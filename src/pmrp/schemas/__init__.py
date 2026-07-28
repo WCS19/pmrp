@@ -23,6 +23,7 @@ from pmrp.schemas.orders import (
     ReplaceOrderRequest,
 )
 from pmrp.schemas.serialization import canonical_json, canonical_sha256
+from pmrp.schemas.strategy import Signal, SignalDirection
 from pmrp.schemas.time import UTCDateTime
 from pmrp.schemas.versions import SchemaRegistration, SchemaVersion, get_schema_model
 
@@ -58,6 +59,8 @@ __all__ = [
     "SchemaRegistration",
     "SchemaVersion",
     "Side",
+    "Signal",
+    "SignalDirection",
     "SourceMetadata",
     "Trade",
     "UTCDateTime",
