@@ -90,6 +90,18 @@ def _registered_schemas() -> tuple[RegisteredSchema, ...]:
         OrderStateTransition,
         ReplaceOrderRequest,
     )
+    from pmrp.schemas.portfolio import (
+        AccountingJournalEntry,
+        CashBalance,
+        JournalLine,
+        PnlAttribution,
+        PortfolioSnapshot,
+        Position,
+        PositionLot,
+        ReconciliationMismatch,
+        ReconciliationResult,
+        Settlement,
+    )
     from pmrp.schemas.risk import (
         KillSwitchState,
         RiskBreach,
@@ -154,6 +166,31 @@ def _registered_schemas() -> tuple[RegisteredSchema, ...]:
         RegisteredSchema("risk_decision", 1, SchemaCategory.DOMAIN, RiskDecision),
         RegisteredSchema("risk_breach", 1, SchemaCategory.DOMAIN, RiskBreach),
         RegisteredSchema("kill_switch_state", 1, SchemaCategory.DOMAIN, KillSwitchState),
+        RegisteredSchema("position", 1, SchemaCategory.DOMAIN, Position),
+        RegisteredSchema("position_lot", 1, SchemaCategory.DOMAIN, PositionLot),
+        RegisteredSchema("cash_balance", 1, SchemaCategory.DOMAIN, CashBalance),
+        RegisteredSchema("portfolio_snapshot", 1, SchemaCategory.DOMAIN, PortfolioSnapshot),
+        RegisteredSchema("journal_line", 1, SchemaCategory.DOMAIN, JournalLine),
+        RegisteredSchema(
+            "accounting_journal_entry",
+            1,
+            SchemaCategory.DOMAIN,
+            AccountingJournalEntry,
+        ),
+        RegisteredSchema("pnl_attribution", 1, SchemaCategory.DOMAIN, PnlAttribution),
+        RegisteredSchema("settlement", 1, SchemaCategory.DOMAIN, Settlement),
+        RegisteredSchema(
+            "reconciliation_mismatch",
+            1,
+            SchemaCategory.DOMAIN,
+            ReconciliationMismatch,
+        ),
+        RegisteredSchema(
+            "reconciliation_result",
+            1,
+            SchemaCategory.DOMAIN,
+            ReconciliationResult,
+        ),
     )
 
 
