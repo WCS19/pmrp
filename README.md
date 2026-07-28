@@ -23,3 +23,9 @@ uv run pytest -m "unit or property"
 uv run pytest --cov=src/pmrp --cov-branch --cov-report=term-missing
 uv build
 ```
+
+## Branch Protection
+
+The `main` branch should require pull requests and passing CI checks before
+merge. Live-trading behavior is out of scope for the initial milestones and must
+remain disabled until the architecture gates are satisfied.
