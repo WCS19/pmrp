@@ -5,8 +5,20 @@ from decimal import Decimal
 import pytest
 from pydantic import ValidationError
 
-from pmrp.schemas.enums import OrderType, Side, TimeInForce
-from pmrp.schemas.orders import ApprovedOrder, OrderIntent
+from pmrp.schemas.enums import LiquidityRole, OrderStatus, OrderType, Side, TimeInForce
+from pmrp.schemas.orders import (
+    ApprovedOrder,
+    CancelOrderAcknowledgement,
+    CancelOrderRequest,
+    ExchangeOrderAcknowledgement,
+    ExchangeOrderRequest,
+    Fill,
+    OpenOrderSnapshot,
+    Order,
+    OrderIntent,
+    OrderStateTransition,
+    ReplaceOrderRequest,
+)
 from pmrp.schemas.serialization import canonical_json, canonical_sha256
 from pmrp.schemas.versions import get_schema_model, get_schema_registration
 
@@ -61,6 +73,193 @@ def _approved_payload(**overrides: object) -> dict[str, object]:
         "client_order_id": "client-order-001",
         "idempotency_key": "idem-order-001",
         "correlation_id": "corr_01j00000000000000000000000",
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _order_payload(**overrides: object) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "order_id": "ord_01j00000000000000000000000",
+        "intent_id": "intent_01j00000000000000000000000",
+        "strategy_id": "strat_threshold_v1",
+        "risk_decision_id": "risk_01j00000000000000000000000",
+        "exchange": "kalshi",
+        "account_id": "acct_paper_001",
+        "market_id": "mkt_01j00000000000000000000000",
+        "contract_id": "ctr_01j00000000000000000000000",
+        "outcome_id": "out_yes",
+        "side": Side.BUY,
+        "quantity": "10",
+        "filled_quantity": "4",
+        "remaining_quantity": "6",
+        "limit_price": "0.43",
+        "average_fill_price": "0.42",
+        "order_type": OrderType.LIMIT,
+        "time_in_force": TimeInForce.GTC,
+        "post_only": True,
+        "reduce_only": False,
+        "status": OrderStatus.PARTIALLY_FILLED,
+        "client_order_id": "client-order-001",
+        "exchange_order_id": "exchange-order-001",
+        "created_at": "2026-07-28T15:00:00Z",
+        "submitted_at": "2026-07-28T15:00:01Z",
+        "accepted_at": "2026-07-28T15:00:02Z",
+        "last_updated_at": "2026-07-28T15:00:03Z",
+        "expires_at": "2026-07-28T15:10:00Z",
+        "aggregate_version": 3,
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _exchange_order_request_payload(**overrides: object) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "order_id": "ord_01j00000000000000000000000",
+        "client_order_id": "client-order-001",
+        "exchange": "kalshi",
+        "account_id": "acct_paper_001",
+        "exchange_market_id": "FED-26SEP-T4.50",
+        "exchange_contract_id": "FED-26SEP-T4.50-YES",
+        "side": Side.BUY,
+        "quantity": "10",
+        "limit_price": "0.43",
+        "order_type": OrderType.LIMIT,
+        "time_in_force": TimeInForce.GTC,
+        "post_only": True,
+        "reduce_only": False,
+        "idempotency_key": "idem-submit-001",
+        "submitted_at": "2026-07-28T15:00:01Z",
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _exchange_order_acknowledgement_payload(**overrides: object) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "order_id": "ord_01j00000000000000000000000",
+        "client_order_id": "client-order-001",
+        "exchange_order_id": "exchange-order-001",
+        "exchange": "kalshi",
+        "account_id": "acct_paper_001",
+        "accepted": True,
+        "exchange_status": "accepted",
+        "rejection_code": None,
+        "rejection_message": None,
+        "acknowledged_at": "2026-07-28T15:00:02Z",
+        "exchange_occurred_at": "2026-07-28T15:00:01.500000Z",
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _cancel_order_request_payload(**overrides: object) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "cancel_request_id": "cancel_001",
+        "order_id": "ord_01j00000000000000000000000",
+        "exchange": "kalshi",
+        "account_id": "acct_paper_001",
+        "client_order_id": "client-order-001",
+        "exchange_order_id": "exchange-order-001",
+        "requested_at": "2026-07-28T15:01:00Z",
+        "idempotency_key": "idem-cancel-001",
+        "correlation_id": "corr_01j00000000000000000000000",
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _cancel_order_acknowledgement_payload(**overrides: object) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "cancel_request_id": "cancel_001",
+        "order_id": "ord_01j00000000000000000000000",
+        "exchange": "kalshi",
+        "account_id": "acct_paper_001",
+        "accepted": True,
+        "exchange_status": "cancelled",
+        "rejection_code": None,
+        "rejection_message": None,
+        "acknowledged_at": "2026-07-28T15:01:01Z",
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _replace_order_request_payload(**overrides: object) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "replace_request_id": "replace_001",
+        "order_id": "ord_01j00000000000000000000000",
+        "new_quantity": "8",
+        "new_limit_price": "0.41",
+        "new_expires_at": "2026-07-28T15:05:00Z",
+        "requested_at": "2026-07-28T15:01:00Z",
+        "idempotency_key": "idem-replace-001",
+        "correlation_id": "corr_01j00000000000000000000000",
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _fill_payload(**overrides: object) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "fill_id": "fill_01j00000000000000000000000",
+        "exchange_fill_id": "exchange-fill-001",
+        "order_id": "ord_01j00000000000000000000000",
+        "exchange_order_id": "exchange-order-001",
+        "client_order_id": "client-order-001",
+        "exchange": "kalshi",
+        "account_id": "acct_paper_001",
+        "market_id": "mkt_01j00000000000000000000000",
+        "contract_id": "ctr_01j00000000000000000000000",
+        "outcome_id": "out_yes",
+        "side": Side.BUY,
+        "price": "0.42",
+        "quantity": "4",
+        "liquidity_role": LiquidityRole.TAKER,
+        "fee": {"amount": "0.01", "currency": "USD"},
+        "rebate": None,
+        "exchange_occurred_at": "2026-07-28T15:00:02Z",
+        "received_at": "2026-07-28T15:00:02.100000Z",
+        "trade_id": "trade_001",
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _order_state_transition_payload(**overrides: object) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "transition_id": "transition_001",
+        "order_id": "ord_01j00000000000000000000000",
+        "previous_status": OrderStatus.ACCEPTED,
+        "current_status": OrderStatus.PARTIALLY_FILLED,
+        "occurred_at": "2026-07-28T15:00:03Z",
+        "source_event_id": "evt_01j00000000000000000000000",
+        "reason_code": "FILL_APPLIED",
+        "reason_text": "Exchange fill applied to local order aggregate.",
+        "aggregate_version_before": 2,
+        "aggregate_version_after": 3,
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _open_order_snapshot_payload(**overrides: object) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "snapshot_id": "open_snapshot_001",
+        "exchange": "kalshi",
+        "account_id": "acct_paper_001",
+        "captured_at": "2026-07-28T15:02:00Z",
+        "orders": (
+            _order_payload(
+                filled_quantity="0",
+                remaining_quantity="10",
+                average_fill_price=None,
+                status=OrderStatus.ACCEPTED,
+            ),
+        ),
+        "source_count": 1,
+        "normalized_count": 1,
+        "rejected_count": 0,
     }
     payload.update(overrides)
     return payload
@@ -223,9 +422,337 @@ def test_approved_order_json_schema_generation() -> None:
     assert "risk_decision_id" in json_schema["properties"]
 
 
+def test_order_accepts_valid_payload_and_exact_quantities() -> None:
+    order = Order.model_validate(_order_payload())
+
+    assert order.quantity == Decimal("10")
+    assert order.filled_quantity == Decimal("4")
+    assert order.remaining_quantity == Decimal("6")
+    assert order.average_fill_price == Decimal("0.42")
+
+
+def test_order_rejects_unknown_fields() -> None:
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        Order.model_validate(_order_payload(unexpected=True))
+
+
+def test_order_rejects_float_quantity() -> None:
+    with pytest.raises(TypeError, match="float input"):
+        Order.model_validate(_order_payload(quantity=10.0))
+
+
+def test_order_rejects_non_positive_quantity() -> None:
+    with pytest.raises(ValidationError, match="greater than 0"):
+        Order.model_validate(
+            _order_payload(quantity="0", filled_quantity="0", remaining_quantity="0")
+        )
+
+
+def test_order_rejects_negative_remaining_quantity() -> None:
+    with pytest.raises(ValidationError, match="greater than or equal to 0"):
+        Order.model_validate(_order_payload(remaining_quantity="-1"))
+
+
+def test_order_rejects_mismatched_fill_accounting() -> None:
+    with pytest.raises(ValidationError, match="filled_quantity plus remaining_quantity"):
+        Order.model_validate(_order_payload(filled_quantity="4", remaining_quantity="5"))
+
+
+def test_order_requires_average_fill_price_when_partially_filled() -> None:
+    with pytest.raises(ValidationError, match="average_fill_price is required"):
+        Order.model_validate(_order_payload(average_fill_price=None))
+
+
+def test_order_allows_missing_average_fill_price_before_fills() -> None:
+    order = Order.model_validate(
+        _order_payload(
+            filled_quantity="0",
+            remaining_quantity="10",
+            average_fill_price=None,
+            status=OrderStatus.ACCEPTED,
+        )
+    )
+
+    assert order.average_fill_price is None
+
+
+def test_order_limit_order_requires_limit_price() -> None:
+    with pytest.raises(ValidationError, match="limit orders require limit_price"):
+        Order.model_validate(_order_payload(limit_price=None))
+
+
+def test_order_rejects_post_only_market_order() -> None:
+    with pytest.raises(ValidationError, match="post_only is invalid"):
+        Order.model_validate(_order_payload(order_type=OrderType.MARKET, post_only=True))
+
+
+def test_order_rejects_naive_last_updated_at() -> None:
+    with pytest.raises(ValidationError, match="timezone-aware"):
+        Order.model_validate(
+            _order_payload(last_updated_at=datetime.fromisoformat("2026-07-28T15:00:03"))
+        )
+
+
+def test_order_rejects_negative_aggregate_version() -> None:
+    with pytest.raises(ValidationError, match="greater than or equal to 0"):
+        Order.model_validate(_order_payload(aggregate_version=-1))
+
+
+def test_order_json_round_trip_and_stable_hash() -> None:
+    order = Order.model_validate_json(json.dumps(_order_payload()))
+    canonical = canonical_json(order)
+
+    assert Order.model_validate_json(canonical) == order
+    assert canonical_sha256(order) == canonical_sha256(Order.model_validate_json(canonical))
+
+
+def test_order_json_schema_generation() -> None:
+    json_schema = Order.model_json_schema()
+
+    assert json_schema["title"] == "Order"
+    assert "filled_quantity" in json_schema["properties"]
+
+
+def test_exchange_order_request_accepts_valid_payload() -> None:
+    request = ExchangeOrderRequest.model_validate(_exchange_order_request_payload())
+
+    assert request.quantity == Decimal("10")
+    assert request.limit_price == Decimal("0.43")
+    assert request.account_id == "acct_paper_001"
+
+
+def test_exchange_order_request_rejects_float_quantity() -> None:
+    with pytest.raises(TypeError, match="float input"):
+        ExchangeOrderRequest.model_validate(_exchange_order_request_payload(quantity=1.0))
+
+
+def test_exchange_order_request_limit_order_requires_limit_price() -> None:
+    with pytest.raises(ValidationError, match="limit orders require limit_price"):
+        ExchangeOrderRequest.model_validate(_exchange_order_request_payload(limit_price=None))
+
+
+def test_exchange_order_request_market_order_accepts_missing_limit_price() -> None:
+    request = ExchangeOrderRequest.model_validate(
+        _exchange_order_request_payload(
+            order_type=OrderType.MARKET,
+            limit_price=None,
+            post_only=False,
+        )
+    )
+
+    assert request.order_type is OrderType.MARKET
+    assert request.limit_price is None
+
+
+def test_exchange_order_request_rejects_post_only_market_order() -> None:
+    with pytest.raises(ValidationError, match="post_only is invalid"):
+        ExchangeOrderRequest.model_validate(
+            _exchange_order_request_payload(order_type=OrderType.MARKET, post_only=True)
+        )
+
+
+def test_exchange_order_request_rejects_naive_submitted_at() -> None:
+    with pytest.raises(ValidationError, match="timezone-aware"):
+        ExchangeOrderRequest.model_validate(
+            _exchange_order_request_payload(
+                submitted_at=datetime.fromisoformat("2026-07-28T15:00:01")
+            )
+        )
+
+
+def test_exchange_order_acknowledgement_accepts_rejection_payload() -> None:
+    acknowledgement = ExchangeOrderAcknowledgement.model_validate(
+        _exchange_order_acknowledgement_payload(
+            accepted=False,
+            exchange_order_id=None,
+            exchange_status="rejected",
+            rejection_code="PRICE_OUT_OF_RANGE",
+            rejection_message="Limit price is outside exchange bounds.",
+        )
+    )
+
+    assert acknowledgement.accepted is False
+    assert acknowledgement.rejection_code == "PRICE_OUT_OF_RANGE"
+
+
+def test_exchange_order_acknowledgement_rejects_naive_acknowledged_at() -> None:
+    with pytest.raises(ValidationError, match="timezone-aware"):
+        ExchangeOrderAcknowledgement.model_validate(
+            _exchange_order_acknowledgement_payload(
+                acknowledged_at=datetime.fromisoformat("2026-07-28T15:00:02")
+            )
+        )
+
+
+def test_cancel_order_request_accepts_valid_payload() -> None:
+    request = CancelOrderRequest.model_validate(_cancel_order_request_payload())
+
+    assert request.cancel_request_id == "cancel_001"
+    assert request.correlation_id == "corr_01j00000000000000000000000"
+
+
+def test_cancel_order_request_rejects_invalid_correlation_id() -> None:
+    with pytest.raises(ValidationError, match="CorrelationId must start"):
+        CancelOrderRequest.model_validate(_cancel_order_request_payload(correlation_id="corr-001"))
+
+
+def test_cancel_order_acknowledgement_accepts_valid_payload() -> None:
+    acknowledgement = CancelOrderAcknowledgement.model_validate(
+        _cancel_order_acknowledgement_payload()
+    )
+
+    assert acknowledgement.accepted is True
+    assert acknowledgement.exchange_status == "cancelled"
+
+
+def test_replace_order_request_accepts_valid_payload() -> None:
+    request = ReplaceOrderRequest.model_validate(_replace_order_request_payload())
+
+    assert request.new_quantity == Decimal("8")
+    assert request.new_limit_price == Decimal("0.41")
+
+
+def test_replace_order_request_rejects_empty_replacement() -> None:
+    with pytest.raises(ValidationError, match="at least one replacement field"):
+        ReplaceOrderRequest.model_validate(
+            _replace_order_request_payload(
+                new_quantity=None,
+                new_limit_price=None,
+                new_expires_at=None,
+            )
+        )
+
+
+def test_replace_order_request_rejects_float_limit_price() -> None:
+    with pytest.raises(TypeError, match="float input"):
+        ReplaceOrderRequest.model_validate(_replace_order_request_payload(new_limit_price=0.41))
+
+
+def test_replace_order_request_rejects_expiry_before_request_time() -> None:
+    with pytest.raises(ValidationError, match="new_expires_at must be after"):
+        ReplaceOrderRequest.model_validate(
+            _replace_order_request_payload(new_expires_at="2026-07-28T15:00:59Z")
+        )
+
+
+def test_replace_order_request_json_round_trip_preserves_values() -> None:
+    request = ReplaceOrderRequest.model_validate_json(json.dumps(_replace_order_request_payload()))
+
+    assert ReplaceOrderRequest.model_validate_json(canonical_json(request)) == request
+
+
+def test_fill_accepts_valid_payload_with_fee() -> None:
+    fill = Fill.model_validate(_fill_payload())
+
+    assert fill.price == Decimal("0.42")
+    assert fill.quantity == Decimal("4")
+    assert fill.fee is not None
+    assert fill.fee.amount == Decimal("0.01")
+
+
+def test_fill_rejects_float_price() -> None:
+    with pytest.raises(TypeError, match="float input"):
+        Fill.model_validate(_fill_payload(price=0.42))
+
+
+def test_fill_rejects_zero_quantity() -> None:
+    with pytest.raises(ValidationError, match="greater than 0"):
+        Fill.model_validate(_fill_payload(quantity="0"))
+
+
+def test_fill_rejects_invalid_fill_identifier() -> None:
+    with pytest.raises(ValidationError, match="FillId must start"):
+        Fill.model_validate(_fill_payload(fill_id="fill-001"))
+
+
+def test_fill_rejects_naive_received_at() -> None:
+    with pytest.raises(ValidationError, match="timezone-aware"):
+        Fill.model_validate(
+            _fill_payload(received_at=datetime.fromisoformat("2026-07-28T15:00:02"))
+        )
+
+
+def test_fill_json_round_trip_preserves_money_values() -> None:
+    fill = Fill.model_validate_json(json.dumps(_fill_payload()))
+
+    assert Fill.model_validate_json(canonical_json(fill)) == fill
+
+
+def test_order_state_transition_accepts_valid_payload() -> None:
+    transition = OrderStateTransition.model_validate(_order_state_transition_payload())
+
+    assert transition.previous_status is OrderStatus.ACCEPTED
+    assert transition.current_status is OrderStatus.PARTIALLY_FILLED
+
+
+def test_order_state_transition_rejects_non_advancing_version() -> None:
+    with pytest.raises(ValidationError, match="aggregate_version_after"):
+        OrderStateTransition.model_validate(
+            _order_state_transition_payload(aggregate_version_before=3, aggregate_version_after=3)
+        )
+
+
+def test_order_state_transition_rejects_invalid_source_event_id() -> None:
+    with pytest.raises(ValidationError, match="EventId must start"):
+        OrderStateTransition.model_validate(
+            _order_state_transition_payload(source_event_id="event_1")
+        )
+
+
+def test_order_state_transition_rejects_naive_occurred_at() -> None:
+    with pytest.raises(ValidationError, match="timezone-aware"):
+        OrderStateTransition.model_validate(
+            _order_state_transition_payload(
+                occurred_at=datetime.fromisoformat("2026-07-28T15:00:03")
+            )
+        )
+
+
+def test_open_order_snapshot_accepts_valid_payload() -> None:
+    snapshot = OpenOrderSnapshot.model_validate(_open_order_snapshot_payload())
+
+    assert len(snapshot.orders) == 1
+    assert snapshot.normalized_count == 1
+
+
+def test_open_order_snapshot_rejects_normalized_count_mismatch() -> None:
+    with pytest.raises(ValidationError, match="normalized_count"):
+        OpenOrderSnapshot.model_validate(_open_order_snapshot_payload(normalized_count=2))
+
+
+def test_open_order_snapshot_rejects_count_overflow() -> None:
+    with pytest.raises(ValidationError, match="must not exceed source_count"):
+        OpenOrderSnapshot.model_validate(
+            _open_order_snapshot_payload(source_count=1, normalized_count=1, rejected_count=1)
+        )
+
+
+def test_open_order_snapshot_rejects_naive_capture_time() -> None:
+    with pytest.raises(ValidationError, match="timezone-aware"):
+        OpenOrderSnapshot.model_validate(
+            _open_order_snapshot_payload(captured_at=datetime.fromisoformat("2026-07-28T15:02:00"))
+        )
+
+
+def test_open_order_snapshot_json_schema_generation() -> None:
+    json_schema = OpenOrderSnapshot.model_json_schema()
+
+    assert json_schema["title"] == "OpenOrderSnapshot"
+    assert "orders" in json_schema["properties"]
+
+
 def test_order_schema_registry_entries_exist() -> None:
     assert get_schema_model("order_intent", 1) is OrderIntent
     assert get_schema_model("approved_order", 1) is ApprovedOrder
+    assert get_schema_model("order", 1) is Order
+    assert get_schema_model("exchange_order_request", 1) is ExchangeOrderRequest
+    assert get_schema_model("exchange_order_acknowledgement", 1) is ExchangeOrderAcknowledgement
+    assert get_schema_model("cancel_order_request", 1) is CancelOrderRequest
+    assert get_schema_model("cancel_order_acknowledgement", 1) is CancelOrderAcknowledgement
+    assert get_schema_model("replace_order_request", 1) is ReplaceOrderRequest
+    assert get_schema_model("fill", 1) is Fill
+    assert get_schema_model("order_state_transition", 1) is OrderStateTransition
+    assert get_schema_model("open_order_snapshot", 1) is OpenOrderSnapshot
     assert (
         get_schema_registration("approved_order", 1).model_path
         == "pmrp.schemas.orders.ApprovedOrder"

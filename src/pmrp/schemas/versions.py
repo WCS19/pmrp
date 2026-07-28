@@ -77,7 +77,19 @@ def _registered_schemas() -> tuple[RegisteredSchema, ...]:
         VersionMetadata,
     )
     from pmrp.schemas.numeric import Money, Price, Probability, Quantity
-    from pmrp.schemas.orders import ApprovedOrder, OrderIntent
+    from pmrp.schemas.orders import (
+        ApprovedOrder,
+        CancelOrderAcknowledgement,
+        CancelOrderRequest,
+        ExchangeOrderAcknowledgement,
+        ExchangeOrderRequest,
+        Fill,
+        OpenOrderSnapshot,
+        Order,
+        OrderIntent,
+        OrderStateTransition,
+        ReplaceOrderRequest,
+    )
 
     return (
         RegisteredSchema("price", 1, SchemaCategory.VALUE_OBJECT, Price),
@@ -99,6 +111,35 @@ def _registered_schemas() -> tuple[RegisteredSchema, ...]:
         RegisteredSchema("trade", 1, SchemaCategory.DOMAIN, Trade),
         RegisteredSchema("order_intent", 1, SchemaCategory.DOMAIN, OrderIntent),
         RegisteredSchema("approved_order", 1, SchemaCategory.DOMAIN, ApprovedOrder),
+        RegisteredSchema("order", 1, SchemaCategory.DOMAIN, Order),
+        RegisteredSchema(
+            "exchange_order_request",
+            1,
+            SchemaCategory.COMMAND,
+            ExchangeOrderRequest,
+        ),
+        RegisteredSchema(
+            "exchange_order_acknowledgement",
+            1,
+            SchemaCategory.DOMAIN,
+            ExchangeOrderAcknowledgement,
+        ),
+        RegisteredSchema("cancel_order_request", 1, SchemaCategory.COMMAND, CancelOrderRequest),
+        RegisteredSchema(
+            "cancel_order_acknowledgement",
+            1,
+            SchemaCategory.DOMAIN,
+            CancelOrderAcknowledgement,
+        ),
+        RegisteredSchema("replace_order_request", 1, SchemaCategory.COMMAND, ReplaceOrderRequest),
+        RegisteredSchema("fill", 1, SchemaCategory.DOMAIN, Fill),
+        RegisteredSchema(
+            "order_state_transition",
+            1,
+            SchemaCategory.DOMAIN,
+            OrderStateTransition,
+        ),
+        RegisteredSchema("open_order_snapshot", 1, SchemaCategory.DOMAIN, OpenOrderSnapshot),
     )
 
 
