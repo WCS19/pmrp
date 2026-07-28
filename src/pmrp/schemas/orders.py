@@ -8,11 +8,13 @@ from typing import Self
 from pydantic import Field, field_validator, model_validator
 
 from pmrp.schemas.base import CanonicalModel
-from pmrp.schemas.enums import OrderStatus, OrderType, Side, TimeInForce
+from pmrp.schemas.enums import LiquidityRole, OrderStatus, OrderType, Side, TimeInForce
 from pmrp.schemas.identifiers import (
     AccountId,
     ContractId,
     CorrelationId,
+    EventId,
+    FillId,
     IntentId,
     MarketId,
     OrderId,
@@ -21,7 +23,7 @@ from pmrp.schemas.identifiers import (
     SignalId,
     StrategyId,
 )
-from pmrp.schemas.numeric import parse_decimal
+from pmrp.schemas.numeric import Money, parse_decimal
 from pmrp.schemas.time import UTCDateTime
 
 _OPAQUE_ORDER_REF_MAX_LENGTH = 256
@@ -313,6 +315,92 @@ class ReplaceOrderRequest(CanonicalModel):
             msg = "replace order request must include at least one replacement field"
             raise ValueError(msg)
         _validate_expiry(self.requested_at, self.new_expires_at, field_name="new_expires_at")
+        return self
+
+
+class Fill(CanonicalModel):
+    fill_id: FillId
+    exchange_fill_id: str = Field(min_length=1, max_length=_OPAQUE_ORDER_REF_MAX_LENGTH)
+
+    order_id: OrderId
+    exchange_order_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=_OPAQUE_ORDER_REF_MAX_LENGTH,
+    )
+    client_order_id: str = Field(min_length=1, max_length=_OPAQUE_ORDER_REF_MAX_LENGTH)
+
+    exchange: str = Field(min_length=1, max_length=64)
+    account_id: AccountId
+
+    market_id: MarketId
+    contract_id: ContractId
+    outcome_id: OutcomeId
+
+    side: Side
+    price: Decimal = Field(ge=Decimal("0"))
+    quantity: Decimal = Field(gt=Decimal("0"))
+
+    liquidity_role: LiquidityRole
+    fee: Money | None = None
+    rebate: Money | None = None
+
+    exchange_occurred_at: UTCDateTime
+    received_at: UTCDateTime
+
+    trade_id: str | None = Field(
+        default=None, min_length=1, max_length=_OPAQUE_ORDER_REF_MAX_LENGTH
+    )
+
+    @field_validator("price", "quantity", mode="before")
+    @classmethod
+    def parse_decimal_fields(cls, value: object) -> Decimal:
+        return parse_decimal(value, field_name="fill decimal field")
+
+
+class OrderStateTransition(CanonicalModel):
+    transition_id: str = Field(min_length=1, max_length=128)
+    order_id: OrderId
+
+    previous_status: OrderStatus | None
+    current_status: OrderStatus
+
+    occurred_at: UTCDateTime
+    source_event_id: EventId
+
+    reason_code: str | None = Field(default=None, min_length=1, max_length=128)
+    reason_text: str | None = Field(default=None, min_length=1, max_length=1024)
+
+    aggregate_version_before: int = Field(ge=0)
+    aggregate_version_after: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def validate_aggregate_version_advances(self) -> Self:
+        if self.aggregate_version_after <= self.aggregate_version_before:
+            msg = "aggregate_version_after must be greater than aggregate_version_before"
+            raise ValueError(msg)
+        return self
+
+
+class OpenOrderSnapshot(CanonicalModel):
+    snapshot_id: str = Field(min_length=1, max_length=128)
+    exchange: str = Field(min_length=1, max_length=64)
+    account_id: AccountId
+    captured_at: UTCDateTime
+
+    orders: tuple[Order, ...]
+    source_count: int = Field(ge=0)
+    normalized_count: int = Field(ge=0)
+    rejected_count: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def validate_counts(self) -> Self:
+        if self.normalized_count != len(self.orders):
+            msg = "normalized_count must equal the number of normalized orders"
+            raise ValueError(msg)
+        if self.normalized_count + self.rejected_count > self.source_count:
+            msg = "normalized_count plus rejected_count must not exceed source_count"
+            raise ValueError(msg)
         return self
 
 

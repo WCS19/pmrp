@@ -83,8 +83,11 @@ def _registered_schemas() -> tuple[RegisteredSchema, ...]:
         CancelOrderRequest,
         ExchangeOrderAcknowledgement,
         ExchangeOrderRequest,
+        Fill,
+        OpenOrderSnapshot,
         Order,
         OrderIntent,
+        OrderStateTransition,
         ReplaceOrderRequest,
     )
 
@@ -129,6 +132,14 @@ def _registered_schemas() -> tuple[RegisteredSchema, ...]:
             CancelOrderAcknowledgement,
         ),
         RegisteredSchema("replace_order_request", 1, SchemaCategory.COMMAND, ReplaceOrderRequest),
+        RegisteredSchema("fill", 1, SchemaCategory.DOMAIN, Fill),
+        RegisteredSchema(
+            "order_state_transition",
+            1,
+            SchemaCategory.DOMAIN,
+            OrderStateTransition,
+        ),
+        RegisteredSchema("open_order_snapshot", 1, SchemaCategory.DOMAIN, OpenOrderSnapshot),
     )
 
 
