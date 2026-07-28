@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from decimal import Decimal
 from enum import StrEnum
+from types import MappingProxyType
 from typing import Self
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, field_serializer, field_validator, model_validator
 
 from pmrp.schemas.base import CanonicalModel
 from pmrp.schemas.identifiers import ReplaySessionId
@@ -34,8 +36,8 @@ class ReplayManifest(CanonicalModel):
 
     event_ordering_policy_version: str = Field(min_length=1, max_length=64)
 
-    strategy_versions: dict[str, str]
-    model_versions: dict[str, str]
+    strategy_versions: Mapping[str, str]
+    model_versions: Mapping[str, str]
 
     configuration_hash: str = Field(min_length=1, max_length=_REPLAY_HASH_MAX_LENGTH)
     code_commit: str = Field(min_length=1, max_length=128)
@@ -51,9 +53,13 @@ class ReplayManifest(CanonicalModel):
 
     @field_validator("strategy_versions", "model_versions")
     @classmethod
-    def validate_version_mapping(cls, value: dict[str, str]) -> dict[str, str]:
+    def validate_version_mapping(cls, value: Mapping[str, str]) -> Mapping[str, str]:
         _validate_string_mapping(value, field_name="version mapping")
-        return value
+        return MappingProxyType(dict(value))
+
+    @field_serializer("strategy_versions", "model_versions")
+    def serialize_version_mapping(self, value: Mapping[str, str]) -> dict[str, str]:
+        return dict(value)
 
     @model_validator(mode="after")
     def validate_manifest(self) -> Self:
@@ -110,6 +116,9 @@ class ReplaySession(CanonicalModel):
             raise ValueError(msg)
         if self.started_at is not None and self.started_at < self.manifest.created_at:
             msg = "started_at must not be before manifest created_at"
+            raise ValueError(msg)
+        if self.completed_at is not None and self.completed_at < self.manifest.created_at:
+            msg = "completed_at must not be before manifest created_at"
             raise ValueError(msg)
         if (
             self.started_at is not None
@@ -175,19 +184,23 @@ class ReplayResult(CanonicalModel):
     simulated_fills: int = Field(ge=0)
 
     final_portfolio: PortfolioSnapshot
-    metrics: dict[str, str]
+    metrics: Mapping[str, str]
 
     result_checksum: str = Field(min_length=1, max_length=_REPLAY_HASH_MAX_LENGTH)
     completed_at: UTCDateTime
 
     @field_validator("metrics")
     @classmethod
-    def validate_metrics(cls, value: dict[str, str]) -> dict[str, str]:
+    def validate_metrics(cls, value: Mapping[str, str]) -> Mapping[str, str]:
         _validate_string_mapping(value, field_name="metrics")
-        return value
+        return MappingProxyType(dict(value))
+
+    @field_serializer("metrics")
+    def serialize_metrics(self, value: Mapping[str, str]) -> dict[str, str]:
+        return dict(value)
 
 
-def _validate_string_mapping(value: dict[str, str], *, field_name: str) -> None:
+def _validate_string_mapping(value: Mapping[str, str], *, field_name: str) -> None:
     for key, item in value.items():
         if key == "" or key.strip() != key:
             msg = f"{field_name} keys must be nonempty strings without surrounding whitespace"

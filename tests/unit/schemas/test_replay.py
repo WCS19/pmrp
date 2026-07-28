@@ -176,6 +176,18 @@ def test_replay_manifest_rejects_empty_version_mapping_value() -> None:
         ReplayManifest.model_validate(_manifest_payload(model_versions={"mdl": ""}))
 
 
+def test_replay_manifest_version_mappings_are_immutable_after_validation() -> None:
+    manifest = ReplayManifest.model_validate(_manifest_payload())
+    original_hash = canonical_sha256(manifest)
+
+    with pytest.raises(TypeError, match="does not support item assignment"):
+        manifest.strategy_versions["strat_other"] = "2.0.0"
+    with pytest.raises(TypeError, match="does not support item assignment"):
+        manifest.model_versions["mdl_other"] = "2026.07.29"
+
+    assert canonical_sha256(manifest) == original_hash
+
+
 def test_replay_session_accepts_running_payload() -> None:
     session = ReplaySession.model_validate(_session_payload())
 
@@ -246,6 +258,20 @@ def test_replay_session_rejects_terminal_without_completed_at() -> None:
         ReplaySession.model_validate(_session_payload(state=ReplayState.CANCELLED))
 
 
+def test_replay_session_rejects_terminal_completed_before_manifest_created_at() -> None:
+    with pytest.raises(
+        ValidationError, match="completed_at must not be before manifest created_at"
+    ):
+        ReplaySession.model_validate(
+            _session_payload(
+                state=ReplayState.FAILED,
+                started_at=None,
+                completed_at="2026-07-28T14:54:00Z",
+                failure_message="Replay failed before it was created.",
+            )
+        )
+
+
 def test_replay_session_rejects_completed_without_checksum() -> None:
     with pytest.raises(ValidationError, match="requires result_checksum"):
         ReplaySession.model_validate(
@@ -280,6 +306,16 @@ def test_replay_result_rejects_negative_counter() -> None:
 def test_replay_result_rejects_empty_metric_key() -> None:
     with pytest.raises(ValidationError, match="keys must be nonempty"):
         ReplayResult.model_validate(_result_payload(metrics={"": "1.0"}))
+
+
+def test_replay_result_metrics_are_immutable_after_validation() -> None:
+    result = ReplayResult.model_validate(_result_payload())
+    original_hash = canonical_sha256(result)
+
+    with pytest.raises(TypeError, match="does not support item assignment"):
+        result.metrics["new_metric"] = "1.0"
+
+    assert canonical_sha256(result) == original_hash
 
 
 def test_replay_result_json_round_trip_and_stable_hash() -> None:
