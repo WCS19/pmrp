@@ -68,6 +68,7 @@ class RegisteredSchema:
 def _registered_schemas() -> tuple[RegisteredSchema, ...]:
     from pmrp.schemas.commands import CommandEnvelope
     from pmrp.schemas.events import EventEnvelope
+    from pmrp.schemas.market_data import OrderBookDelta, OrderBookSnapshot, Trade
     from pmrp.schemas.markets import Contract, Market, Outcome
     from pmrp.schemas.metadata import (
         AuditMetadata,
@@ -92,6 +93,9 @@ def _registered_schemas() -> tuple[RegisteredSchema, ...]:
         RegisteredSchema("market", 1, SchemaCategory.DOMAIN, Market),
         RegisteredSchema("outcome", 1, SchemaCategory.DOMAIN, Outcome),
         RegisteredSchema("contract", 1, SchemaCategory.DOMAIN, Contract),
+        RegisteredSchema("order_book_snapshot", 1, SchemaCategory.DOMAIN, OrderBookSnapshot),
+        RegisteredSchema("order_book_delta", 1, SchemaCategory.DOMAIN, OrderBookDelta),
+        RegisteredSchema("trade", 1, SchemaCategory.DOMAIN, Trade),
     )
 
 

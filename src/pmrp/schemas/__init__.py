@@ -5,6 +5,7 @@ from pmrp.schemas.commands import CommandEnvelope
 from pmrp.schemas.enums import Side
 from pmrp.schemas.events import EventEnvelope
 from pmrp.schemas.identifiers import EventId, MarketId, OrderId
+from pmrp.schemas.market_data import OrderBookDelta, OrderBookSnapshot, Trade
 from pmrp.schemas.markets import Contract, Market, Outcome
 from pmrp.schemas.metadata import AuditMetadata, FlexibleMetadata, SourceMetadata, VersionMetadata
 from pmrp.schemas.numeric import Money, Price, Probability, Quantity
@@ -23,6 +24,8 @@ __all__ = [
     "Market",
     "MarketId",
     "Money",
+    "OrderBookDelta",
+    "OrderBookSnapshot",
     "OrderId",
     "Outcome",
     "Price",
@@ -32,6 +35,7 @@ __all__ = [
     "SchemaVersion",
     "Side",
     "SourceMetadata",
+    "Trade",
     "UTCDateTime",
     "VersionMetadata",
     "canonical_json",
