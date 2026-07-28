@@ -1,4 +1,5 @@
 import json
+from collections.abc import Mapping
 from datetime import datetime
 
 import pytest
@@ -72,6 +73,27 @@ def test_command_envelope_json_round_trip_preserves_fields() -> None:
     assert command.command_type == "order.place"
     assert command.deadline_at is not None
     assert json.loads(command.model_dump_json())["deadline_at"] == "2026-07-28T12:00:05Z"
+
+
+def test_command_envelope_attributes_are_deeply_immutable_after_validation() -> None:
+    command = CommandEnvelope.model_validate(
+        _command_payload(attributes={"source": "unit_test", "nested": {"levels": ["one"]}})
+    )
+    original_hash = canonical_sha256(command)
+    nested_attributes = command.attributes["nested"]
+
+    with pytest.raises(TypeError, match="does not support item assignment"):
+        command.attributes["source"] = "changed"
+    assert isinstance(nested_attributes, Mapping)
+    with pytest.raises(TypeError, match="does not support item assignment"):
+        nested_attributes["levels"] = ["changed"]
+
+    assert canonical_sha256(command) == original_hash
+
+
+def test_command_envelope_rejects_invalid_attribute_key() -> None:
+    with pytest.raises(ValidationError, match="keys must be nonempty"):
+        CommandEnvelope.model_validate(_command_payload(attributes={" source": "unit_test"}))
 
 
 def test_command_envelope_canonical_hash_is_stable() -> None:

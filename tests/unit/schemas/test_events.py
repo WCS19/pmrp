@@ -1,4 +1,5 @@
 import json
+from collections.abc import Mapping
 from datetime import datetime
 
 import pytest
@@ -94,6 +95,32 @@ def test_event_envelope_serializes_datetimes_enums_and_ids() -> None:
     assert serialized["occurred_at"] == "2026-07-28T12:00:00Z"
     assert serialized["quality_flags"] == ["replayed"]
     assert serialized["event_id"] == "evt_01j00000000000000000000000"
+
+
+def test_event_envelope_attributes_are_deeply_immutable_after_validation() -> None:
+    event = EventEnvelope.model_validate(
+        _event_payload(attributes={"source": "unit_test", "nested": {"levels": ["one"]}})
+    )
+    original_hash = canonical_sha256(event)
+    nested_attributes = event.attributes["nested"]
+
+    with pytest.raises(TypeError, match="does not support item assignment"):
+        event.attributes["source"] = "changed"
+    assert isinstance(nested_attributes, Mapping)
+    with pytest.raises(TypeError, match="does not support item assignment"):
+        nested_attributes["levels"] = ["changed"]
+
+    assert canonical_sha256(event) == original_hash
+
+
+def test_event_envelope_rejects_invalid_attribute_key() -> None:
+    with pytest.raises(ValidationError, match="keys must be nonempty"):
+        EventEnvelope.model_validate(_event_payload(attributes={" source": "unit_test"}))
+
+
+def test_event_envelope_rejects_noncanonical_attribute_leaf_value() -> None:
+    with pytest.raises(TypeError, match="must not contain floats"):
+        EventEnvelope.model_validate(_event_payload(attributes={"probability": 0.5}))
 
 
 def test_event_envelope_json_round_trip_accepts_quality_flag_array() -> None:
