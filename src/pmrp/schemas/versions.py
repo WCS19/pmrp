@@ -90,6 +90,7 @@ def _registered_schemas() -> tuple[RegisteredSchema, ...]:
         OrderStateTransition,
         ReplaceOrderRequest,
     )
+    from pmrp.schemas.strategy import Signal
 
     return (
         RegisteredSchema("price", 1, SchemaCategory.VALUE_OBJECT, Price),
@@ -140,6 +141,7 @@ def _registered_schemas() -> tuple[RegisteredSchema, ...]:
             OrderStateTransition,
         ),
         RegisteredSchema("open_order_snapshot", 1, SchemaCategory.DOMAIN, OpenOrderSnapshot),
+        RegisteredSchema("signal", 1, SchemaCategory.DOMAIN, Signal),
     )
 
 
