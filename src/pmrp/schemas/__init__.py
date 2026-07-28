@@ -1,6 +1,7 @@
 """Canonical schema primitives for PMRP."""
 
 from pmrp.schemas.base import CanonicalModel
+from pmrp.schemas.commands import CommandEnvelope
 from pmrp.schemas.enums import Side
 from pmrp.schemas.events import EventEnvelope
 from pmrp.schemas.identifiers import EventId, MarketId, OrderId
@@ -13,6 +14,7 @@ from pmrp.schemas.versions import SchemaRegistration, SchemaVersion, get_schema_
 __all__ = [
     "AuditMetadata",
     "CanonicalModel",
+    "CommandEnvelope",
     "EventEnvelope",
     "EventId",
     "FlexibleMetadata",
