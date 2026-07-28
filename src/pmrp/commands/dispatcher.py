@@ -180,7 +180,8 @@ class InMemoryCommandIdempotencyHook:
                     )
                 return CommandIdempotencyDecision.duplicate_failed(existing.failure)
 
-            self._evict_oldest_terminal_entry()
+            if len(self._entries) >= self._max_entries:
+                self._evict_oldest_terminal_entry()
             if len(self._entries) >= self._max_entries:
                 return CommandIdempotencyDecision.rejected(
                     "command idempotency hook capacity is exhausted"

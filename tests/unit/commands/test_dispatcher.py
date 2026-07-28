@@ -134,6 +134,40 @@ async def test_command_dispatcher_returns_cached_duplicate_result_without_handle
     assert len(handler.calls) == 1
 
 
+async def test_command_dispatcher_retains_terminal_duplicates_below_hook_capacity() -> None:
+    calls = 0
+
+    async def handler(command: CommandEnvelope, context: CommandContext) -> object | None:
+        nonlocal calls
+        del context
+        calls += 1
+        return {"call": calls, "key": command.idempotency_key}
+
+    dispatcher = CommandDispatcher(
+        registry=CommandHandlerRegistry(
+            (
+                CommandHandlerRegistration(
+                    command_type="adapter.connect",
+                    schema_name="command_envelope",
+                    schema_version=1,
+                    handler=handler,
+                ),
+            )
+        ),
+        clock=FrozenClock(_instant()),
+    )
+
+    first = await dispatcher.dispatch(_command(idempotency_key="idem-1"))
+    second = await dispatcher.dispatch(_command(idempotency_key="idem-2"))
+    third = await dispatcher.dispatch(_command(idempotency_key="idem-1"))
+
+    assert first.status is CommandDispatchStatus.COMPLETED
+    assert second.status is CommandDispatchStatus.COMPLETED
+    assert third.status is CommandDispatchStatus.DUPLICATE
+    assert third.result == {"call": 1, "key": "idem-1"}
+    assert calls == 2
+
+
 async def test_command_dispatcher_rejects_same_idempotency_key_for_different_command() -> None:
     connect_handler = RecordingHandler(result={"connected": True})
     disconnect_handler = RecordingHandler(result={"disconnected": True})
