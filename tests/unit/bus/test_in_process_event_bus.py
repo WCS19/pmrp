@@ -123,6 +123,20 @@ async def test_shutdown_closes_subscriptions_and_managed_consumer_tasks() -> Non
         await bus.publish(_TestEvent(sequence=1))
 
 
+async def test_subscription_close_preserves_pending_event_when_queue_is_full() -> None:
+    bus = InProcessEventBus(default_queue_size=1)
+    subscription = bus.subscribe(_TestEvent, consumer_name="consumer")
+    event = _TestEvent(sequence=1)
+
+    await bus.publish(event)
+    await bus.close()
+
+    assert await subscription.__anext__() == event
+    with pytest.raises(StopAsyncIteration):
+        await subscription.__anext__()
+    assert subscription.queue_depth == 0
+
+
 async def test_publish_waiting_behind_close_fails_without_delivery() -> None:
     bus = InProcessEventBus()
     subscription = bus.subscribe(_TestEvent, consumer_name="consumer")

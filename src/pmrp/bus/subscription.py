@@ -63,7 +63,8 @@ class QueuedEventSubscription[T]:
         self._consumer_name = consumer_name
         self._partition_key = partition_key
         self._queue_size = queue_size
-        self._queue: asyncio.Queue[_QueueItem[T]] = asyncio.Queue(maxsize=queue_size)
+        self._queue: asyncio.Queue[_QueueItem[T]] = asyncio.Queue(maxsize=queue_size + 1)
+        self._pending_events = 0
         self._on_close = on_close
         self._closed = False
 
@@ -81,7 +82,7 @@ class QueuedEventSubscription[T]:
 
     @property
     def queue_depth(self) -> int:
-        return self._queue.qsize()
+        return self._pending_events
 
     @property
     def max_queue_size(self) -> int:
@@ -92,16 +93,19 @@ class QueuedEventSubscription[T]:
         return self._closed
 
     def full(self) -> bool:
-        return self._queue.full()
+        return self._pending_events >= self._queue_size
 
     def publish_nowait(self, event: T) -> None:
         if self._closed:
             msg = "event subscription is closed"
             raise EventBusClosedError(msg)
+        if self.full():
+            raise EventBusBackpressureError((self._consumer_name,))
         try:
             self._queue.put_nowait(event)
         except asyncio.QueueFull as exc:
             raise EventBusBackpressureError((self._consumer_name,)) from exc
+        self._pending_events += 1
 
     def __aiter__(self) -> AsyncIterator[T]:
         return self
@@ -110,14 +114,13 @@ class QueuedEventSubscription[T]:
         item = await self._queue.get()
         if isinstance(item, _ClosedSubscription):
             raise StopAsyncIteration
+        self._pending_events -= 1
         return item
 
     async def close(self) -> None:
         if self._closed:
             return
         self._closed = True
-        while self._queue.full():
-            self._queue.get_nowait()
         self._queue.put_nowait(_CLOSED)
         if self._on_close is not None:
             self._on_close(self._consumer_name)
