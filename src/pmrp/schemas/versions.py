@@ -33,6 +33,7 @@ type SchemaVersion = Annotated[
 
 
 class SchemaCategory(StrEnum):
+    EVENT = "event"
     VALUE_OBJECT = "value_object"
     METADATA = "metadata"
     REGISTRY = "registry"
@@ -63,6 +64,7 @@ class RegisteredSchema:
 
 @cache
 def _registered_schemas() -> tuple[RegisteredSchema, ...]:
+    from pmrp.schemas.events import EventEnvelope
     from pmrp.schemas.metadata import (
         AuditMetadata,
         FlexibleMetadata,
@@ -81,6 +83,7 @@ def _registered_schemas() -> tuple[RegisteredSchema, ...]:
         RegisteredSchema("audit_metadata", 1, SchemaCategory.METADATA, AuditMetadata),
         RegisteredSchema("flexible_metadata", 1, SchemaCategory.METADATA, FlexibleMetadata),
         RegisteredSchema("schema_registration", 1, SchemaCategory.REGISTRY, SchemaRegistration),
+        RegisteredSchema("event_envelope", 1, SchemaCategory.EVENT, EventEnvelope),
     )
 
 

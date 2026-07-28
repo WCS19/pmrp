@@ -196,3 +196,5 @@ SUPPORTED_IDENTIFIER_PREFIXES: tuple[str, ...] = (
     RelationshipId.prefix,
     SettlementId.prefix,
 )
+
+type CausationRef = EventId | CommandId | CausationId

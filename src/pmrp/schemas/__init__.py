@@ -2,6 +2,7 @@
 
 from pmrp.schemas.base import CanonicalModel
 from pmrp.schemas.enums import Side
+from pmrp.schemas.events import EventEnvelope
 from pmrp.schemas.identifiers import EventId, MarketId, OrderId
 from pmrp.schemas.metadata import AuditMetadata, FlexibleMetadata, SourceMetadata, VersionMetadata
 from pmrp.schemas.numeric import Money, Price, Probability, Quantity
@@ -12,6 +13,7 @@ from pmrp.schemas.versions import SchemaRegistration, SchemaVersion, get_schema_
 __all__ = [
     "AuditMetadata",
     "CanonicalModel",
+    "EventEnvelope",
     "EventId",
     "FlexibleMetadata",
     "MarketId",
