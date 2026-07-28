@@ -9,7 +9,7 @@ from pmrp.schemas.market_data import OrderBookDelta, OrderBookSnapshot, Trade
 from pmrp.schemas.markets import Contract, Market, Outcome
 from pmrp.schemas.metadata import AuditMetadata, FlexibleMetadata, SourceMetadata, VersionMetadata
 from pmrp.schemas.numeric import Money, Price, Probability, Quantity
-from pmrp.schemas.orders import ApprovedOrder, OrderIntent
+from pmrp.schemas.orders import ApprovedOrder, Order, OrderIntent
 from pmrp.schemas.serialization import canonical_json, canonical_sha256
 from pmrp.schemas.time import UTCDateTime
 from pmrp.schemas.versions import SchemaRegistration, SchemaVersion, get_schema_model
@@ -26,6 +26,7 @@ __all__ = [
     "Market",
     "MarketId",
     "Money",
+    "Order",
     "OrderBookDelta",
     "OrderBookSnapshot",
     "OrderId",

@@ -8,7 +8,7 @@ from typing import Self
 from pydantic import Field, field_validator, model_validator
 
 from pmrp.schemas.base import CanonicalModel
-from pmrp.schemas.enums import OrderType, Side, TimeInForce
+from pmrp.schemas.enums import OrderStatus, OrderType, Side, TimeInForce
 from pmrp.schemas.identifiers import (
     AccountId,
     ContractId,
@@ -114,6 +114,78 @@ class ApprovedOrder(CanonicalModel):
             self.approval_expires_at,
             field_name="approval_expires_at",
         )
+        return self
+
+
+class Order(CanonicalModel):
+    order_id: OrderId
+    intent_id: IntentId | None = None
+    strategy_id: StrategyId | None = None
+    risk_decision_id: RiskDecisionId | None = None
+
+    exchange: str = Field(min_length=1, max_length=64)
+    account_id: AccountId
+
+    market_id: MarketId
+    contract_id: ContractId
+    outcome_id: OutcomeId
+
+    side: Side
+    quantity: Decimal = Field(gt=Decimal("0"))
+    filled_quantity: Decimal = Field(ge=Decimal("0"))
+    remaining_quantity: Decimal = Field(ge=Decimal("0"))
+
+    limit_price: Decimal | None = Field(default=None, ge=Decimal("0"))
+    average_fill_price: Decimal | None = Field(default=None, ge=Decimal("0"))
+
+    order_type: OrderType
+    time_in_force: TimeInForce
+
+    post_only: bool
+    reduce_only: bool
+
+    status: OrderStatus
+
+    client_order_id: str = Field(min_length=1, max_length=_OPAQUE_ORDER_REF_MAX_LENGTH)
+    exchange_order_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=_OPAQUE_ORDER_REF_MAX_LENGTH,
+    )
+
+    created_at: UTCDateTime
+    submitted_at: UTCDateTime | None = None
+    accepted_at: UTCDateTime | None = None
+    last_updated_at: UTCDateTime
+
+    expires_at: UTCDateTime | None = None
+
+    aggregate_version: int = Field(ge=0)
+
+    @field_validator(
+        "quantity",
+        "filled_quantity",
+        "remaining_quantity",
+        "limit_price",
+        "average_fill_price",
+        mode="before",
+    )
+    @classmethod
+    def parse_decimal_fields(cls, value: object) -> Decimal | None:
+        if value is None:
+            return None
+        return parse_decimal(value, field_name="order decimal field")
+
+    @model_validator(mode="after")
+    def validate_order_constraints(self) -> Self:
+        _validate_order_pricing(self.order_type, self.limit_price, self.post_only)
+        if self.filled_quantity + self.remaining_quantity != self.quantity:
+            msg = "filled_quantity plus remaining_quantity must equal quantity"
+            raise ValueError(msg)
+        if self.filled_quantity > Decimal("0") and self.average_fill_price is None:
+            msg = "average_fill_price is required when filled_quantity is positive"
+            raise ValueError(msg)
+        _validate_expiry(self.created_at, self.expires_at, field_name="expires_at")
         return self
 
 
