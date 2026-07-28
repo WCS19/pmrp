@@ -51,16 +51,10 @@ class ServiceHealth(CanonicalModel):
         return _validate_required_text(value, field_name="service health text field")
 
     @model_validator(mode="after")
-    def validate_health_consistency(self) -> Self:
+    def validate_unique_dependencies(self) -> Self:
         dependency_names = [dependency.dependency for dependency in self.dependencies]
         if len(set(dependency_names)) != len(dependency_names):
             msg = "dependencies must have unique dependency names"
-            raise ValueError(msg)
-        if self.ready and not self.alive:
-            msg = "ready service health must also be alive"
-            raise ValueError(msg)
-        if self.status is HealthStatus.HEALTHY and (not self.ready or not self.alive):
-            msg = "healthy service health must be ready and alive"
             raise ValueError(msg)
         return self
 

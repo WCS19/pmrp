@@ -116,16 +116,14 @@ def test_service_health_rejects_duplicate_dependency_names() -> None:
         )
 
 
-def test_service_health_rejects_ready_when_not_alive() -> None:
-    with pytest.raises(ValidationError, match="must also be alive"):
-        ServiceHealth.model_validate(_service_payload(ready=True, alive=False))
+def test_service_health_allows_health_readiness_and_liveness_to_vary_independently() -> None:
+    health = ServiceHealth.model_validate(
+        _service_payload(status=HealthStatus.HEALTHY, ready=False, alive=True)
+    )
 
-
-def test_service_health_rejects_healthy_when_not_ready() -> None:
-    with pytest.raises(ValidationError, match="must be ready and alive"):
-        ServiceHealth.model_validate(
-            _service_payload(status=HealthStatus.HEALTHY, ready=False, alive=True)
-        )
+    assert health.status is HealthStatus.HEALTHY
+    assert health.ready is False
+    assert health.alive is True
 
 
 def test_service_health_dependencies_are_immutable_after_validation() -> None:
