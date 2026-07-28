@@ -1,0 +1,140 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "prediction-market-research-platform"
+version = "0.1.0"
+description = "Exchange-agnostic prediction-market research and trading platform"
+readme = "README.md"
+requires-python = ">=3.13,<3.14"
+license = "Apache-2.0"
+authors = [
+  { name = "PMRP Contributors" },
+]
+dependencies = [
+  "alembic>=1.16.4",
+  "asyncpg>=0.30.0",
+  "pydantic>=2.11.7",
+  "sqlalchemy>=2.0.41",
+]
+
+[dependency-groups]
+dev = [
+  "mypy>=1.17.0",
+  "pre-commit>=4.2.0",
+  "ruff>=0.12.5",
+]
+test = [
+  "hypothesis>=6.136.9",
+  "pytest>=8.4.1",
+  "pytest-asyncio>=1.1.0",
+  "pytest-cov>=6.2.1",
+  "pytest-mock>=3.14.1",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pmrp"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/docs",
+  "/src",
+  "/tests",
+  "/README.md",
+  "/pyproject.toml",
+]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+src = ["src", "tests"]
+extend-exclude = ["docs"]
+
+[tool.ruff.lint]
+select = [
+  "A",
+  "ASYNC",
+  "B",
+  "C4",
+  "DTZ",
+  "E",
+  "F",
+  "FA",
+  "I",
+  "N",
+  "PT",
+  "PTH",
+  "RUF",
+  "S",
+  "SIM",
+  "UP",
+  "W",
+]
+ignore = [
+  "S101",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = [
+  "S101",
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+mypy_path = "src"
+packages = ["pmrp"]
+warn_unused_configs = true
+show_error_codes = true
+pretty = true
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = [
+  "--strict-config",
+  "--strict-markers",
+  "-ra",
+]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+  "unit: fast isolated tests",
+  "property: property-based invariant tests",
+  "integration: tests using local infrastructure",
+  "contract: exchange adapter contract tests",
+  "database: PostgreSQL database tests",
+  "api: HTTP and streaming API tests",
+  "replay: deterministic replay tests",
+  "simulation: simulated execution tests",
+  "end_to_end: full safe workflow tests",
+  "security: security validation tests",
+  "slow: tests excluded from quick local runs",
+  "live: explicitly authorized live tests",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["pmrp"]
+parallel = true
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
+skip_covered = false
+exclude_also = [
+  "if TYPE_CHECKING:",
+  "raise NotImplementedError",
+  "@overload",
+]
+
+[tool.coverage.paths]
+source = [
+  "src/pmrp",
+  "*/site-packages/pmrp",
+]
