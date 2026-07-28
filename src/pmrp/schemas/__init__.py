@@ -36,6 +36,7 @@ from pmrp.schemas.portfolio import (
     Settlement,
     SettlementStatus,
 )
+from pmrp.schemas.replay import ReplayManifest, ReplayResult, ReplaySession, ReplayState
 from pmrp.schemas.risk import (
     KillSwitchScope,
     KillSwitchState,
@@ -91,6 +92,10 @@ __all__ = [
     "ReconciliationResult",
     "ReconciliationStatus",
     "ReplaceOrderRequest",
+    "ReplayManifest",
+    "ReplayResult",
+    "ReplaySession",
+    "ReplayState",
     "RiskBreach",
     "RiskDecision",
     "RiskLimit",

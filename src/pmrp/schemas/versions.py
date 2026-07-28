@@ -102,6 +102,7 @@ def _registered_schemas() -> tuple[RegisteredSchema, ...]:
         ReconciliationResult,
         Settlement,
     )
+    from pmrp.schemas.replay import ReplayManifest, ReplayResult, ReplaySession
     from pmrp.schemas.risk import (
         KillSwitchState,
         RiskBreach,
@@ -191,6 +192,9 @@ def _registered_schemas() -> tuple[RegisteredSchema, ...]:
             SchemaCategory.DOMAIN,
             ReconciliationResult,
         ),
+        RegisteredSchema("replay_manifest", 1, SchemaCategory.DOMAIN, ReplayManifest),
+        RegisteredSchema("replay_session", 1, SchemaCategory.DOMAIN, ReplaySession),
+        RegisteredSchema("replay_result", 1, SchemaCategory.DOMAIN, ReplayResult),
     )
 
 
