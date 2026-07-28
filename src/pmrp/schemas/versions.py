@@ -77,7 +77,16 @@ def _registered_schemas() -> tuple[RegisteredSchema, ...]:
         VersionMetadata,
     )
     from pmrp.schemas.numeric import Money, Price, Probability, Quantity
-    from pmrp.schemas.orders import ApprovedOrder, Order, OrderIntent
+    from pmrp.schemas.orders import (
+        ApprovedOrder,
+        CancelOrderAcknowledgement,
+        CancelOrderRequest,
+        ExchangeOrderAcknowledgement,
+        ExchangeOrderRequest,
+        Order,
+        OrderIntent,
+        ReplaceOrderRequest,
+    )
 
     return (
         RegisteredSchema("price", 1, SchemaCategory.VALUE_OBJECT, Price),
@@ -100,6 +109,26 @@ def _registered_schemas() -> tuple[RegisteredSchema, ...]:
         RegisteredSchema("order_intent", 1, SchemaCategory.DOMAIN, OrderIntent),
         RegisteredSchema("approved_order", 1, SchemaCategory.DOMAIN, ApprovedOrder),
         RegisteredSchema("order", 1, SchemaCategory.DOMAIN, Order),
+        RegisteredSchema(
+            "exchange_order_request",
+            1,
+            SchemaCategory.COMMAND,
+            ExchangeOrderRequest,
+        ),
+        RegisteredSchema(
+            "exchange_order_acknowledgement",
+            1,
+            SchemaCategory.DOMAIN,
+            ExchangeOrderAcknowledgement,
+        ),
+        RegisteredSchema("cancel_order_request", 1, SchemaCategory.COMMAND, CancelOrderRequest),
+        RegisteredSchema(
+            "cancel_order_acknowledgement",
+            1,
+            SchemaCategory.DOMAIN,
+            CancelOrderAcknowledgement,
+        ),
+        RegisteredSchema("replace_order_request", 1, SchemaCategory.COMMAND, ReplaceOrderRequest),
     )
 
 

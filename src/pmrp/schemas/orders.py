@@ -189,6 +189,133 @@ class Order(CanonicalModel):
         return self
 
 
+class ExchangeOrderRequest(CanonicalModel):
+    order_id: OrderId
+    client_order_id: str = Field(min_length=1, max_length=_OPAQUE_ORDER_REF_MAX_LENGTH)
+
+    exchange: str = Field(min_length=1, max_length=64)
+    account_id: AccountId
+
+    exchange_market_id: str = Field(min_length=1, max_length=_OPAQUE_ORDER_REF_MAX_LENGTH)
+    exchange_contract_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=_OPAQUE_ORDER_REF_MAX_LENGTH,
+    )
+
+    side: Side
+    quantity: Decimal = Field(gt=Decimal("0"))
+    limit_price: Decimal | None = Field(default=None, ge=Decimal("0"))
+
+    order_type: OrderType
+    time_in_force: TimeInForce
+
+    post_only: bool
+    reduce_only: bool
+
+    idempotency_key: str = Field(min_length=1, max_length=_OPAQUE_ORDER_REF_MAX_LENGTH)
+    submitted_at: UTCDateTime
+
+    @field_validator("quantity", "limit_price", mode="before")
+    @classmethod
+    def parse_decimal_fields(cls, value: object) -> Decimal | None:
+        if value is None:
+            return None
+        return parse_decimal(value, field_name="exchange order request decimal field")
+
+    @model_validator(mode="after")
+    def validate_order_constraints(self) -> Self:
+        _validate_order_pricing(self.order_type, self.limit_price, self.post_only)
+        return self
+
+
+class ExchangeOrderAcknowledgement(CanonicalModel):
+    order_id: OrderId
+    client_order_id: str = Field(min_length=1, max_length=_OPAQUE_ORDER_REF_MAX_LENGTH)
+    exchange_order_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=_OPAQUE_ORDER_REF_MAX_LENGTH,
+    )
+
+    exchange: str = Field(min_length=1, max_length=64)
+    account_id: AccountId
+
+    accepted: bool
+    exchange_status: str | None = Field(default=None, min_length=1, max_length=128)
+    rejection_code: str | None = Field(default=None, min_length=1, max_length=128)
+    rejection_message: str | None = Field(default=None, min_length=1, max_length=1024)
+
+    acknowledged_at: UTCDateTime
+    exchange_occurred_at: UTCDateTime | None = None
+
+
+class CancelOrderRequest(CanonicalModel):
+    cancel_request_id: str = Field(min_length=1, max_length=128)
+    order_id: OrderId
+
+    exchange: str = Field(min_length=1, max_length=64)
+    account_id: AccountId
+
+    client_order_id: str = Field(min_length=1, max_length=_OPAQUE_ORDER_REF_MAX_LENGTH)
+    exchange_order_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=_OPAQUE_ORDER_REF_MAX_LENGTH,
+    )
+
+    requested_at: UTCDateTime
+    idempotency_key: str = Field(min_length=1, max_length=_OPAQUE_ORDER_REF_MAX_LENGTH)
+    correlation_id: CorrelationId
+
+
+class CancelOrderAcknowledgement(CanonicalModel):
+    cancel_request_id: str = Field(min_length=1, max_length=128)
+    order_id: OrderId
+
+    exchange: str = Field(min_length=1, max_length=64)
+    account_id: AccountId
+
+    accepted: bool
+    exchange_status: str | None = Field(default=None, min_length=1, max_length=128)
+    rejection_code: str | None = Field(default=None, min_length=1, max_length=128)
+    rejection_message: str | None = Field(default=None, min_length=1, max_length=1024)
+
+    acknowledged_at: UTCDateTime
+
+
+class ReplaceOrderRequest(CanonicalModel):
+    replace_request_id: str = Field(min_length=1, max_length=128)
+    order_id: OrderId
+
+    new_quantity: Decimal | None = Field(default=None, gt=Decimal("0"))
+    new_limit_price: Decimal | None = Field(default=None, ge=Decimal("0"))
+    new_expires_at: UTCDateTime | None = None
+
+    requested_at: UTCDateTime
+    idempotency_key: str = Field(min_length=1, max_length=_OPAQUE_ORDER_REF_MAX_LENGTH)
+    correlation_id: CorrelationId
+
+    @field_validator("new_quantity", "new_limit_price", mode="before")
+    @classmethod
+    def parse_decimal_fields(cls, value: object) -> Decimal | None:
+        if value is None:
+            return None
+        return parse_decimal(value, field_name="replace order request decimal field")
+
+    @model_validator(mode="after")
+    def validate_replacement(self) -> Self:
+        if (
+            self.new_quantity is None
+            and self.new_limit_price is None
+            and self.new_expires_at is None
+        ):
+            msg = "replace order request must include at least one replacement field"
+            raise ValueError(msg)
+        _validate_expiry(self.requested_at, self.new_expires_at, field_name="new_expires_at")
+        return self
+
+
 def _validate_order_pricing(
     order_type: OrderType,
     limit_price: Decimal | None,
