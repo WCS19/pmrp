@@ -4,6 +4,7 @@ from pmrp.schemas.base import CanonicalModel
 from pmrp.schemas.enums import Side
 from pmrp.schemas.identifiers import EventId, MarketId, OrderId
 from pmrp.schemas.numeric import Money, Price, Probability, Quantity
+from pmrp.schemas.serialization import canonical_json, canonical_sha256
 from pmrp.schemas.time import UTCDateTime
 
 __all__ = [
@@ -17,4 +18,6 @@ __all__ = [
     "Quantity",
     "Side",
     "UTCDateTime",
+    "canonical_json",
+    "canonical_sha256",
 ]
