@@ -116,7 +116,7 @@ class CashBalance(CanonicalModel):
     currency: str
 
     available: Decimal
-    reserved: Decimal
+    reserved: Decimal = Field(ge=Decimal("0"))
     total: Decimal
 
     captured_at: UTCDateTime
@@ -238,9 +238,40 @@ class PnlAttribution(CanonicalModel):
     calculation_version: str = Field(min_length=1, max_length=64)
 
     @model_validator(mode="after")
-    def validate_window(self) -> Self:
+    def validate_pnl_attribution(self) -> Self:
         if self.ends_at <= self.starts_at:
             msg = "ends_at must be after starts_at"
+            raise ValueError(msg)
+        money_components = (
+            self.realized_trading_pnl,
+            self.unrealized_pnl_change,
+            self.fees,
+            self.rebates,
+            self.slippage,
+            self.settlement_pnl,
+            self.total_pnl,
+        )
+        currencies = {money.currency for money in money_components if money is not None}
+        if len(currencies) != 1:
+            msg = "PnL attribution money components must use one currency"
+            raise ValueError(msg)
+        if self.fees.amount < Decimal("0"):
+            msg = "fees amount must be nonnegative"
+            raise ValueError(msg)
+        if self.rebates.amount < Decimal("0"):
+            msg = "rebates amount must be nonnegative"
+            raise ValueError(msg)
+
+        expected_total = (
+            self.realized_trading_pnl.amount
+            + self.unrealized_pnl_change.amount
+            - self.fees.amount
+            + self.rebates.amount
+            + _optional_money_amount(self.slippage)
+            + _optional_money_amount(self.settlement_pnl)
+        )
+        if self.total_pnl.amount != expected_total:
+            msg = "total_pnl must equal PnL component sum"
             raise ValueError(msg)
         return self
 
@@ -286,6 +317,57 @@ class Settlement(CanonicalModel):
 
     @model_validator(mode="after")
     def validate_settlement_lifecycle(self) -> Self:
+        has_resolution_fields = (
+            bool(self.winning_outcome_ids)
+            or self.resolved_at is not None
+            or self.finalized_at is not None
+            or self.settled_at is not None
+            or self.payout_per_unit is not None
+        )
+        if self.status in {
+            SettlementStatus.UNRESOLVED,
+            SettlementStatus.PENDING_RESOLUTION,
+        }:
+            if has_resolution_fields:
+                msg = "unresolved settlement states cannot contain resolution fields"
+                raise ValueError(msg)
+            if self.correction_of_settlement_id is not None:
+                msg = "unresolved settlement states cannot correct another settlement"
+                raise ValueError(msg)
+            return self
+
+        if not self.winning_outcome_ids:
+            msg = "resolved settlement states require winning outcomes"
+            raise ValueError(msg)
+        if self.resolved_at is None:
+            msg = "resolved settlement states require resolved_at"
+            raise ValueError(msg)
+        if self.payout_per_unit is None:
+            msg = "resolved settlement states require payout_per_unit"
+            raise ValueError(msg)
+
+        if self.status in {SettlementStatus.RESOLVED, SettlementStatus.DISPUTED}:
+            if self.finalized_at is not None or self.settled_at is not None:
+                msg = "non-final settlement states cannot contain finalization fields"
+                raise ValueError(msg)
+        elif self.status is SettlementStatus.FINALIZED:
+            if self.finalized_at is None:
+                msg = "finalized settlement requires finalized_at"
+                raise ValueError(msg)
+            if self.settled_at is not None:
+                msg = "finalized settlement cannot contain settled_at"
+                raise ValueError(msg)
+        elif self.status is SettlementStatus.SETTLED:
+            if self.finalized_at is None:
+                msg = "settled settlement requires finalized_at"
+                raise ValueError(msg)
+            if self.settled_at is None:
+                msg = "settled settlement requires settled_at"
+                raise ValueError(msg)
+        elif self.status is SettlementStatus.CORRECTED and self.correction_of_settlement_id is None:
+            msg = "corrected settlement requires correction_of_settlement_id"
+            raise ValueError(msg)
+
         if self.finalized_at is not None and self.resolved_at is None:
             msg = "finalized settlement requires resolved_at"
             raise ValueError(msg)
@@ -305,9 +387,6 @@ class Settlement(CanonicalModel):
             and self.settled_at < self.finalized_at
         ):
             msg = "settled_at must not be before finalized_at"
-            raise ValueError(msg)
-        if self.status is SettlementStatus.CORRECTED and self.correction_of_settlement_id is None:
-            msg = "corrected settlement requires correction_of_settlement_id"
             raise ValueError(msg)
         return self
 
@@ -374,3 +453,9 @@ def _reject_duplicate_strings(values: Iterable[object], *, field_name: str) -> N
             msg = f"{field_name} must not contain duplicate identifiers"
             raise ValueError(msg)
         seen.add(text)
+
+
+def _optional_money_amount(value: Money | None) -> Decimal:
+    if value is None:
+        return Decimal("0")
+    return value.amount

@@ -283,6 +283,11 @@ def test_cash_balance_rejects_identity_mismatch() -> None:
         CashBalance.model_validate(_cash_balance_payload(total="999.99"))
 
 
+def test_cash_balance_rejects_negative_reserved_amount() -> None:
+    with pytest.raises(ValidationError, match="greater than or equal to 0"):
+        CashBalance.model_validate(_cash_balance_payload(available="1001.00", reserved="-1.00"))
+
+
 def test_portfolio_snapshot_accepts_valid_payload() -> None:
     snapshot = PortfolioSnapshot.model_validate(_portfolio_snapshot_payload())
 
@@ -350,6 +355,23 @@ def test_pnl_attribution_rejects_invalid_window() -> None:
         PnlAttribution.model_validate(_pnl_attribution_payload(ends_at="2026-07-28T15:00:00Z"))
 
 
+def test_pnl_attribution_rejects_mixed_currencies() -> None:
+    with pytest.raises(ValidationError, match="must use one currency"):
+        PnlAttribution.model_validate(
+            _pnl_attribution_payload(total_pnl=_money("2.89", currency="EUR"))
+        )
+
+
+def test_pnl_attribution_rejects_negative_fees() -> None:
+    with pytest.raises(ValidationError, match="fees amount must be nonnegative"):
+        PnlAttribution.model_validate(_pnl_attribution_payload(fees=_money("-0.10")))
+
+
+def test_pnl_attribution_rejects_total_mismatch() -> None:
+    with pytest.raises(ValidationError, match="total_pnl must equal"):
+        PnlAttribution.model_validate(_pnl_attribution_payload(total_pnl=_money("999.99")))
+
+
 def test_settlement_accepts_valid_payload() -> None:
     settlement = Settlement.model_validate(_settlement_payload())
 
@@ -357,13 +379,61 @@ def test_settlement_accepts_valid_payload() -> None:
     assert settlement.payout_per_unit == Decimal("1.00")
 
 
+def test_settlement_accepts_unresolved_payload_without_resolution_fields() -> None:
+    settlement = Settlement.model_validate(
+        _settlement_payload(
+            status=SettlementStatus.UNRESOLVED,
+            winning_outcome_ids=(),
+            resolved_at=None,
+            finalized_at=None,
+            settled_at=None,
+            payout_per_unit=None,
+            source_reference=None,
+        )
+    )
+
+    assert settlement.status is SettlementStatus.UNRESOLVED
+    assert settlement.winning_outcome_ids == ()
+
+
+def test_settlement_accepts_corrected_payload_with_reference() -> None:
+    settlement = Settlement.model_validate(
+        _settlement_payload(
+            status=SettlementStatus.CORRECTED,
+            correction_of_settlement_id="set_01j11111111111111111111111",
+        )
+    )
+
+    assert settlement.correction_of_settlement_id == "set_01j11111111111111111111111"
+
+
 def test_settlement_rejects_float_payout() -> None:
     with pytest.raises(TypeError, match="float input"):
         Settlement.model_validate(_settlement_payload(payout_per_unit=1.0))
 
 
+def test_settlement_rejects_unresolved_with_resolution_fields() -> None:
+    with pytest.raises(ValidationError, match="cannot contain resolution fields"):
+        Settlement.model_validate(_settlement_payload(status=SettlementStatus.UNRESOLVED))
+
+
+def test_settlement_rejects_settled_without_winning_outcomes() -> None:
+    with pytest.raises(ValidationError, match="require winning outcomes"):
+        Settlement.model_validate(_settlement_payload(winning_outcome_ids=()))
+
+
+def test_settlement_rejects_settled_without_payout() -> None:
+    with pytest.raises(ValidationError, match="require payout_per_unit"):
+        Settlement.model_validate(_settlement_payload(payout_per_unit=None))
+
+
+def test_settlement_rejects_resolved_with_finalization_fields() -> None:
+    with pytest.raises(ValidationError, match="cannot contain finalization fields"):
+        Settlement.model_validate(_settlement_payload(status=SettlementStatus.RESOLVED))
+
+
 def test_settlement_rejects_finalized_without_resolution() -> None:
-    with pytest.raises(ValidationError, match="requires resolved_at"):
+    with pytest.raises(ValidationError, match="require resolved_at"):
         Settlement.model_validate(_settlement_payload(resolved_at=None))
 
 
