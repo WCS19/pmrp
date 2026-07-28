@@ -47,6 +47,7 @@ from pmrp.schemas.risk import (
     RiskRuleResult,
 )
 from pmrp.schemas.serialization import canonical_json, canonical_sha256
+from pmrp.schemas.simulation import SimulationConfiguration
 from pmrp.schemas.strategy import Signal, SignalDirection
 from pmrp.schemas.time import UTCDateTime
 from pmrp.schemas.versions import SchemaRegistration, SchemaVersion, get_schema_model
@@ -108,6 +109,7 @@ __all__ = [
     "Side",
     "Signal",
     "SignalDirection",
+    "SimulationConfiguration",
     "SourceMetadata",
     "Trade",
     "UTCDateTime",
