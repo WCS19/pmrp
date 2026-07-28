@@ -77,6 +77,7 @@ def _registered_schemas() -> tuple[RegisteredSchema, ...]:
         VersionMetadata,
     )
     from pmrp.schemas.numeric import Money, Price, Probability, Quantity
+    from pmrp.schemas.orders import ApprovedOrder, OrderIntent
 
     return (
         RegisteredSchema("price", 1, SchemaCategory.VALUE_OBJECT, Price),
@@ -96,6 +97,8 @@ def _registered_schemas() -> tuple[RegisteredSchema, ...]:
         RegisteredSchema("order_book_snapshot", 1, SchemaCategory.DOMAIN, OrderBookSnapshot),
         RegisteredSchema("order_book_delta", 1, SchemaCategory.DOMAIN, OrderBookDelta),
         RegisteredSchema("trade", 1, SchemaCategory.DOMAIN, Trade),
+        RegisteredSchema("order_intent", 1, SchemaCategory.DOMAIN, OrderIntent),
+        RegisteredSchema("approved_order", 1, SchemaCategory.DOMAIN, ApprovedOrder),
     )
 
 
