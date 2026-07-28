@@ -10,6 +10,7 @@ from pmrp.bus import (
     EventBusBackpressureError,
     EventBusClosedError,
     InProcessEventBus,
+    InvalidQueueSizeError,
 )
 
 pytestmark = pytest.mark.unit
@@ -122,6 +123,24 @@ async def test_shutdown_closes_subscriptions_and_managed_consumer_tasks() -> Non
         await bus.publish(_TestEvent(sequence=1))
 
 
+async def test_publish_waiting_behind_close_fails_without_delivery() -> None:
+    bus = InProcessEventBus()
+    subscription = bus.subscribe(_TestEvent, consumer_name="consumer")
+    await bus._publish_lock.acquire()
+    close_task = asyncio.create_task(bus.close())
+    publish_task = asyncio.create_task(bus.publish(_TestEvent(sequence=1)))
+    await asyncio.sleep(0)
+
+    bus._publish_lock.release()
+    await close_task
+
+    with pytest.raises(EventBusClosedError):
+        await publish_task
+    assert bus.health().published_events == 0
+    assert bus.health().delivered_events == 0
+    assert subscription.closed is True
+
+
 async def test_duplicate_publish_is_explicitly_delivered_twice() -> None:
     bus = InProcessEventBus()
     subscription = bus.subscribe(_TestEvent, consumer_name="consumer")
@@ -200,3 +219,10 @@ def test_duplicate_consumer_name_is_rejected() -> None:
 
     with pytest.raises(DuplicateConsumerError):
         bus.subscribe(_TestEvent, consumer_name="consumer")
+
+
+def test_explicit_zero_queue_size_is_rejected() -> None:
+    bus = InProcessEventBus()
+
+    with pytest.raises(InvalidQueueSizeError, match="queue_size must be positive"):
+        bus.subscribe(_TestEvent, consumer_name="consumer", queue_size=0)

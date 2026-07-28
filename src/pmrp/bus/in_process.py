@@ -51,6 +51,9 @@ class InProcessEventBus:
             raise EventBusClosedError(msg)
         effective_partition_key = _event_partition_key(event, explicit_partition_key=partition_key)
         async with self._publish_lock:
+            if self._closed:
+                msg = "event bus is closed"
+                raise EventBusClosedError(msg)
             subscriptions = self._matching_subscriptions(event, effective_partition_key)
             full_subscriptions = tuple(
                 subscription.consumer_name for subscription in subscriptions if subscription.full()
@@ -87,7 +90,7 @@ class InProcessEventBus:
             event_type=event_type,
             consumer_name=consumer_name,
             partition_key=partition_key,
-            queue_size=queue_size or self._default_queue_size,
+            queue_size=self._default_queue_size if queue_size is None else queue_size,
             on_close=self._remove_subscription,
         )
         self._subscriptions[consumer_name] = subscription
@@ -144,12 +147,13 @@ class InProcessEventBus:
         )
 
     async def close(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
-        subscriptions = tuple(self._subscriptions.values())
-        for subscription in subscriptions:
-            await subscription.close()
+        async with self._publish_lock:
+            if self._closed:
+                return
+            self._closed = True
+            subscriptions = tuple(self._subscriptions.values())
+            for subscription in subscriptions:
+                await subscription.close()
 
         tasks = tuple(handle.task for handle in self._consumer_handles.values())
         if not tasks:
