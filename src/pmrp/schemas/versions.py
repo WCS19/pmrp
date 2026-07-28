@@ -112,6 +112,7 @@ def _registered_schemas() -> tuple[RegisteredSchema, ...]:
     )
     from pmrp.schemas.simulation import SimulationConfiguration
     from pmrp.schemas.strategy import Signal
+    from pmrp.schemas.system import DependencyHealth, ServiceHealth
 
     return (
         RegisteredSchema("price", 1, SchemaCategory.VALUE_OBJECT, Price),
@@ -202,6 +203,8 @@ def _registered_schemas() -> tuple[RegisteredSchema, ...]:
             SchemaCategory.DOMAIN,
             SimulationConfiguration,
         ),
+        RegisteredSchema("dependency_health", 1, SchemaCategory.DOMAIN, DependencyHealth),
+        RegisteredSchema("service_health", 1, SchemaCategory.DOMAIN, ServiceHealth),
     )
 
 

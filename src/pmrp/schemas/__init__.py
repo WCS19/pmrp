@@ -2,7 +2,7 @@
 
 from pmrp.schemas.base import CanonicalModel
 from pmrp.schemas.commands import CommandEnvelope
-from pmrp.schemas.enums import Side
+from pmrp.schemas.enums import Environment, HealthStatus, Side
 from pmrp.schemas.events import EventEnvelope
 from pmrp.schemas.identifiers import EventId, MarketId, OrderId
 from pmrp.schemas.market_data import OrderBookDelta, OrderBookSnapshot, Trade
@@ -49,6 +49,7 @@ from pmrp.schemas.risk import (
 from pmrp.schemas.serialization import canonical_json, canonical_sha256
 from pmrp.schemas.simulation import SimulationConfiguration
 from pmrp.schemas.strategy import Signal, SignalDirection
+from pmrp.schemas.system import DependencyHealth, ServiceHealth
 from pmrp.schemas.time import UTCDateTime
 from pmrp.schemas.versions import SchemaRegistration, SchemaVersion, get_schema_model
 
@@ -62,12 +63,15 @@ __all__ = [
     "CashBalance",
     "CommandEnvelope",
     "Contract",
+    "DependencyHealth",
+    "Environment",
     "EventEnvelope",
     "EventId",
     "ExchangeOrderAcknowledgement",
     "ExchangeOrderRequest",
     "Fill",
     "FlexibleMetadata",
+    "HealthStatus",
     "JournalLine",
     "KillSwitchScope",
     "KillSwitchState",
@@ -104,6 +108,7 @@ __all__ = [
     "RiskRuleResult",
     "SchemaRegistration",
     "SchemaVersion",
+    "ServiceHealth",
     "Settlement",
     "SettlementStatus",
     "Side",
