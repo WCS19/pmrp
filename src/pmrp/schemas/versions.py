@@ -110,6 +110,7 @@ def _registered_schemas() -> tuple[RegisteredSchema, ...]:
         RiskLimit,
         RiskRuleResult,
     )
+    from pmrp.schemas.simulation import SimulationConfiguration
     from pmrp.schemas.strategy import Signal
 
     return (
@@ -195,6 +196,12 @@ def _registered_schemas() -> tuple[RegisteredSchema, ...]:
         RegisteredSchema("replay_manifest", 1, SchemaCategory.DOMAIN, ReplayManifest),
         RegisteredSchema("replay_session", 1, SchemaCategory.DOMAIN, ReplaySession),
         RegisteredSchema("replay_result", 1, SchemaCategory.DOMAIN, ReplayResult),
+        RegisteredSchema(
+            "simulation_configuration",
+            1,
+            SchemaCategory.DOMAIN,
+            SimulationConfiguration,
+        ),
     )
 
 
