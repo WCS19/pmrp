@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from decimal import Decimal
 from typing import Self
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, field_serializer, field_validator, model_validator
 
 from pmrp.schemas.base import CanonicalModel
 from pmrp.schemas.enums import MarketStatus, OutcomeType
 from pmrp.schemas.identifiers import ContractId, EventId, MarketId, OutcomeId
+from pmrp.schemas.immutability import freeze_string_mapping, thaw_string_mapping
 from pmrp.schemas.numeric import parse_decimal, validate_currency
 from pmrp.schemas.time import UTCDateTime
 
@@ -84,12 +86,21 @@ class Outcome(CanonicalModel):
     is_winning: bool | None = None
 
     payout_per_unit: Decimal = Field(default=Decimal("1"), gt=Decimal("0"))
-    metadata: dict[str, str] = Field(default_factory=dict)
+    metadata: Mapping[str, str] = Field(default_factory=dict)
 
     @field_validator("payout_per_unit", mode="before")
     @classmethod
     def parse_payout_per_unit(cls, value: object) -> Decimal:
         return parse_decimal(value, field_name="Outcome.payout_per_unit")
+
+    @field_validator("metadata")
+    @classmethod
+    def validate_metadata(cls, value: Mapping[str, str]) -> Mapping[str, str]:
+        return freeze_string_mapping(value, field_name="outcome metadata")
+
+    @field_serializer("metadata")
+    def serialize_metadata(self, value: Mapping[str, str]) -> dict[str, str]:
+        return thaw_string_mapping(value)
 
 
 class Contract(CanonicalModel):

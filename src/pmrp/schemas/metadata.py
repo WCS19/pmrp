@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-from pydantic import Field
+from collections.abc import Mapping
+
+from pydantic import Field, field_serializer, field_validator
 
 from pmrp.schemas.base import CanonicalModel
+from pmrp.schemas.immutability import freeze_canonical_mapping, thaw_canonical_mapping
 from pmrp.schemas.time import UTCDateTime
 from pmrp.schemas.versions import SchemaVersion
 
@@ -36,4 +39,13 @@ class AuditMetadata(CanonicalModel):
 
 
 class FlexibleMetadata(CanonicalModel):
-    values: dict[str, object] = Field(default_factory=dict)
+    values: Mapping[str, object] = Field(default_factory=dict)
+
+    @field_validator("values")
+    @classmethod
+    def validate_values(cls, value: Mapping[str, object]) -> Mapping[str, object]:
+        return freeze_canonical_mapping(value, field_name="flexible metadata")
+
+    @field_serializer("values")
+    def serialize_values(self, value: Mapping[str, object]) -> dict[str, object]:
+        return thaw_canonical_mapping(value)

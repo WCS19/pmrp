@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-from pydantic import Field
+from collections.abc import Mapping
+
+from pydantic import Field, field_serializer, field_validator
 
 from pmrp.schemas.base import CanonicalModel
 from pmrp.schemas.identifiers import CausationRef, CommandId, CorrelationId
+from pmrp.schemas.immutability import freeze_canonical_mapping, thaw_canonical_mapping
 from pmrp.schemas.time import UTCDateTime
 from pmrp.schemas.versions import SchemaVersion
 
@@ -32,4 +35,13 @@ class CommandEnvelope(CanonicalModel):
     deadline_at: UTCDateTime | None = None
     priority: int = 0
 
-    attributes: dict[str, object] = Field(default_factory=dict)
+    attributes: Mapping[str, object] = Field(default_factory=dict)
+
+    @field_validator("attributes")
+    @classmethod
+    def validate_attributes(cls, value: Mapping[str, object]) -> Mapping[str, object]:
+        return freeze_canonical_mapping(value, field_name="command attributes")
+
+    @field_serializer("attributes")
+    def serialize_attributes(self, value: Mapping[str, object]) -> dict[str, object]:
+        return thaw_canonical_mapping(value)

@@ -7,7 +7,7 @@ from pydantic import ValidationError
 
 from pmrp.schemas.enums import MarketStatus, OutcomeType
 from pmrp.schemas.markets import Contract, Market, Outcome
-from pmrp.schemas.serialization import canonical_json
+from pmrp.schemas.serialization import canonical_json, canonical_sha256
 from pmrp.schemas.versions import get_schema_model, get_schema_registration
 
 pytestmark = pytest.mark.unit
@@ -139,6 +139,26 @@ def test_outcome_accepts_valid_payload() -> None:
 
     assert outcome.outcome_id == "out_yes"
     assert outcome.payout_per_unit == Decimal("1")
+
+
+def test_outcome_metadata_is_immutable_after_validation() -> None:
+    outcome = Outcome.model_validate(_outcome_payload())
+    original_hash = canonical_sha256(outcome)
+
+    with pytest.raises(TypeError, match="does not support item assignment"):
+        outcome.metadata["display"] = "NO"
+
+    assert canonical_sha256(outcome) == original_hash
+
+
+def test_outcome_rejects_invalid_metadata_key() -> None:
+    with pytest.raises(ValidationError, match="keys must be nonempty"):
+        Outcome.model_validate(_outcome_payload(metadata={" display": "YES"}))
+
+
+def test_outcome_rejects_invalid_metadata_value() -> None:
+    with pytest.raises(ValidationError, match="values must be nonempty"):
+        Outcome.model_validate(_outcome_payload(metadata={"display": " YES"}))
 
 
 def test_outcome_rejects_negative_index() -> None:
