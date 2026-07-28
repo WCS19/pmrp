@@ -3,7 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from datetime import datetime
+from decimal import Decimal
+from enum import Enum
 from types import MappingProxyType
+
+from pmrp.schemas.base import CanonicalModel
+from pmrp.schemas.time import parse_utc_datetime
 
 
 def freeze_canonical_mapping(
@@ -48,7 +54,25 @@ def freeze_canonical_value(value: object, *, field_name: str) -> object:
         raise TypeError(msg)
     if isinstance(value, Sequence) and not isinstance(value, str | bytes | bytearray):
         return tuple(freeze_canonical_value(item, field_name=field_name) for item in value)
-    return value
+    if isinstance(value, Decimal):
+        if not value.is_finite():
+            msg = f"{field_name} Decimal values must be finite"
+            raise ValueError(msg)
+        return value
+    if isinstance(value, datetime):
+        return parse_utc_datetime(value)
+    if isinstance(value, Enum | CanonicalModel):
+        return value
+    if isinstance(value, bool | int | str) or value is None:
+        return value
+    if isinstance(value, float):
+        msg = f"{field_name} values must not contain floats"
+        raise TypeError(msg)
+    if isinstance(value, bytes | bytearray):
+        msg = f"{field_name} values must not contain bytes"
+        raise TypeError(msg)
+    msg = f"unsupported {field_name} value type: {type(value).__name__}"
+    raise TypeError(msg)
 
 
 def thaw_canonical_mapping(value: Mapping[str, object]) -> dict[str, object]:

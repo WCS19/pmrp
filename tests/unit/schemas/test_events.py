@@ -118,6 +118,11 @@ def test_event_envelope_rejects_invalid_attribute_key() -> None:
         EventEnvelope.model_validate(_event_payload(attributes={" source": "unit_test"}))
 
 
+def test_event_envelope_rejects_noncanonical_attribute_leaf_value() -> None:
+    with pytest.raises(TypeError, match="must not contain floats"):
+        EventEnvelope.model_validate(_event_payload(attributes={"probability": 0.5}))
+
+
 def test_event_envelope_json_round_trip_accepts_quality_flag_array() -> None:
     event = EventEnvelope.model_validate_json(json.dumps(_event_payload()))
 
