@@ -175,6 +175,70 @@ def test_risk_decision_accepts_valid_payload() -> None:
     assert decision.approved_quantity == Decimal("10")
 
 
+def test_risk_decision_accepts_rejected_payload_with_failed_rule() -> None:
+    decision = RiskDecision.model_validate(
+        _risk_decision_payload(
+            status=RiskDecisionStatus.REJECTED,
+            rule_results=(
+                _risk_rule_result_payload(
+                    passed=False,
+                    reason_code="ORDER_NOTIONAL_LIMIT",
+                    reason_text="Requested notional exceeded limit.",
+                ),
+            ),
+            approved_quantity=None,
+            approved_limit_price=None,
+            approval_expires_at=None,
+        )
+    )
+
+    assert decision.status is RiskDecisionStatus.REJECTED
+    assert decision.rule_results[0].passed is False
+
+
+def test_risk_decision_rejects_empty_rule_results() -> None:
+    with pytest.raises(ValidationError, match="requires at least one rule result"):
+        RiskDecision.model_validate(_risk_decision_payload(rule_results=()))
+
+
+def test_risk_decision_rejects_approved_with_failed_rule_result() -> None:
+    with pytest.raises(ValidationError, match="approved risk decision cannot contain failed"):
+        RiskDecision.model_validate(
+            _risk_decision_payload(
+                rule_results=(
+                    _risk_rule_result_payload(
+                        passed=False,
+                        reason_code="ORDER_NOTIONAL_LIMIT",
+                    ),
+                )
+            )
+        )
+
+
+def test_risk_decision_rejects_approved_without_approval_fields() -> None:
+    with pytest.raises(ValidationError, match="requires approved quantity and limit price"):
+        RiskDecision.model_validate(
+            _risk_decision_payload(approved_quantity=None, approved_limit_price=None)
+        )
+
+
+def test_risk_decision_rejects_non_approved_with_approval_fields() -> None:
+    with pytest.raises(ValidationError, match="non-approved risk decision cannot contain"):
+        RiskDecision.model_validate(_risk_decision_payload(status=RiskDecisionStatus.REJECTED))
+
+
+def test_risk_decision_rejects_non_approved_without_failed_rule_result() -> None:
+    with pytest.raises(ValidationError, match="requires at least one failed rule result"):
+        RiskDecision.model_validate(
+            _risk_decision_payload(
+                status=RiskDecisionStatus.ERROR,
+                approved_quantity=None,
+                approved_limit_price=None,
+                approval_expires_at=None,
+            )
+        )
+
+
 def test_risk_decision_rejects_invalid_risk_identifier() -> None:
     with pytest.raises(ValidationError, match="RiskDecisionId must start"):
         RiskDecision.model_validate(_risk_decision_payload(risk_decision_id="decision_001"))
@@ -313,24 +377,78 @@ def test_kill_switch_state_accepts_released_payload() -> None:
     assert state.released_by == "risk_operator"
 
 
+def test_kill_switch_state_accepts_inactive_never_activated_payload() -> None:
+    state = KillSwitchState.model_validate(
+        _kill_switch_payload(
+            active=False,
+            activated_at=None,
+            activated_by=None,
+            activation_reason=None,
+            version=0,
+        )
+    )
+
+    assert state.active is False
+    assert state.activated_at is None
+
+
 def test_kill_switch_state_rejects_active_without_activation_time() -> None:
-    with pytest.raises(ValidationError, match="active kill switch requires activated_at"):
+    with pytest.raises(ValidationError, match="active kill switch requires activation audit"):
         KillSwitchState.model_validate(_kill_switch_payload(activated_at=None))
 
 
-def test_kill_switch_state_rejects_release_without_activation_time() -> None:
-    with pytest.raises(ValidationError, match="released kill switch requires activated_at"):
+def test_kill_switch_state_rejects_active_with_release_fields() -> None:
+    with pytest.raises(ValidationError, match="active kill switch cannot contain release fields"):
         KillSwitchState.model_validate(
             _kill_switch_payload(
-                active=False, activated_at=None, released_at="2026-07-27T15:30:00Z"
+                released_at="2026-07-27T15:30:00Z",
+                released_by="risk_operator",
+                release_reason="Incident reviewed.",
             )
         )
+
+
+def test_kill_switch_state_rejects_release_without_activation_time() -> None:
+    with pytest.raises(ValidationError, match="released kill switch requires activation audit"):
+        KillSwitchState.model_validate(
+            _kill_switch_payload(
+                active=False,
+                activated_at=None,
+                activated_by=None,
+                activation_reason=None,
+                released_at="2026-07-27T15:30:00Z",
+                released_by="risk_operator",
+                release_reason="Incident reviewed.",
+            )
+        )
+
+
+def test_kill_switch_state_rejects_release_without_operator_evidence() -> None:
+    with pytest.raises(ValidationError, match="released kill switch requires release audit"):
+        KillSwitchState.model_validate(
+            _kill_switch_payload(
+                active=False,
+                released_at="2026-07-27T15:30:00Z",
+                released_by=None,
+                release_reason=None,
+            )
+        )
+
+
+def test_kill_switch_state_rejects_inactive_activated_without_release() -> None:
+    with pytest.raises(ValidationError, match="inactive activated kill switch requires release"):
+        KillSwitchState.model_validate(_kill_switch_payload(active=False))
 
 
 def test_kill_switch_state_rejects_release_before_activation() -> None:
     with pytest.raises(ValidationError, match="released_at must be after"):
         KillSwitchState.model_validate(
-            _kill_switch_payload(released_at="2026-07-27T15:09:59Z", active=False)
+            _kill_switch_payload(
+                active=False,
+                released_at="2026-07-27T15:09:59Z",
+                released_by="risk_operator",
+                release_reason="Incident reviewed.",
+            )
         )
 
 

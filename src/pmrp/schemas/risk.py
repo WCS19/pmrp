@@ -105,7 +105,32 @@ class RiskDecision(CanonicalModel):
         return parse_decimal(value, field_name="risk decision decimal field")
 
     @model_validator(mode="after")
-    def validate_approval_window(self) -> Self:
+    def validate_decision_state(self) -> Self:
+        if not self.rule_results:
+            msg = "risk decision requires at least one rule result"
+            raise ValueError(msg)
+
+        approved_fields = (
+            self.approved_quantity,
+            self.approved_limit_price,
+            self.approval_expires_at,
+        )
+        has_approval = any(value is not None for value in approved_fields)
+
+        if self.status is RiskDecisionStatus.APPROVED:
+            if any(not result.passed for result in self.rule_results):
+                msg = "approved risk decision cannot contain failed rule results"
+                raise ValueError(msg)
+            if self.approved_quantity is None or self.approved_limit_price is None:
+                msg = "approved risk decision requires approved quantity and limit price"
+                raise ValueError(msg)
+        elif has_approval:
+            msg = "non-approved risk decision cannot contain approval fields"
+            raise ValueError(msg)
+        elif all(result.passed for result in self.rule_results):
+            msg = "non-approved risk decision requires at least one failed rule result"
+            raise ValueError(msg)
+
         if self.approval_expires_at is not None and self.approval_expires_at <= self.evaluated_at:
             msg = "approval_expires_at must be after evaluated_at"
             raise ValueError(msg)
@@ -167,14 +192,49 @@ class KillSwitchState(CanonicalModel):
 
     @model_validator(mode="after")
     def validate_activation_lifecycle(self) -> Self:
-        if self.active and self.activated_at is None:
-            msg = "active kill switch requires activated_at"
+        activation_fields = (
+            self.activated_at,
+            self.activated_by,
+            self.activation_reason,
+        )
+        release_fields = (
+            self.released_at,
+            self.released_by,
+            self.release_reason,
+        )
+        has_activation = any(value is not None for value in activation_fields)
+        has_release = any(value is not None for value in release_fields)
+
+        if self.active and not all(value is not None for value in activation_fields):
+            msg = "active kill switch requires activation audit fields"
             raise ValueError(msg)
-        if self.released_at is not None:
-            if self.activated_at is None:
-                msg = "released kill switch requires activated_at"
-                raise ValueError(msg)
-            if self.released_at <= self.activated_at:
-                msg = "released_at must be after activated_at"
-                raise ValueError(msg)
+        if self.active and has_release:
+            msg = "active kill switch cannot contain release fields"
+            raise ValueError(msg)
+
+        if (
+            not self.active
+            and has_release
+            and not all(value is not None for value in release_fields)
+        ):
+            msg = "released kill switch requires release audit fields"
+            raise ValueError(msg)
+        if (
+            not self.active
+            and has_release
+            and not all(value is not None for value in activation_fields)
+        ):
+            msg = "released kill switch requires activation audit fields"
+            raise ValueError(msg)
+        if not self.active and has_activation and not has_release:
+            msg = "inactive activated kill switch requires release audit fields"
+            raise ValueError(msg)
+
+        if (
+            self.released_at is not None
+            and self.activated_at is not None
+            and self.released_at <= self.activated_at
+        ):
+            msg = "released_at must be after activated_at"
+            raise ValueError(msg)
         return self
