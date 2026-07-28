@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from pmrp.clock import FrozenClock
+from pmrp.clock import AdvancingTestClock, FrozenClock
 from pmrp.commands import (
     CommandContext,
     CommandDispatcher,
@@ -131,6 +131,57 @@ async def test_command_dispatcher_returns_cached_duplicate_result_without_handle
     assert first.status is CommandDispatchStatus.COMPLETED
     assert second.status is CommandDispatchStatus.DUPLICATE
     assert second.result == {"accepted": True}
+    assert len(handler.calls) == 1
+
+
+async def test_command_dispatcher_rejects_same_idempotency_key_for_different_command() -> None:
+    connect_handler = RecordingHandler(result={"connected": True})
+    disconnect_handler = RecordingHandler(result={"disconnected": True})
+    dispatcher = CommandDispatcher(
+        registry=CommandHandlerRegistry(
+            (
+                CommandHandlerRegistration(
+                    command_type="adapter.connect",
+                    schema_name="command_envelope",
+                    schema_version=1,
+                    handler=connect_handler,
+                ),
+                CommandHandlerRegistration(
+                    command_type="adapter.disconnect",
+                    schema_name="command_envelope",
+                    schema_version=1,
+                    handler=disconnect_handler,
+                ),
+            )
+        ),
+        clock=FrozenClock(_instant()),
+    )
+
+    first = await dispatcher.dispatch(_command(command_type="adapter.connect"))
+    second = await dispatcher.dispatch(_command(command_type="adapter.disconnect"))
+
+    assert first.status is CommandDispatchStatus.COMPLETED
+    assert second.status is CommandDispatchStatus.REJECTED
+    assert second.failure is not None
+    assert second.failure.kind is CommandFailureKind.IDEMPOTENCY_CONFLICT
+    assert connect_handler.calls
+    assert disconnect_handler.calls == []
+
+
+async def test_command_dispatcher_replays_completed_duplicate_after_deadline_expires() -> None:
+    clock = AdvancingTestClock(_instant())
+    handler = RecordingHandler(result={"accepted": True})
+    dispatcher = CommandDispatcher(registry=_registry(handler), clock=clock)
+    command = _command(deadline_at=_instant() + timedelta(seconds=1))
+
+    first = await dispatcher.dispatch(command)
+    clock.advance(timedelta(seconds=2))
+    second = await dispatcher.dispatch(command)
+
+    assert first.status is CommandDispatchStatus.COMPLETED
+    assert second.status is CommandDispatchStatus.DUPLICATE
+    assert second.result == {"accepted": True}
+    assert second.failure is None
     assert len(handler.calls) == 1
 
 

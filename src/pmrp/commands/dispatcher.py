@@ -12,6 +12,7 @@ from pmrp.clock import Clock
 from pmrp.commands.registry import CommandContext, CommandHandlerRegistry, UnknownCommandTypeError
 from pmrp.schemas.commands import CommandEnvelope
 from pmrp.schemas.identifiers import CommandId, CorrelationId
+from pmrp.schemas.serialization import canonical_sha256
 
 
 class CommandDispatchStatus(StrEnum):
@@ -30,6 +31,7 @@ class CommandFailureKind(StrEnum):
     SCHEMA_VERSION_MISMATCH = "schema_version_mismatch"
     DEADLINE_EXCEEDED = "deadline_exceeded"
     DUPLICATE_IN_PROGRESS = "duplicate_in_progress"
+    IDEMPOTENCY_CONFLICT = "idempotency_conflict"
     IDEMPOTENCY_REJECTED = "idempotency_rejected"
     IDEMPOTENCY_HOOK_ERROR = "idempotency_hook_error"
     HANDLER_REJECTED = "handler_rejected"
@@ -85,6 +87,7 @@ class CommandIdempotencyStatus(StrEnum):
     DUPLICATE_COMPLETED = "duplicate_completed"
     DUPLICATE_FAILED = "duplicate_failed"
     DUPLICATE_IN_PROGRESS = "duplicate_in_progress"
+    CONFLICT = "conflict"
     REJECTED = "rejected"
 
 
@@ -112,6 +115,10 @@ class CommandIdempotencyDecision:
         return cls(status=CommandIdempotencyStatus.DUPLICATE_IN_PROGRESS, reason=reason)
 
     @classmethod
+    def conflict(cls, reason: str) -> CommandIdempotencyDecision:
+        return cls(status=CommandIdempotencyStatus.CONFLICT, reason=reason)
+
+    @classmethod
     def rejected(cls, reason: str) -> CommandIdempotencyDecision:
         return cls(status=CommandIdempotencyStatus.REJECTED, reason=reason)
 
@@ -134,6 +141,7 @@ class _InMemoryEntryStatus(StrEnum):
 
 @dataclass(slots=True)
 class _InMemoryIdempotencyEntry:
+    fingerprint: str
     status: _InMemoryEntryStatus
     result: object | None = None
     failure: CommandFailure | None = None
@@ -151,10 +159,15 @@ class InMemoryCommandIdempotencyHook:
         self._lock = asyncio.Lock()
 
     async def before_dispatch(self, command: CommandEnvelope) -> CommandIdempotencyDecision:
+        fingerprint = _command_idempotency_fingerprint(command)
         async with self._lock:
             existing = self._entries.get(command.idempotency_key)
             if existing is not None:
                 self._entries.move_to_end(command.idempotency_key)
+                if existing.fingerprint != fingerprint:
+                    return CommandIdempotencyDecision.conflict(
+                        "command idempotency key conflicts with a different command request"
+                    )
                 if existing.status is _InMemoryEntryStatus.IN_PROGRESS:
                     return CommandIdempotencyDecision.duplicate_in_progress(
                         "command idempotency key is already in progress"
@@ -174,13 +187,14 @@ class InMemoryCommandIdempotencyHook:
                 )
 
             self._entries[command.idempotency_key] = _InMemoryIdempotencyEntry(
-                status=_InMemoryEntryStatus.IN_PROGRESS
+                fingerprint=fingerprint, status=_InMemoryEntryStatus.IN_PROGRESS
             )
             return CommandIdempotencyDecision.claimed()
 
     async def record_success(self, command: CommandEnvelope, result: object | None) -> None:
         async with self._lock:
             self._entries[command.idempotency_key] = _InMemoryIdempotencyEntry(
+                fingerprint=_command_idempotency_fingerprint(command),
                 status=_InMemoryEntryStatus.COMPLETED,
                 result=result,
             )
@@ -190,6 +204,7 @@ class InMemoryCommandIdempotencyHook:
     async def record_failure(self, command: CommandEnvelope, failure: CommandFailure) -> None:
         async with self._lock:
             self._entries[command.idempotency_key] = _InMemoryIdempotencyEntry(
+                fingerprint=_command_idempotency_fingerprint(command),
                 status=_InMemoryEntryStatus.FAILED,
                 failure=failure,
             )
@@ -250,17 +265,6 @@ class CommandDispatcher:
                 status=CommandDispatchStatus.REJECTED,
             )
 
-        if command.deadline_at is not None and self._clock.now() > command.deadline_at:
-            return _result_for_failure(
-                command,
-                CommandFailure(
-                    kind=CommandFailureKind.DEADLINE_EXCEEDED,
-                    message="command deadline has expired",
-                    retryable=False,
-                ),
-                status=CommandDispatchStatus.REJECTED,
-            )
-
         try:
             decision = await self._idempotency_hook.before_dispatch(command)
         except Exception:
@@ -269,6 +273,17 @@ class CommandDispatcher:
         duplicate_result = _result_for_idempotency_decision(command, decision)
         if duplicate_result is not None:
             return duplicate_result
+
+        if command.deadline_at is not None and self._clock.now() > command.deadline_at:
+            return await self._record_failure(
+                command,
+                CommandFailure(
+                    kind=CommandFailureKind.DEADLINE_EXCEEDED,
+                    message="command deadline has expired",
+                    retryable=False,
+                ),
+                status=CommandDispatchStatus.REJECTED,
+            )
 
         context = CommandContext.from_command(command)
         try:
@@ -358,6 +373,16 @@ def _result_for_idempotency_decision(
             ),
             status=CommandDispatchStatus.REJECTED,
         )
+    if decision.status is CommandIdempotencyStatus.CONFLICT:
+        return _result_for_failure(
+            command,
+            CommandFailure(
+                kind=CommandFailureKind.IDEMPOTENCY_CONFLICT,
+                message=decision.reason or "command idempotency key conflicts with another request",
+                retryable=False,
+            ),
+            status=CommandDispatchStatus.REJECTED,
+        )
     return _result_for_failure(
         command,
         CommandFailure(
@@ -366,6 +391,19 @@ def _result_for_idempotency_decision(
             retryable=True,
         ),
         status=CommandDispatchStatus.REJECTED,
+    )
+
+
+def _command_idempotency_fingerprint(command: CommandEnvelope) -> str:
+    return canonical_sha256(
+        {
+            "attributes": command.attributes,
+            "command_type": command.command_type,
+            "deadline_at": command.deadline_at,
+            "issuer": command.issuer,
+            "priority": command.priority,
+            "schema_version": command.schema_version,
+        }
     )
 
 
