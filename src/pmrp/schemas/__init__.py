@@ -5,6 +5,7 @@ from pmrp.schemas.commands import CommandEnvelope
 from pmrp.schemas.enums import Side
 from pmrp.schemas.events import EventEnvelope
 from pmrp.schemas.identifiers import EventId, MarketId, OrderId
+from pmrp.schemas.markets import Contract, Market, Outcome
 from pmrp.schemas.metadata import AuditMetadata, FlexibleMetadata, SourceMetadata, VersionMetadata
 from pmrp.schemas.numeric import Money, Price, Probability, Quantity
 from pmrp.schemas.serialization import canonical_json, canonical_sha256
@@ -15,12 +16,15 @@ __all__ = [
     "AuditMetadata",
     "CanonicalModel",
     "CommandEnvelope",
+    "Contract",
     "EventEnvelope",
     "EventId",
     "FlexibleMetadata",
+    "Market",
     "MarketId",
     "Money",
     "OrderId",
+    "Outcome",
     "Price",
     "Probability",
     "Quantity",

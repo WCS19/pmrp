@@ -52,7 +52,7 @@ def test_registry_lookup_returns_registration_metadata() -> None:
 
 def test_registry_lookup_rejects_unknown_schema() -> None:
     with pytest.raises(KeyError, match="schema is not registered"):
-        get_schema_model("market", 1)
+        get_schema_model("not_registered", 1)
 
 
 def test_list_schema_registrations_includes_foundational_schemas() -> None:
