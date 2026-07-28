@@ -22,7 +22,15 @@ from pmrp.schemas.orders import (
     OrderStateTransition,
     ReplaceOrderRequest,
 )
-from pmrp.schemas.risk import RiskDecision, RiskLimit, RiskLimitScope, RiskRuleResult
+from pmrp.schemas.risk import (
+    KillSwitchScope,
+    KillSwitchState,
+    RiskBreach,
+    RiskDecision,
+    RiskLimit,
+    RiskLimitScope,
+    RiskRuleResult,
+)
 from pmrp.schemas.serialization import canonical_json, canonical_sha256
 from pmrp.schemas.strategy import Signal, SignalDirection
 from pmrp.schemas.time import UTCDateTime
@@ -42,6 +50,8 @@ __all__ = [
     "ExchangeOrderRequest",
     "Fill",
     "FlexibleMetadata",
+    "KillSwitchScope",
+    "KillSwitchState",
     "Market",
     "MarketId",
     "Money",
@@ -57,6 +67,7 @@ __all__ = [
     "Probability",
     "Quantity",
     "ReplaceOrderRequest",
+    "RiskBreach",
     "RiskDecision",
     "RiskLimit",
     "RiskLimitScope",

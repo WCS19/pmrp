@@ -110,3 +110,71 @@ class RiskDecision(CanonicalModel):
             msg = "approval_expires_at must be after evaluated_at"
             raise ValueError(msg)
         return self
+
+
+class RiskBreach(CanonicalModel):
+    breach_id: str = Field(min_length=1, max_length=_RISK_ID_MAX_LENGTH)
+    rule_id: str = Field(min_length=1, max_length=_RISK_ID_MAX_LENGTH)
+    rule_version: str = Field(min_length=1, max_length=64)
+
+    scope: RiskLimitScope
+    scope_id: str | None = Field(default=None, min_length=1, max_length=256)
+
+    severity: str = Field(min_length=1, max_length=64)
+    detected_at: UTCDateTime
+
+    observed_value: Decimal | None = None
+    limit_value: Decimal | None = None
+    unit: str | None = Field(default=None, min_length=1, max_length=64)
+
+    action_taken: str = Field(min_length=1, max_length=_RISK_ID_MAX_LENGTH)
+    correlation_id: CorrelationId
+
+    @field_validator("observed_value", "limit_value", mode="before")
+    @classmethod
+    def parse_decimal_fields(cls, value: object) -> Decimal | None:
+        if value is None:
+            return None
+        return parse_decimal(value, field_name="risk breach decimal field")
+
+
+class KillSwitchScope(StrEnum):
+    GLOBAL = "global"
+    EXCHANGE = "exchange"
+    ACCOUNT = "account"
+    STRATEGY = "strategy"
+    MARKET = "market"
+    EXECUTION_GATEWAY = "execution_gateway"
+
+
+class KillSwitchState(CanonicalModel):
+    kill_switch_id: str = Field(min_length=1, max_length=_RISK_ID_MAX_LENGTH)
+    scope: KillSwitchScope
+    scope_id: str | None = Field(default=None, min_length=1, max_length=256)
+
+    active: bool
+    activated_at: UTCDateTime | None = None
+    activated_by: str | None = Field(default=None, min_length=1, max_length=_RISK_ID_MAX_LENGTH)
+    activation_reason: str | None = Field(
+        default=None, min_length=1, max_length=_RISK_TEXT_MAX_LENGTH
+    )
+
+    released_at: UTCDateTime | None = None
+    released_by: str | None = Field(default=None, min_length=1, max_length=_RISK_ID_MAX_LENGTH)
+    release_reason: str | None = Field(default=None, min_length=1, max_length=_RISK_TEXT_MAX_LENGTH)
+
+    version: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def validate_activation_lifecycle(self) -> Self:
+        if self.active and self.activated_at is None:
+            msg = "active kill switch requires activated_at"
+            raise ValueError(msg)
+        if self.released_at is not None:
+            if self.activated_at is None:
+                msg = "released kill switch requires activated_at"
+                raise ValueError(msg)
+            if self.released_at <= self.activated_at:
+                msg = "released_at must be after activated_at"
+                raise ValueError(msg)
+        return self

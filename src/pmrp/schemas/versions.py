@@ -90,7 +90,13 @@ def _registered_schemas() -> tuple[RegisteredSchema, ...]:
         OrderStateTransition,
         ReplaceOrderRequest,
     )
-    from pmrp.schemas.risk import RiskDecision, RiskLimit, RiskRuleResult
+    from pmrp.schemas.risk import (
+        KillSwitchState,
+        RiskBreach,
+        RiskDecision,
+        RiskLimit,
+        RiskRuleResult,
+    )
     from pmrp.schemas.strategy import Signal
 
     return (
@@ -146,6 +152,8 @@ def _registered_schemas() -> tuple[RegisteredSchema, ...]:
         RegisteredSchema("risk_limit", 1, SchemaCategory.DOMAIN, RiskLimit),
         RegisteredSchema("risk_rule_result", 1, SchemaCategory.DOMAIN, RiskRuleResult),
         RegisteredSchema("risk_decision", 1, SchemaCategory.DOMAIN, RiskDecision),
+        RegisteredSchema("risk_breach", 1, SchemaCategory.DOMAIN, RiskBreach),
+        RegisteredSchema("kill_switch_state", 1, SchemaCategory.DOMAIN, KillSwitchState),
     )
 
 

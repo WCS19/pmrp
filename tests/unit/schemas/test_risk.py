@@ -6,7 +6,15 @@ import pytest
 from pydantic import ValidationError
 
 from pmrp.schemas.enums import RiskDecisionStatus
-from pmrp.schemas.risk import RiskDecision, RiskLimit, RiskLimitScope, RiskRuleResult
+from pmrp.schemas.risk import (
+    KillSwitchScope,
+    KillSwitchState,
+    RiskBreach,
+    RiskDecision,
+    RiskLimit,
+    RiskLimitScope,
+    RiskRuleResult,
+)
 from pmrp.schemas.serialization import canonical_json, canonical_sha256
 from pmrp.schemas.versions import get_schema_model, get_schema_registration
 
@@ -62,6 +70,43 @@ def _risk_decision_payload(**overrides: object) -> dict[str, object]:
         "approval_expires_at": "2026-07-27T15:00:01.145000Z",
         "configuration_hash": "sha256:abc123",
         "correlation_id": "corr_01j00000000000000000000000",
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _risk_breach_payload(**overrides: object) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "breach_id": "breach_001",
+        "rule_id": "RISK-007",
+        "rule_version": "1.0",
+        "scope": RiskLimitScope.ACCOUNT,
+        "scope_id": "acct_paper_001",
+        "severity": "critical",
+        "detected_at": "2026-07-27T15:10:00Z",
+        "observed_value": "12000",
+        "limit_value": "10000",
+        "unit": "usd",
+        "action_taken": "BLOCK_TRADING",
+        "correlation_id": "corr_01j00000000000000000000000",
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _kill_switch_payload(**overrides: object) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "kill_switch_id": "kill_switch_001",
+        "scope": KillSwitchScope.STRATEGY,
+        "scope_id": "strat_fed_value_v1",
+        "active": True,
+        "activated_at": "2026-07-27T15:10:00Z",
+        "activated_by": "risk_operator",
+        "activation_reason": "Unexpected fill behavior",
+        "released_at": None,
+        "released_by": None,
+        "release_reason": None,
+        "version": 1,
     }
     payload.update(overrides)
     return payload
@@ -208,3 +253,103 @@ def test_risk_decision_schema_registry_entries_exist() -> None:
     registration = get_schema_registration("risk_decision", 1)
 
     assert registration.model_path == "pmrp.schemas.risk.RiskDecision"
+
+
+def test_risk_breach_accepts_valid_payload() -> None:
+    breach = RiskBreach.model_validate(_risk_breach_payload())
+
+    assert breach.scope is RiskLimitScope.ACCOUNT
+    assert breach.observed_value == Decimal("12000")
+    assert breach.limit_value == Decimal("10000")
+
+
+def test_risk_breach_rejects_unknown_fields() -> None:
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        RiskBreach.model_validate(_risk_breach_payload(unexpected=True))
+
+
+def test_risk_breach_rejects_float_limit_value() -> None:
+    with pytest.raises(TypeError, match="float input"):
+        RiskBreach.model_validate(_risk_breach_payload(limit_value=10000.0))
+
+
+def test_risk_breach_rejects_invalid_scope_enum() -> None:
+    with pytest.raises(ValidationError):
+        RiskBreach.model_validate(_risk_breach_payload(scope="portfolio"))
+
+
+def test_risk_breach_rejects_naive_detected_at() -> None:
+    with pytest.raises(ValidationError, match="timezone-aware"):
+        RiskBreach.model_validate(
+            _risk_breach_payload(detected_at=datetime.fromisoformat("2026-07-27T15:10:00"))
+        )
+
+
+def test_risk_breach_rejects_invalid_correlation_id() -> None:
+    with pytest.raises(ValidationError, match="CorrelationId must start"):
+        RiskBreach.model_validate(_risk_breach_payload(correlation_id="corr-001"))
+
+
+def test_kill_switch_state_accepts_active_payload() -> None:
+    state = KillSwitchState.model_validate(_kill_switch_payload())
+
+    assert state.scope is KillSwitchScope.STRATEGY
+    assert state.active is True
+    assert state.version == 1
+
+
+def test_kill_switch_state_accepts_released_payload() -> None:
+    state = KillSwitchState.model_validate(
+        _kill_switch_payload(
+            active=False,
+            released_at="2026-07-27T15:30:00Z",
+            released_by="risk_operator",
+            release_reason="Incident reviewed.",
+            version=2,
+        )
+    )
+
+    assert state.active is False
+    assert state.released_by == "risk_operator"
+
+
+def test_kill_switch_state_rejects_active_without_activation_time() -> None:
+    with pytest.raises(ValidationError, match="active kill switch requires activated_at"):
+        KillSwitchState.model_validate(_kill_switch_payload(activated_at=None))
+
+
+def test_kill_switch_state_rejects_release_without_activation_time() -> None:
+    with pytest.raises(ValidationError, match="released kill switch requires activated_at"):
+        KillSwitchState.model_validate(
+            _kill_switch_payload(
+                active=False, activated_at=None, released_at="2026-07-27T15:30:00Z"
+            )
+        )
+
+
+def test_kill_switch_state_rejects_release_before_activation() -> None:
+    with pytest.raises(ValidationError, match="released_at must be after"):
+        KillSwitchState.model_validate(
+            _kill_switch_payload(released_at="2026-07-27T15:09:59Z", active=False)
+        )
+
+
+def test_kill_switch_state_rejects_negative_version() -> None:
+    with pytest.raises(ValidationError, match="greater than or equal to 0"):
+        KillSwitchState.model_validate(_kill_switch_payload(version=-1))
+
+
+def test_kill_switch_state_json_round_trip_preserves_scope() -> None:
+    state = KillSwitchState.model_validate_json(
+        json.dumps({**_kill_switch_payload(), "scope": "strategy"})
+    )
+
+    assert KillSwitchState.model_validate_json(canonical_json(state)) == state
+
+
+def test_operational_risk_schema_registry_entries_exist() -> None:
+    assert get_schema_model("risk_breach", 1) is RiskBreach
+    assert get_schema_model("kill_switch_state", 1) is KillSwitchState
+    registration = get_schema_registration("kill_switch_state", 1)
+
+    assert registration.model_path == "pmrp.schemas.risk.KillSwitchState"
