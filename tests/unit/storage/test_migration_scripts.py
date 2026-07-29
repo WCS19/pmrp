@@ -8,7 +8,7 @@ from types import ModuleType
 from typing import cast
 
 import pytest
-from sqlalchemy import CheckConstraint
+from sqlalchemy import CheckConstraint, ForeignKeyConstraint
 from sqlalchemy.schema import CreateSchema, DropSchema
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
@@ -16,6 +16,10 @@ INITIAL_MIGRATION_PATH = REPOSITORY_ROOT / "migrations/versions/0001_create_logi
 SCHEMA_REGISTRY_MIGRATION_PATH = (
     REPOSITORY_ROOT / "migrations/versions/0002_create_schema_registry.py"
 )
+EXCHANGE_REGISTRY_MIGRATION_PATH = (
+    REPOSITORY_ROOT / "migrations/versions/0003_exchange_account_registries.py"
+)
+MAX_ALEMBIC_REVISION_ID_LENGTH = 32
 EXPECTED_LOGICAL_SCHEMAS = (
     "pmrp_core",
     "pmrp_raw",
@@ -48,6 +52,31 @@ def test_schema_registry_migration_revision_metadata_is_stable() -> None:
     assert migration.down_revision == "0001_create_logical_schemas"
     assert migration.branch_labels is None
     assert migration.depends_on is None
+
+
+@pytest.mark.unit
+def test_exchange_registry_migration_revision_metadata_is_stable() -> None:
+    migration = _load_migration(EXCHANGE_REGISTRY_MIGRATION_PATH)
+
+    assert migration.revision == "0003_exchange_account_registries"
+    assert migration.down_revision == "0002_create_schema_registry"
+    assert migration.branch_labels is None
+    assert migration.depends_on is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "migration_path",
+    [
+        INITIAL_MIGRATION_PATH,
+        SCHEMA_REGISTRY_MIGRATION_PATH,
+        EXCHANGE_REGISTRY_MIGRATION_PATH,
+    ],
+)
+def test_migration_revision_ids_fit_alembic_version_column(migration_path: Path) -> None:
+    migration = _load_migration(migration_path)
+
+    assert len(migration.revision) <= MAX_ALEMBIC_REVISION_ID_LENGTH
 
 
 @pytest.mark.unit
@@ -131,6 +160,51 @@ def test_schema_registry_migration_marks_check_constraint_name_as_final(
     assert formatted_names == ["ck_schema_registry__schema_version"]
     assert [constraint.name for constraint in check_constraints] == [
         "final:ck_schema_registry__schema_version"
+    ]
+
+
+@pytest.mark.unit
+def test_exchange_registry_migration_uses_expected_names() -> None:
+    migration = _load_migration(EXCHANGE_REGISTRY_MIGRATION_PATH)
+
+    assert migration.SCHEMA_NAME == "pmrp_core"
+    assert migration.EXCHANGES_TABLE_NAME == "exchanges"
+    assert migration.EXCHANGE_ACCOUNTS_TABLE_NAME == "exchange_accounts"
+    assert migration.EXCHANGE_ACCOUNT_INDEX_NAME == ("ix_exchange_accounts__exchange_environment")
+    assert migration.EXCHANGE_ACCOUNT_FOREIGN_KEY_NAME == (
+        "fk_exchange_accounts__exchange__exchanges"
+    )
+
+
+@pytest.mark.unit
+def test_exchange_registry_migration_marks_foreign_key_name_as_final(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    migration = _load_migration(EXCHANGE_REGISTRY_MIGRATION_PATH)
+    formatted_names: list[str] = []
+    created_table_arguments: list[object] = []
+
+    def fake_format_name(name: str) -> str:
+        formatted_names.append(name)
+        return f"final:{name}"
+
+    def fake_create_table(*arguments: object, **_kwargs: object) -> None:
+        created_table_arguments.extend(arguments)
+
+    monkeypatch.setattr(migration.op, "f", fake_format_name)
+    monkeypatch.setattr(migration.op, "create_table", fake_create_table)
+    monkeypatch.setattr(migration.op, "create_index", lambda *_args, **_kwargs: None)
+
+    migration.upgrade()
+
+    foreign_key_constraints = [
+        argument
+        for argument in created_table_arguments
+        if isinstance(argument, ForeignKeyConstraint)
+    ]
+    assert formatted_names == ["fk_exchange_accounts__exchange__exchanges"]
+    assert [constraint.name for constraint in foreign_key_constraints] == [
+        "final:fk_exchange_accounts__exchange__exchanges"
     ]
 
 
