@@ -11,6 +11,8 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
+from pmrp.storage.config import DatabaseConfig
+from pmrp.storage.migrations import alembic_engine_configuration, database_config_from_environment
 from pmrp.storage.models import StorageBase
 
 config = context.config
@@ -21,19 +23,19 @@ if config.config_file_name is not None:
 target_metadata = StorageBase.metadata
 
 
-def _database_url() -> str:
-    url = os.environ.get("PMRP_DATABASE_URL") or config.get_main_option("sqlalchemy.url")
-    if not url:
-        msg = "PMRP_DATABASE_URL or alembic sqlalchemy.url is required"
-        raise RuntimeError(msg)
-    return url
+def _database_config() -> DatabaseConfig:
+    return database_config_from_environment(
+        os.environ,
+        fallback_url=config.get_main_option("sqlalchemy.url"),
+    )
 
 
 def run_migrations_offline() -> None:
     """Run migrations without creating an Engine."""
 
+    database_config = _database_config()
     context.configure(
-        url=_database_url(),
+        url=database_config.sqlalchemy_url,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
@@ -55,12 +57,16 @@ def do_run_migrations(connection: Connection) -> None:
 async def run_async_migrations() -> None:
     """Create an async engine only for the migration invocation."""
 
-    configuration = config.get_section(config.config_ini_section, {})
-    configuration["sqlalchemy.url"] = _database_url()
+    database_config = _database_config()
+    configuration = alembic_engine_configuration(
+        config.get_section(config.config_ini_section, {}),
+        database_config,
+    )
     connectable = async_engine_from_config(
         configuration,
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        connect_args=database_config.connect_args,
     )
 
     async with connectable.connect() as connection:

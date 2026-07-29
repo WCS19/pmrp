@@ -13,6 +13,7 @@ from pmrp.storage.errors import (
     UnitOfWorkStateError,
     classify_storage_error,
 )
+from pmrp.storage.migrations import alembic_engine_configuration, database_config_from_environment
 from pmrp.storage.session import AsyncSessionFactory, create_session_factory, session_scope
 from pmrp.storage.transactions import SqlAlchemyUnitOfWork
 
@@ -29,9 +30,11 @@ __all__ = [
     "StorageError",
     "StorageIntegrityError",
     "UnitOfWorkStateError",
+    "alembic_engine_configuration",
     "check_database_health",
     "classify_storage_error",
     "create_database_engine",
     "create_session_factory",
+    "database_config_from_environment",
     "session_scope",
 ]
