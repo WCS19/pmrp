@@ -14,7 +14,9 @@ from pmrp.storage.models.portfolio import (
     CashBalanceRow,
     JournalEntryRow,
     JournalLineRow,
+    PnlAttributionRow,
     PositionRow,
+    SettlementRow,
 )
 from pmrp.storage.models.raw_exchange import RawExchangeRecordRow
 from pmrp.storage.models.research_metadata import (
@@ -49,10 +51,12 @@ __all__ = [
     "OrderStateTransitionRow",
     "OutboxMessageRow",
     "OutcomeRow",
+    "PnlAttributionRow",
     "PositionRow",
     "ProcessedEventRow",
     "RawExchangeRecordRow",
     "SchemaRegistryRow",
+    "SettlementRow",
     "SignalRow",
     "StorageBase",
     "StrategyConfigurationRow",
