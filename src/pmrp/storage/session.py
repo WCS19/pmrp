@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator, Callable
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
@@ -32,10 +33,20 @@ async def session_scope(session_factory: AsyncSessionFactory) -> AsyncIterator[A
     try:
         yield session
     except SQLAlchemyError as exc:
-        await session.rollback()
+        try:
+            await session.rollback()
+        except SQLAlchemyError as rollback_exc:
+            raise classify_storage_error(rollback_exc) from exc
         raise classify_storage_error(exc) from exc
-    except BaseException:
-        await session.rollback()
+    except asyncio.CancelledError:
+        with suppress(SQLAlchemyError):
+            await session.rollback()
+        raise
+    except Exception as exc:
+        try:
+            await session.rollback()
+        except SQLAlchemyError as rollback_exc:
+            raise classify_storage_error(rollback_exc) from exc
         raise
     finally:
         await session.close()

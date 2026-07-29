@@ -12,7 +12,11 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from pmrp.storage.config import DatabaseConfig
-from pmrp.storage.migrations import alembic_engine_configuration, database_config_from_environment
+from pmrp.storage.migrations import (
+    alembic_engine_configuration,
+    alembic_engine_options,
+    database_config_from_environment,
+)
 from pmrp.storage.models import StorageBase
 
 config = context.config
@@ -66,7 +70,7 @@ async def run_async_migrations() -> None:
         configuration,
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
-        connect_args=database_config.connect_args,
+        **alembic_engine_options(database_config),
     )
 
     async with connectable.connect() as connection:

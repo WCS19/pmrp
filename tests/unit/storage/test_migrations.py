@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from pmrp.storage import alembic_engine_configuration, database_config_from_environment
+from pmrp.storage import (
+    alembic_engine_configuration,
+    alembic_engine_options,
+    database_config_from_environment,
+)
 
 
 @pytest.mark.unit
@@ -106,4 +110,19 @@ def test_alembic_engine_configuration_preserves_existing_configuration() -> None
         "script_location": "migrations",
         "sqlalchemy.echo": "false",
         "sqlalchemy.url": "postgresql+asyncpg://user:password@localhost/pmrp",
+    }
+
+
+@pytest.mark.unit
+def test_alembic_engine_options_hide_parameters_and_reuse_hardened_connect_args() -> None:
+    config = database_config_from_environment(
+        {},
+        fallback_url="postgresql+asyncpg://user:password@localhost/pmrp",
+    )
+
+    options = alembic_engine_options(config)
+
+    assert options == {
+        "connect_args": config.connect_args,
+        "hide_parameters": True,
     }

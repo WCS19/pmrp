@@ -34,6 +34,7 @@ def create_database_engine(config: DatabaseConfig) -> AsyncEngine:
         pool_recycle=config.pool_recycle_seconds,
         pool_pre_ping=True,
         connect_args=config.connect_args,
+        hide_parameters=True,
     )
 
 

@@ -74,6 +74,15 @@ def alembic_engine_configuration(
     return configuration
 
 
+def alembic_engine_options(database_config: DatabaseConfig) -> dict[str, object]:
+    """Return hardened SQLAlchemy engine options for Alembic online migrations."""
+
+    return {
+        "connect_args": database_config.connect_args,
+        "hide_parameters": True,
+    }
+
+
 def _positive_int(environment: Mapping[str, str], name: str, *, default: int) -> int:
     raw_value = environment.get(name)
     if raw_value is None:

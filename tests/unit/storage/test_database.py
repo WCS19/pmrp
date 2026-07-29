@@ -44,6 +44,7 @@ def test_create_database_engine_uses_configured_pool_and_timeouts(
     assert captured["pool_recycle"] == 120
     assert captured["pool_pre_ping"] is True
     assert captured["connect_args"] == config.connect_args
+    assert captured["hide_parameters"] is True
 
 
 @pytest.mark.unit
