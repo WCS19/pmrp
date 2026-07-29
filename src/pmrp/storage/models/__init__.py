@@ -5,6 +5,7 @@ from pmrp.storage.models.canonical_events import CanonicalEventRow, EventIdRow
 from pmrp.storage.models.dead_letters import DeadLetterRecordRow
 from pmrp.storage.models.event_processing import OutboxMessageRow, ProcessedEventRow
 from pmrp.storage.models.exchange_registry import ExchangeAccountRow, ExchangeRow
+from pmrp.storage.models.fills import FillIdRow, FillRow
 from pmrp.storage.models.idempotency import IdempotencyRecordRow
 from pmrp.storage.models.market_catalog import ContractRow, MarketRow, OutcomeRow
 from pmrp.storage.models.market_data import OrderBookSnapshotRow, TradeRow
@@ -28,6 +29,8 @@ __all__ = [
     "ExchangeAccountRow",
     "ExchangeRow",
     "FeatureSnapshotRow",
+    "FillIdRow",
+    "FillRow",
     "IdempotencyRecordRow",
     "MarketRow",
     "ModelArtifactRow",
