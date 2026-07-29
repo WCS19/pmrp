@@ -43,6 +43,7 @@ ORDER_STORAGE_MIGRATION_PATH = REPOSITORY_ROOT / "migrations/versions/0012_order
 FILLS_REGISTRY_MIGRATION_PATH = REPOSITORY_ROOT / "migrations/versions/0013_fills_registry.py"
 PORTFOLIO_STORAGE_MIGRATION_PATH = REPOSITORY_ROOT / "migrations/versions/0014_portfolio_storage.py"
 PNL_SETTLEMENTS_MIGRATION_PATH = REPOSITORY_ROOT / "migrations/versions/0015_pnl_settlements.py"
+RISK_STORAGE_MIGRATION_PATH = REPOSITORY_ROOT / "migrations/versions/0016_risk_storage.py"
 MAX_ALEMBIC_REVISION_ID_LENGTH = 32
 EXPECTED_LOGICAL_SCHEMAS = (
     "pmrp_core",
@@ -209,6 +210,16 @@ def test_pnl_settlements_migration_revision_metadata_is_stable() -> None:
 
 
 @pytest.mark.unit
+def test_risk_storage_migration_revision_metadata_is_stable() -> None:
+    migration = _load_migration(RISK_STORAGE_MIGRATION_PATH)
+
+    assert migration.revision == "0016_risk_storage"
+    assert migration.down_revision == "0015_pnl_settlements"
+    assert migration.branch_labels is None
+    assert migration.depends_on is None
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "migration_path",
     [
@@ -227,6 +238,7 @@ def test_pnl_settlements_migration_revision_metadata_is_stable() -> None:
         FILLS_REGISTRY_MIGRATION_PATH,
         PORTFOLIO_STORAGE_MIGRATION_PATH,
         PNL_SETTLEMENTS_MIGRATION_PATH,
+        RISK_STORAGE_MIGRATION_PATH,
     ],
 )
 def test_migration_revision_ids_fit_alembic_version_column(migration_path: Path) -> None:
@@ -961,6 +973,20 @@ def test_pnl_settlements_migration_marks_constraint_names_as_final(
         "fk_settlements__correction_of_settlement_id__settlements",
     ]
     assert final_constraint_names == [f"final:{name}" for name in formatted_names]
+
+
+@pytest.mark.unit
+def test_risk_storage_migration_uses_expected_names() -> None:
+    migration = _load_migration(RISK_STORAGE_MIGRATION_PATH)
+
+    assert migration.SCHEMA_NAME == "pmrp_risk"
+    assert migration.RISK_LIMITS_TABLE_NAME == "risk_limits"
+    assert migration.RISK_DECISIONS_TABLE_NAME == "risk_decisions"
+    assert migration.RISK_BREACHES_TABLE_NAME == "risk_breaches"
+    assert migration.RISK_LIMITS_ACTIVE_SCOPE_INDEX_NAME == "ix_risk_limits__active_scope"
+    assert migration.RISK_DECISIONS_INTENT_INDEX_NAME == "ix_risk_decisions__intent"
+    assert migration.RISK_DECISIONS_STATUS_TIME_INDEX_NAME == "ix_risk_decisions__status_time"
+    assert migration.RISK_BREACHES_OPEN_SEVERITY_INDEX_NAME == ("ix_risk_breaches__open_severity")
 
 
 def _load_initial_migration() -> ModuleType:

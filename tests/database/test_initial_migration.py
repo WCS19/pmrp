@@ -40,7 +40,7 @@ def test_migrations_upgrade_downgrade_and_reupgrade_empty_database() -> None:
     command.downgrade(alembic_config, "base")
     command.upgrade(alembic_config, "head")
     assert asyncio.run(_migration_state()) == (
-        "0015_pnl_settlements",
+        "0016_risk_storage",
         LOGICAL_SCHEMAS,
         True,
     )
@@ -351,13 +351,41 @@ def test_migrations_upgrade_downgrade_and_reupgrade_empty_database() -> None:
         "1.000000000000000000",
     )
     asyncio.run(_assert_pnl_settlements_constraints())
+    assert asyncio.run(_risk_storage_state()) == (
+        True,
+        ("risk_limit_id",),
+        ("ix_risk_limits__active_scope",),
+        True,
+        True,
+        0,
+        "100.000000000000000000",
+        True,
+        ("evaluated_at", "risk_decision_id"),
+        True,
+        (
+            "ix_risk_decisions__intent",
+            "ix_risk_decisions__status_time",
+        ),
+        True,
+        "10.000000000000000000",
+        "0.420000000000000000",
+        True,
+        True,
+        ("breach_id",),
+        ("ix_risk_breaches__open_severity",),
+        True,
+        True,
+        "125.000000000000000000",
+        "100.000000000000000000",
+    )
+    asyncio.run(_assert_risk_storage_constraints())
 
     command.downgrade(alembic_config, "base")
     assert asyncio.run(_schemas()) == ()
 
     command.upgrade(alembic_config, "head")
     assert asyncio.run(_migration_state()) == (
-        "0015_pnl_settlements",
+        "0016_risk_storage",
         LOGICAL_SCHEMAS,
         True,
     )
@@ -4164,6 +4192,394 @@ async def _assert_pnl_settlements_constraints() -> None:
     )
 
 
+async def _risk_storage_state() -> tuple[
+    bool,
+    tuple[str, ...],
+    tuple[str, ...],
+    bool,
+    bool,
+    int,
+    str,
+    bool,
+    tuple[str, ...],
+    bool,
+    tuple[str, ...],
+    bool,
+    str,
+    str,
+    bool,
+    bool,
+    tuple[str, ...],
+    tuple[str, ...],
+    bool,
+    bool,
+    str,
+    str,
+]:
+    engine = create_database_engine(
+        database_config_from_environment(os.environ, fallback_url=None),
+    )
+    try:
+        async with engine.begin() as connection:
+            risk_limit_table_exists = await _table_exists(
+                connection,
+                schema_name="pmrp_risk",
+                table_name="risk_limits",
+            )
+            risk_limit_primary_key_columns = await _primary_key_columns(
+                connection,
+                "pmrp_risk.risk_limits",
+            )
+            risk_limit_index_names = await _index_names(
+                connection,
+                schema_name="pmrp_risk",
+                table_name="risk_limits",
+                expected_names=("ix_risk_limits__active_scope",),
+            )
+            risk_limit_active_index_partial = bool(
+                (
+                    await connection.execute(
+                        text(
+                            """
+                            SELECT indexdef LIKE '%WHERE (enabled = true)%'
+                            FROM pg_indexes
+                            WHERE schemaname = 'pmrp_risk'
+                              AND tablename = 'risk_limits'
+                              AND indexname = 'ix_risk_limits__active_scope'
+                            """
+                        )
+                    )
+                ).scalar_one()
+            )
+            risk_decision_table_exists = await _table_exists(
+                connection,
+                schema_name="pmrp_risk",
+                table_name="risk_decisions",
+            )
+            risk_decision_primary_key_columns = await _primary_key_columns(
+                connection,
+                "pmrp_risk.risk_decisions",
+            )
+            risk_decision_partitioned = await _partitioned_table_exists(
+                connection,
+                "pmrp_risk.risk_decisions",
+            )
+            risk_decision_index_names = await _index_names(
+                connection,
+                schema_name="pmrp_risk",
+                table_name="risk_decisions",
+                expected_names=(
+                    "ix_risk_decisions__intent",
+                    "ix_risk_decisions__status_time",
+                ),
+            )
+            risk_decision_status_index_descending = bool(
+                (
+                    await connection.execute(
+                        text(
+                            """
+                            SELECT indexdef LIKE '%evaluated_at DESC%'
+                            FROM pg_indexes
+                            WHERE schemaname = 'pmrp_risk'
+                              AND tablename = 'risk_decisions'
+                              AND indexname = 'ix_risk_decisions__status_time'
+                            """
+                        )
+                    )
+                ).scalar_one()
+            )
+            risk_breach_table_exists = await _table_exists(
+                connection,
+                schema_name="pmrp_risk",
+                table_name="risk_breaches",
+            )
+            risk_breach_primary_key_columns = await _primary_key_columns(
+                connection,
+                "pmrp_risk.risk_breaches",
+            )
+            risk_breach_index_names = await _index_names(
+                connection,
+                schema_name="pmrp_risk",
+                table_name="risk_breaches",
+                expected_names=("ix_risk_breaches__open_severity",),
+            )
+            risk_breach_open_index_partial = bool(
+                (
+                    await connection.execute(
+                        text(
+                            """
+                            SELECT indexdef LIKE '%WHERE (resolved_at IS NULL)%'
+                            FROM pg_indexes
+                            WHERE schemaname = 'pmrp_risk'
+                              AND tablename = 'risk_breaches'
+                              AND indexname = 'ix_risk_breaches__open_severity'
+                            """
+                        )
+                    )
+                ).scalar_one()
+            )
+            risk_breach_open_index_descending = bool(
+                (
+                    await connection.execute(
+                        text(
+                            """
+                            SELECT indexdef LIKE '%detected_at DESC%'
+                            FROM pg_indexes
+                            WHERE schemaname = 'pmrp_risk'
+                              AND tablename = 'risk_breaches'
+                              AND indexname = 'ix_risk_breaches__open_severity'
+                            """
+                        )
+                    )
+                ).scalar_one()
+            )
+
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO pmrp_risk.risk_limits (
+                        risk_limit_id,
+                        rule_id,
+                        rule_version,
+                        scope,
+                        scope_id,
+                        limit_type,
+                        limit_value,
+                        unit,
+                        effective_at,
+                        enabled,
+                        created_by
+                    )
+                    VALUES (
+                        'risk_limit_01j00000000000000000000001',
+                        'max_position',
+                        'v1',
+                        'account',
+                        'acct_01j00000000000000000000001',
+                        'quantity',
+                        100.000000000000000000,
+                        'contracts',
+                        '2026-07-29T12:18:00Z',
+                        true,
+                        'operator'
+                    )
+                    """
+                )
+            )
+            inserted_risk_limit = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT
+                            created_at IS NOT NULL,
+                            aggregate_version,
+                            limit_value
+                        FROM pmrp_risk.risk_limits
+                        WHERE risk_limit_id = 'risk_limit_01j00000000000000000000001'
+                        """
+                    )
+                )
+            ).one()
+
+            await _create_risk_decision_test_partition(connection)
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO pmrp_risk.risk_decisions (
+                        evaluated_at,
+                        risk_decision_id,
+                        intent_id,
+                        status,
+                        input_snapshot_id,
+                        approved_quantity,
+                        approved_limit_price,
+                        approval_expires_at,
+                        configuration_hash,
+                        correlation_id,
+                        rule_results,
+                        payload_hash
+                    )
+                    VALUES (
+                        '2026-07-29T12:18:00Z',
+                        'rdec_01j00000000000000000000001',
+                        'intent_01j00000000000000000000001',
+                        'approved',
+                        'risk_input_01j00000000000000000000001',
+                        10.000000000000000000,
+                        0.420000000000000000,
+                        '2026-07-29T12:19:00Z',
+                        'sha256:risk-config',
+                        'corr_01j00000000000000000000001',
+                        '[{"rule_id": "max_position", "passed": true}]'::jsonb,
+                        'sha256:risk-decision'
+                    )
+                    """
+                )
+            )
+            inserted_risk_decision = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT
+                            approved_quantity,
+                            approved_limit_price,
+                            rule_results @> '[{"rule_id": "max_position", "passed": true}]'::jsonb
+                        FROM pmrp_risk.risk_decisions
+                        WHERE risk_decision_id = 'rdec_01j00000000000000000000001'
+                        """
+                    )
+                )
+            ).one()
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO pmrp_risk.risk_breaches (
+                        breach_id,
+                        rule_id,
+                        rule_version,
+                        scope,
+                        scope_id,
+                        severity,
+                        detected_at,
+                        observed_value,
+                        limit_value,
+                        unit,
+                        action_taken,
+                        correlation_id
+                    )
+                    VALUES (
+                        'breach_01j00000000000000000000001',
+                        'max_position',
+                        'v1',
+                        'account',
+                        'acct_01j00000000000000000000001',
+                        'high',
+                        '2026-07-29T12:18:30Z',
+                        125.000000000000000000,
+                        100.000000000000000000,
+                        'contracts',
+                        'blocked',
+                        'corr_01j00000000000000000000001'
+                    )
+                    """
+                )
+            )
+            inserted_risk_breach = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT observed_value, limit_value
+                        FROM pmrp_risk.risk_breaches
+                        WHERE breach_id = 'breach_01j00000000000000000000001'
+                        """
+                    )
+                )
+            ).one()
+            return (
+                risk_limit_table_exists,
+                risk_limit_primary_key_columns,
+                risk_limit_index_names,
+                risk_limit_active_index_partial,
+                bool(inserted_risk_limit[0]),
+                int(inserted_risk_limit[1]),
+                _numeric_18_text(inserted_risk_limit[2]),
+                risk_decision_table_exists,
+                risk_decision_primary_key_columns,
+                risk_decision_partitioned,
+                risk_decision_index_names,
+                risk_decision_status_index_descending,
+                _numeric_18_text(inserted_risk_decision[0]),
+                _numeric_18_text(inserted_risk_decision[1]),
+                bool(inserted_risk_decision[2]),
+                risk_breach_table_exists,
+                risk_breach_primary_key_columns,
+                risk_breach_index_names,
+                risk_breach_open_index_partial,
+                risk_breach_open_index_descending,
+                _numeric_18_text(inserted_risk_breach[0]),
+                _numeric_18_text(inserted_risk_breach[1]),
+            )
+    finally:
+        await engine.dispose()
+
+
+async def _assert_risk_storage_constraints() -> None:
+    await _assert_integrity_error(
+        """
+        INSERT INTO pmrp_risk.risk_limits (
+            risk_limit_id,
+            rule_id,
+            rule_version,
+            scope,
+            limit_type,
+            unit,
+            effective_at,
+            enabled,
+            created_by
+        )
+        VALUES (
+            'risk_limit_01j00000000000000000000002',
+            'max_position',
+            'v1',
+            'account',
+            'quantity',
+            'contracts',
+            '2026-07-29T12:18:00Z',
+            true,
+            'operator'
+        )
+        """
+    )
+    await _assert_integrity_error(
+        """
+        INSERT INTO pmrp_risk.risk_decisions (
+            evaluated_at,
+            risk_decision_id,
+            intent_id,
+            status,
+            input_snapshot_id,
+            configuration_hash,
+            correlation_id,
+            rule_results,
+            payload_hash
+        )
+        VALUES (
+            '2026-07-29T12:18:00Z',
+            'rdec_01j00000000000000000000001',
+            'intent_01j00000000000000000000001',
+            'rejected',
+            'risk_input_01j00000000000000000000002',
+            'sha256:risk-config',
+            'corr_01j00000000000000000000001',
+            '[{"rule_id": "max_position", "passed": false}]'::jsonb,
+            'sha256:risk-decision-duplicate'
+        )
+        """
+    )
+    await _assert_integrity_error(
+        """
+        INSERT INTO pmrp_risk.risk_breaches (
+            breach_id,
+            rule_id,
+            rule_version,
+            scope,
+            severity,
+            detected_at,
+            correlation_id
+        )
+        VALUES (
+            'breach_01j00000000000000000000002',
+            'max_position',
+            'v1',
+            'account',
+            'high',
+            '2026-07-29T12:18:30Z',
+            'corr_01j00000000000000000000001'
+        )
+        """
+    )
+
+
 async def _create_raw_exchange_record_test_partition(connection: AsyncConnection) -> None:
     await connection.execute(
         text(
@@ -4230,6 +4646,18 @@ async def _create_fill_test_partition(connection: AsyncConnection) -> None:
             """
             CREATE TABLE IF NOT EXISTS pmrp_execution.fills_2026_07
             PARTITION OF pmrp_execution.fills
+            FOR VALUES FROM ('2026-07-01T00:00:00Z') TO ('2026-08-01T00:00:00Z')
+            """
+        )
+    )
+
+
+async def _create_risk_decision_test_partition(connection: AsyncConnection) -> None:
+    await connection.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS pmrp_risk.risk_decisions_2026_07
+            PARTITION OF pmrp_risk.risk_decisions
             FOR VALUES FROM ('2026-07-01T00:00:00Z') TO ('2026-08-01T00:00:00Z')
             """
         )
