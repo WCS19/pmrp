@@ -12,6 +12,9 @@ from sqlalchemy.schema import CreateSchema, DropSchema
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 INITIAL_MIGRATION_PATH = REPOSITORY_ROOT / "migrations/versions/0001_create_logical_schemas.py"
+SCHEMA_REGISTRY_MIGRATION_PATH = (
+    REPOSITORY_ROOT / "migrations/versions/0002_create_schema_registry.py"
+)
 EXPECTED_LOGICAL_SCHEMAS = (
     "pmrp_core",
     "pmrp_raw",
@@ -32,6 +35,16 @@ def test_initial_migration_revision_metadata_is_stable() -> None:
 
     assert migration.revision == "0001_create_logical_schemas"
     assert migration.down_revision is None
+    assert migration.branch_labels is None
+    assert migration.depends_on is None
+
+
+@pytest.mark.unit
+def test_schema_registry_migration_revision_metadata_is_stable() -> None:
+    migration = _load_migration(SCHEMA_REGISTRY_MIGRATION_PATH)
+
+    assert migration.revision == "0002_create_schema_registry"
+    assert migration.down_revision == "0001_create_logical_schemas"
     assert migration.branch_labels is None
     assert migration.depends_on is None
 
@@ -81,13 +94,26 @@ def test_initial_migration_downgrade_drops_schemas_in_reverse_without_cascade(
     assert "DROP EXTENSION IF EXISTS pgcrypto" not in executed
 
 
+@pytest.mark.unit
+def test_schema_registry_migration_uses_expected_names() -> None:
+    migration = _load_migration(SCHEMA_REGISTRY_MIGRATION_PATH)
+
+    assert migration.SCHEMA_NAME == "pmrp_core"
+    assert migration.TABLE_NAME == "schema_registry"
+    assert migration.CATEGORY_INDEX_NAME == "ix_schema_registry__category"
+
+
 def _load_initial_migration() -> ModuleType:
+    return _load_migration(INITIAL_MIGRATION_PATH)
+
+
+def _load_migration(path: Path) -> ModuleType:
     spec = importlib.util.spec_from_file_location(
-        "initial_logical_schema_migration",
-        INITIAL_MIGRATION_PATH,
+        path.stem,
+        path,
     )
-    if spec is None or spec.loader is None:
-        msg = "could not load initial Alembic migration"
+    if spec is None or spec.loader is None:  # pragma: no cover
+        msg = f"could not load Alembic migration: {path}"
         raise RuntimeError(msg)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
