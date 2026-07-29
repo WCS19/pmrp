@@ -15,6 +15,7 @@ from pmrp.storage.models.research_metadata import (
     StrategyDefinitionRow,
     StrategyInstanceRow,
 )
+from pmrp.storage.models.research_signals import FeatureSnapshotRow, SignalRow
 from pmrp.storage.models.schema_registry import SchemaRegistryRow
 
 __all__ = [
@@ -25,6 +26,7 @@ __all__ = [
     "EventIdRow",
     "ExchangeAccountRow",
     "ExchangeRow",
+    "FeatureSnapshotRow",
     "IdempotencyRecordRow",
     "MarketRow",
     "ModelArtifactRow",
@@ -34,6 +36,7 @@ __all__ = [
     "ProcessedEventRow",
     "RawExchangeRecordRow",
     "SchemaRegistryRow",
+    "SignalRow",
     "StorageBase",
     "StrategyConfigurationRow",
     "StrategyDefinitionRow",
