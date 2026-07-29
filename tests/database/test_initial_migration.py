@@ -39,7 +39,7 @@ def test_migrations_upgrade_downgrade_and_reupgrade_empty_database() -> None:
     command.downgrade(alembic_config, "base")
     command.upgrade(alembic_config, "head")
     assert asyncio.run(_migration_state()) == (
-        "0005_canonical_events",
+        "0006_processed_events_outbox",
         LOGICAL_SCHEMAS,
         True,
     )
@@ -99,13 +99,27 @@ def test_migrations_upgrade_downgrade_and_reupgrade_empty_database() -> None:
     )
     asyncio.run(_assert_event_id_unique_constraint())
     asyncio.run(_assert_canonical_event_schema_version_constraint())
+    assert asyncio.run(_event_processing_state()) == (
+        True,
+        ("consumer_name", "event_id"),
+        ("ix_processed_events__time",),
+        True,
+        ("outbox_id",),
+        ("uq_outbox_messages__event_id_topic",),
+        ("ix_outbox_messages__pending",),
+        "(published_at IS NULL)",
+        0,
+        True,
+        True,
+    )
+    asyncio.run(_assert_outbox_event_topic_unique_constraint())
 
     command.downgrade(alembic_config, "base")
     assert asyncio.run(_schemas()) == ()
 
     command.upgrade(alembic_config, "head")
     assert asyncio.run(_migration_state()) == (
-        "0005_canonical_events",
+        "0006_processed_events_outbox",
         LOGICAL_SCHEMAS,
         True,
     )
@@ -846,6 +860,186 @@ async def _assert_canonical_event_schema_version_constraint() -> None:
                                 'corr_01j00000000000000000000002',
                                 '{}'::jsonb,
                                 'sha256:invalid-event'
+                            )
+                            """
+                        )
+                    )
+            finally:
+                await transaction.rollback()
+    finally:
+        await engine.dispose()
+
+
+async def _event_processing_state() -> tuple[
+    bool,
+    tuple[str, ...],
+    tuple[str, ...],
+    bool,
+    tuple[str, ...],
+    tuple[str, ...],
+    tuple[str, ...],
+    str,
+    int,
+    bool,
+    bool,
+]:
+    engine = create_database_engine(
+        database_config_from_environment(os.environ, fallback_url=None),
+    )
+    try:
+        async with engine.begin() as connection:
+            processed_table_exists = await _table_exists(
+                connection,
+                schema_name="pmrp_event",
+                table_name="processed_events",
+            )
+            processed_primary_key_columns = await _primary_key_columns(
+                connection,
+                "pmrp_event.processed_events",
+            )
+            processed_index_names = tuple(
+                str(row[0])
+                for row in await connection.execute(
+                    text(
+                        """
+                        SELECT indexname
+                        FROM pg_indexes
+                        WHERE schemaname = 'pmrp_event'
+                          AND tablename = 'processed_events'
+                          AND indexname = 'ix_processed_events__time'
+                        ORDER BY indexname
+                        """
+                    )
+                )
+            )
+            outbox_table_exists = await _table_exists(
+                connection,
+                schema_name="pmrp_event",
+                table_name="outbox_messages",
+            )
+            outbox_primary_key_columns = await _primary_key_columns(
+                connection,
+                "pmrp_event.outbox_messages",
+            )
+            outbox_unique_constraint_names = tuple(
+                str(row[0])
+                for row in await connection.execute(
+                    text(
+                        """
+                        SELECT conname
+                        FROM pg_constraint
+                        WHERE conrelid = 'pmrp_event.outbox_messages'::regclass
+                          AND contype = 'u'
+                        ORDER BY conname
+                        """
+                    )
+                )
+            )
+            outbox_pending_index = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT
+                            idx.relname,
+                            pg_get_expr(i.indpred, i.indrelid)
+                        FROM pg_index i
+                        JOIN pg_class idx ON idx.oid = i.indexrelid
+                        WHERE i.indrelid = 'pmrp_event.outbox_messages'::regclass
+                          AND idx.relname = 'ix_outbox_messages__pending'
+                        """
+                    )
+                )
+            ).one()
+
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO pmrp_event.processed_events (
+                        consumer_name,
+                        event_id,
+                        processing_version,
+                        result_hash
+                    )
+                    VALUES (
+                        'research-indexer',
+                        'evt_01j00000000000000000000003',
+                        'v1',
+                        'sha256:result'
+                    )
+                    """
+                )
+            )
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO pmrp_event.outbox_messages (
+                        event_id,
+                        topic,
+                        partition_key,
+                        payload
+                    )
+                    VALUES (
+                        'evt_01j00000000000000000000003',
+                        'canonical-events',
+                        'mkt_01j00000000000000000000001',
+                        '{"ok": true}'::jsonb
+                    )
+                    """
+                )
+            )
+            inserted = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT
+                            publish_attempts,
+                            created_at IS NOT NULL,
+                            available_at IS NOT NULL
+                        FROM pmrp_event.outbox_messages
+                        WHERE event_id = 'evt_01j00000000000000000000003'
+                          AND topic = 'canonical-events'
+                        """
+                    )
+                )
+            ).one()
+            return (
+                processed_table_exists,
+                processed_primary_key_columns,
+                processed_index_names,
+                outbox_table_exists,
+                outbox_primary_key_columns,
+                outbox_unique_constraint_names,
+                (str(outbox_pending_index[0]),),
+                str(outbox_pending_index[1]),
+                int(inserted[0]),
+                bool(inserted[1]),
+                bool(inserted[2]),
+            )
+    finally:
+        await engine.dispose()
+
+
+async def _assert_outbox_event_topic_unique_constraint() -> None:
+    engine = create_database_engine(
+        database_config_from_environment(os.environ, fallback_url=None),
+    )
+    try:
+        async with engine.connect() as connection:
+            transaction = await connection.begin()
+            try:
+                with pytest.raises(IntegrityError):
+                    await connection.execute(
+                        text(
+                            """
+                            INSERT INTO pmrp_event.outbox_messages (
+                                event_id,
+                                topic,
+                                payload
+                            )
+                            VALUES (
+                                'evt_01j00000000000000000000003',
+                                'canonical-events',
+                                '{}'::jsonb
                             )
                             """
                         )
