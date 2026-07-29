@@ -40,7 +40,7 @@ def test_migrations_upgrade_downgrade_and_reupgrade_empty_database() -> None:
     command.downgrade(alembic_config, "base")
     command.upgrade(alembic_config, "head")
     assert asyncio.run(_migration_state()) == (
-        "0013_fills_registry",
+        "0014_portfolio_storage",
         LOGICAL_SCHEMAS,
         True,
     )
@@ -296,13 +296,46 @@ def test_migrations_upgrade_downgrade_and_reupgrade_empty_database() -> None:
         True,
     )
     asyncio.run(_assert_fills_registry_constraints())
+    assert asyncio.run(_portfolio_storage_state()) == (
+        True,
+        ("position_id",),
+        ("uq_positions__exchange_account_contract",),
+        ("ix_positions__account_market",),
+        0,
+        "5.000000000000000000",
+        "0.420000000000000000",
+        "0.000000000000000000",
+        "0.000000000000000000",
+        "0.000000000000000000",
+        "0.000000000000000000",
+        True,
+        ("balance_id",),
+        ("uq_cash_balances__exchange_account_currency",),
+        ("ck_cash_balances__balance_identity",),
+        0,
+        "990.000000000000000000",
+        "10.000000000000000000",
+        "1000.000000000000000000",
+        True,
+        ("journal_entry_id",),
+        ("uq_journal_entries__source_event_id",),
+        ("ix_journal_entries__reference",),
+        True,
+        True,
+        ("journal_entry_id", "line_number"),
+        ("fk_journal_lines__journal_entry_id__journal_entries",),
+        ("ix_journal_lines__account_currency",),
+        "2.100000000000000000",
+        "-2.100000000000000000",
+    )
+    asyncio.run(_assert_portfolio_storage_constraints())
 
     command.downgrade(alembic_config, "base")
     assert asyncio.run(_schemas()) == ()
 
     command.upgrade(alembic_config, "head")
     assert asyncio.run(_migration_state()) == (
-        "0013_fills_registry",
+        "0014_portfolio_storage",
         LOGICAL_SCHEMAS,
         True,
     )
@@ -3444,6 +3477,414 @@ async def _assert_fills_registry_constraints() -> None:
             'exchange-fill-duplicate',
             'fill_01j00000000000000000000001',
             '2026-07-29T12:12:00Z'
+        )
+        """
+    )
+
+
+async def _portfolio_storage_state() -> tuple[
+    bool,
+    tuple[str, ...],
+    tuple[str, ...],
+    tuple[str, ...],
+    int,
+    str,
+    str,
+    str,
+    str,
+    str,
+    str,
+    bool,
+    tuple[str, ...],
+    tuple[str, ...],
+    tuple[str, ...],
+    int,
+    str,
+    str,
+    str,
+    bool,
+    tuple[str, ...],
+    tuple[str, ...],
+    tuple[str, ...],
+    bool,
+    bool,
+    tuple[str, ...],
+    tuple[str, ...],
+    tuple[str, ...],
+    str,
+    str,
+]:
+    engine = create_database_engine(
+        database_config_from_environment(os.environ, fallback_url=None),
+    )
+    try:
+        async with engine.begin() as connection:
+            position_table_exists = await _table_exists(
+                connection,
+                schema_name="pmrp_portfolio",
+                table_name="positions",
+            )
+            position_primary_key_columns = await _primary_key_columns(
+                connection,
+                "pmrp_portfolio.positions",
+            )
+            position_unique_constraint_names = await _constraint_names(
+                connection,
+                "pmrp_portfolio.positions",
+                constraint_type="u",
+            )
+            position_index_names = await _index_names(
+                connection,
+                schema_name="pmrp_portfolio",
+                table_name="positions",
+                expected_names=("ix_positions__account_market",),
+            )
+            cash_balance_table_exists = await _table_exists(
+                connection,
+                schema_name="pmrp_portfolio",
+                table_name="cash_balances",
+            )
+            cash_balance_primary_key_columns = await _primary_key_columns(
+                connection,
+                "pmrp_portfolio.cash_balances",
+            )
+            cash_balance_unique_constraint_names = await _constraint_names(
+                connection,
+                "pmrp_portfolio.cash_balances",
+                constraint_type="u",
+            )
+            cash_balance_check_constraint_names = await _check_constraint_names(
+                connection,
+                "pmrp_portfolio.cash_balances",
+            )
+            journal_entry_table_exists = await _table_exists(
+                connection,
+                schema_name="pmrp_portfolio",
+                table_name="journal_entries",
+            )
+            journal_entry_primary_key_columns = await _primary_key_columns(
+                connection,
+                "pmrp_portfolio.journal_entries",
+            )
+            journal_entry_unique_constraint_names = await _constraint_names(
+                connection,
+                "pmrp_portfolio.journal_entries",
+                constraint_type="u",
+            )
+            journal_entry_index_names = await _index_names(
+                connection,
+                schema_name="pmrp_portfolio",
+                table_name="journal_entries",
+                expected_names=("ix_journal_entries__reference",),
+            )
+            journal_line_table_exists = await _table_exists(
+                connection,
+                schema_name="pmrp_portfolio",
+                table_name="journal_lines",
+            )
+            journal_line_primary_key_columns = await _primary_key_columns(
+                connection,
+                "pmrp_portfolio.journal_lines",
+            )
+            journal_line_foreign_key_names = await _constraint_names(
+                connection,
+                "pmrp_portfolio.journal_lines",
+                constraint_type="f",
+            )
+            journal_line_index_names = await _index_names(
+                connection,
+                schema_name="pmrp_portfolio",
+                table_name="journal_lines",
+                expected_names=("ix_journal_lines__account_currency",),
+            )
+
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO pmrp_portfolio.positions (
+                        position_id,
+                        exchange,
+                        account_id,
+                        market_id,
+                        contract_id,
+                        outcome_id,
+                        quantity,
+                        average_entry_price,
+                        currency,
+                        opened_at,
+                        last_updated_at
+                    )
+                    VALUES (
+                        'pos_01j00000000000000000000001',
+                        'kalshi',
+                        'acct_01j00000000000000000000001',
+                        'mkt_01j00000000000000000000001',
+                        'ctr_01j00000000000000000000001',
+                        'out_01j00000000000000000000001',
+                        5.000000000000000000,
+                        0.420000000000000000,
+                        'USD',
+                        '2026-07-29T12:13:00Z',
+                        '2026-07-29T12:13:00Z'
+                    )
+                    """
+                )
+            )
+            inserted_position = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT
+                            aggregate_version,
+                            quantity,
+                            average_entry_price,
+                            realized_pnl_amount,
+                            unrealized_pnl_amount,
+                            fees_paid_amount,
+                            rebates_received_amount
+                        FROM pmrp_portfolio.positions
+                        WHERE position_id = 'pos_01j00000000000000000000001'
+                        """
+                    )
+                )
+            ).one()
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO pmrp_portfolio.cash_balances (
+                        balance_id,
+                        exchange,
+                        account_id,
+                        currency,
+                        available,
+                        reserved,
+                        total,
+                        captured_at
+                    )
+                    VALUES (
+                        'bal_01j00000000000000000000001',
+                        'kalshi',
+                        'acct_01j00000000000000000000001',
+                        'USD',
+                        990.000000000000000000,
+                        10.000000000000000000,
+                        1000.000000000000000000,
+                        '2026-07-29T12:13:00Z'
+                    )
+                    """
+                )
+            )
+            inserted_cash_balance = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT aggregate_version, available, reserved, total
+                        FROM pmrp_portfolio.cash_balances
+                        WHERE balance_id = 'bal_01j00000000000000000000001'
+                        """
+                    )
+                )
+            ).one()
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO pmrp_portfolio.journal_entries (
+                        journal_entry_id,
+                        occurred_at,
+                        source_event_id,
+                        reference_type,
+                        reference_id,
+                        description
+                    )
+                    VALUES (
+                        'journal_01j00000000000000000000001',
+                        '2026-07-29T12:13:00Z',
+                        'evt_01j00000000000000000000008',
+                        'fill',
+                        'fill_01j00000000000000000000001',
+                        'Record fill accounting lines'
+                    )
+                    """
+                )
+            )
+            inserted_journal_entry_created_at = bool(
+                (
+                    await connection.execute(
+                        text(
+                            """
+                            SELECT created_at IS NOT NULL
+                            FROM pmrp_portfolio.journal_entries
+                            WHERE journal_entry_id = 'journal_01j00000000000000000000001'
+                            """
+                        )
+                    )
+                ).scalar_one()
+            )
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO pmrp_portfolio.journal_lines (
+                        journal_entry_id,
+                        line_number,
+                        account_code,
+                        amount,
+                        currency,
+                        description
+                    )
+                    VALUES
+                    (
+                        'journal_01j00000000000000000000001',
+                        1,
+                        'contracts',
+                        2.100000000000000000,
+                        'USD',
+                        'Increase contract asset'
+                    ),
+                    (
+                        'journal_01j00000000000000000000001',
+                        2,
+                        'cash',
+                        -2.100000000000000000,
+                        'USD',
+                        'Decrease cash'
+                    )
+                    """
+                )
+            )
+            inserted_journal_lines = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT amount
+                        FROM pmrp_portfolio.journal_lines
+                        WHERE journal_entry_id = 'journal_01j00000000000000000000001'
+                        ORDER BY line_number
+                        """
+                    )
+                )
+            ).all()
+            return (
+                position_table_exists,
+                position_primary_key_columns,
+                position_unique_constraint_names,
+                position_index_names,
+                int(inserted_position[0]),
+                _numeric_18_text(inserted_position[1]),
+                _numeric_18_text(inserted_position[2]),
+                _numeric_18_text(inserted_position[3]),
+                _numeric_18_text(inserted_position[4]),
+                _numeric_18_text(inserted_position[5]),
+                _numeric_18_text(inserted_position[6]),
+                cash_balance_table_exists,
+                cash_balance_primary_key_columns,
+                cash_balance_unique_constraint_names,
+                cash_balance_check_constraint_names,
+                int(inserted_cash_balance[0]),
+                _numeric_18_text(inserted_cash_balance[1]),
+                _numeric_18_text(inserted_cash_balance[2]),
+                _numeric_18_text(inserted_cash_balance[3]),
+                journal_entry_table_exists,
+                journal_entry_primary_key_columns,
+                journal_entry_unique_constraint_names,
+                journal_entry_index_names,
+                inserted_journal_entry_created_at,
+                journal_line_table_exists,
+                journal_line_primary_key_columns,
+                journal_line_foreign_key_names,
+                journal_line_index_names,
+                _numeric_18_text(inserted_journal_lines[0][0]),
+                _numeric_18_text(inserted_journal_lines[1][0]),
+            )
+    finally:
+        await engine.dispose()
+
+
+async def _assert_portfolio_storage_constraints() -> None:
+    await _assert_integrity_error(
+        """
+        INSERT INTO pmrp_portfolio.positions (
+            position_id,
+            exchange,
+            account_id,
+            market_id,
+            contract_id,
+            outcome_id,
+            quantity,
+            currency,
+            last_updated_at
+        )
+        VALUES (
+            'pos_01j00000000000000000000002',
+            'kalshi',
+            'acct_01j00000000000000000000001',
+            'mkt_01j00000000000000000000001',
+            'ctr_01j00000000000000000000001',
+            'out_01j00000000000000000000001',
+            1.000000000000000000,
+            'USD',
+            '2026-07-29T12:14:00Z'
+        )
+        """
+    )
+    await _assert_integrity_error(
+        """
+        INSERT INTO pmrp_portfolio.cash_balances (
+            balance_id,
+            exchange,
+            account_id,
+            currency,
+            available,
+            reserved,
+            total,
+            captured_at
+        )
+        VALUES (
+            'bal_01j00000000000000000000002',
+            'kalshi',
+            'acct_01j00000000000000000000002',
+            'USD',
+            5.000000000000000000,
+            2.000000000000000000,
+            10.000000000000000000,
+            '2026-07-29T12:14:00Z'
+        )
+        """
+    )
+    await _assert_integrity_error(
+        """
+        INSERT INTO pmrp_portfolio.journal_entries (
+            journal_entry_id,
+            occurred_at,
+            source_event_id,
+            reference_type,
+            reference_id,
+            description
+        )
+        VALUES (
+            'journal_01j00000000000000000000002',
+            '2026-07-29T12:14:00Z',
+            'evt_01j00000000000000000000008',
+            'fill',
+            'fill_01j00000000000000000000001',
+            'Duplicate event journal'
+        )
+        """
+    )
+    await _assert_integrity_error(
+        """
+        INSERT INTO pmrp_portfolio.journal_lines (
+            journal_entry_id,
+            line_number,
+            account_code,
+            amount,
+            currency
+        )
+        VALUES (
+            'journal_missing',
+            1,
+            'cash',
+            1.000000000000000000,
+            'USD'
         )
         """
     )
