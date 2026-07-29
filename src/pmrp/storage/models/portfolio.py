@@ -10,13 +10,16 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     Numeric,
     Text,
     UniqueConstraint,
+    desc,
     text,
 )
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column
 
 from pmrp.storage.models.base import StorageBase
@@ -150,3 +153,71 @@ class JournalLineRow(StorageBase):
     amount: Mapped[Decimal] = mapped_column(Numeric(38, 18), nullable=False)
     currency: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
+
+
+class PnlAttributionRow(StorageBase):
+    """Versioned PnL components for reporting and research."""
+
+    __tablename__ = "pnl_attributions"
+    __table_args__ = (
+        Index("ix_pnl_attributions__strategy_period", "strategy_id", "starts_at", "ends_at"),
+        {"schema": "pmrp_portfolio"},
+    )
+
+    attribution_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    strategy_id: Mapped[str | None] = mapped_column(Text)
+    market_id: Mapped[str | None] = mapped_column(Text)
+    exchange: Mapped[str | None] = mapped_column(Text)
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    currency: Mapped[str] = mapped_column(Text, nullable=False)
+    realized_trading_pnl: Mapped[Decimal] = mapped_column(Numeric(38, 18), nullable=False)
+    unrealized_pnl_change: Mapped[Decimal] = mapped_column(Numeric(38, 18), nullable=False)
+    fees: Mapped[Decimal] = mapped_column(Numeric(38, 18), nullable=False)
+    rebates: Mapped[Decimal] = mapped_column(Numeric(38, 18), nullable=False)
+    slippage: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
+    settlement_pnl: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
+    total_pnl: Mapped[Decimal] = mapped_column(Numeric(38, 18), nullable=False)
+    calculation_version: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+
+
+class SettlementRow(StorageBase):
+    """Canonical settlement lifecycle and correction history row."""
+
+    __tablename__ = "settlements"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["correction_of_settlement_id"],
+            ["pmrp_portfolio.settlements.settlement_id"],
+            name="fk_settlements__correction_of_settlement_id__settlements",
+        ),
+        Index("ix_settlements__market_created", "market_id", desc("created_at")),
+        {"schema": "pmrp_portfolio"},
+    )
+
+    settlement_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    market_id: Mapped[str] = mapped_column(Text, nullable=False)
+    exchange: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    winning_outcome_ids: Mapped[list[str]] = mapped_column(
+        ARRAY(Text),
+        nullable=False,
+        server_default=text("'{}'::text[]"),
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finalized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    settled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    payout_per_unit: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    source_reference: Mapped[str | None] = mapped_column(Text)
+    correction_of_settlement_id: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )

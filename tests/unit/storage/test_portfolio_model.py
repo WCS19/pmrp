@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import pytest
 from sqlalchemy import Numeric, Table
+from sqlalchemy.dialects import postgresql
 
 from pmrp.storage.models import (
     CashBalanceRow,
     JournalEntryRow,
     JournalLineRow,
+    PnlAttributionRow,
     PositionRow,
+    SettlementRow,
     StorageBase,
 )
 
@@ -167,6 +170,105 @@ def test_portfolio_numeric_columns_use_exact_database_scale(
 
 
 @pytest.mark.unit
+def test_pnl_attribution_row_mapping_matches_database_spec() -> None:
+    table = PnlAttributionRow.__table__
+
+    assert table.schema == "pmrp_portfolio"
+    assert table.name == "pnl_attributions"
+    assert [column.name for column in table.primary_key.columns] == ["attribution_id"]
+    assert set(table.columns.keys()) == {
+        "attribution_id",
+        "strategy_id",
+        "market_id",
+        "exchange",
+        "starts_at",
+        "ends_at",
+        "currency",
+        "realized_trading_pnl",
+        "unrealized_pnl_change",
+        "fees",
+        "rebates",
+        "slippage",
+        "settlement_pnl",
+        "total_pnl",
+        "calculation_version",
+        "created_at",
+    }
+
+
+@pytest.mark.unit
+def test_pnl_attribution_indexes_match_database_spec() -> None:
+    assert {"ix_pnl_attributions__strategy_period"} <= {
+        index.name for index in PnlAttributionRow.__table__.indexes
+    }
+
+
+@pytest.mark.unit
+def test_settlement_row_mapping_matches_database_spec() -> None:
+    table = SettlementRow.__table__
+
+    assert table.schema == "pmrp_portfolio"
+    assert table.name == "settlements"
+    assert [column.name for column in table.primary_key.columns] == ["settlement_id"]
+    assert set(table.columns.keys()) == {
+        "settlement_id",
+        "market_id",
+        "exchange",
+        "status",
+        "winning_outcome_ids",
+        "resolved_at",
+        "finalized_at",
+        "settled_at",
+        "payout_per_unit",
+        "source",
+        "source_reference",
+        "correction_of_settlement_id",
+        "created_at",
+    }
+
+
+@pytest.mark.unit
+def test_settlement_constraints_and_indexes_match_database_spec() -> None:
+    table = SettlementRow.__table__
+    market_created_index = next(
+        index for index in table.indexes if index.name == "ix_settlements__market_created"
+    )
+
+    assert {"fk_settlements__correction_of_settlement_id__settlements"} <= {
+        constraint.name for constraint in table.constraints
+    }
+    assert {"ix_settlements__market_created"} <= {index.name for index in table.indexes}
+    assert str(market_created_index.expressions[1].compile(dialect=postgresql.dialect())) == (
+        "created_at DESC"
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("table", "column_name"),
+    [
+        (PnlAttributionRow.__table__, "realized_trading_pnl"),
+        (PnlAttributionRow.__table__, "unrealized_pnl_change"),
+        (PnlAttributionRow.__table__, "fees"),
+        (PnlAttributionRow.__table__, "rebates"),
+        (PnlAttributionRow.__table__, "slippage"),
+        (PnlAttributionRow.__table__, "settlement_pnl"),
+        (PnlAttributionRow.__table__, "total_pnl"),
+        (SettlementRow.__table__, "payout_per_unit"),
+    ],
+)
+def test_pnl_settlement_numeric_columns_use_exact_database_scale(
+    table: Table,
+    column_name: str,
+) -> None:
+    column = table.columns[column_name]
+
+    assert isinstance(column.type, Numeric)
+    assert column.type.precision == 38
+    assert column.type.scale == 18
+
+
+@pytest.mark.unit
 def test_portfolio_rows_are_registered_in_storage_metadata() -> None:
     assert StorageBase.metadata.tables["pmrp_portfolio.positions"] is PositionRow.__table__
     assert StorageBase.metadata.tables["pmrp_portfolio.cash_balances"] is CashBalanceRow.__table__
@@ -174,3 +276,8 @@ def test_portfolio_rows_are_registered_in_storage_metadata() -> None:
         StorageBase.metadata.tables["pmrp_portfolio.journal_entries"] is JournalEntryRow.__table__
     )
     assert StorageBase.metadata.tables["pmrp_portfolio.journal_lines"] is JournalLineRow.__table__
+    assert (
+        StorageBase.metadata.tables["pmrp_portfolio.pnl_attributions"]
+        is PnlAttributionRow.__table__
+    )
+    assert StorageBase.metadata.tables["pmrp_portfolio.settlements"] is SettlementRow.__table__

@@ -40,7 +40,7 @@ def test_migrations_upgrade_downgrade_and_reupgrade_empty_database() -> None:
     command.downgrade(alembic_config, "base")
     command.upgrade(alembic_config, "head")
     assert asyncio.run(_migration_state()) == (
-        "0014_portfolio_storage",
+        "0015_pnl_settlements",
         LOGICAL_SCHEMAS,
         True,
     )
@@ -329,13 +329,35 @@ def test_migrations_upgrade_downgrade_and_reupgrade_empty_database() -> None:
         "-2.100000000000000000",
     )
     asyncio.run(_assert_portfolio_storage_constraints())
+    assert asyncio.run(_pnl_settlements_state()) == (
+        True,
+        ("attribution_id",),
+        ("ix_pnl_attributions__strategy_period",),
+        "1.250000000000000000",
+        "0.100000000000000000",
+        "0.010000000000000000",
+        "0.005000000000000000",
+        "0.020000000000000000",
+        "0.500000000000000000",
+        "1.825000000000000000",
+        True,
+        True,
+        ("settlement_id",),
+        ("fk_settlements__correction_of_settlement_id__settlements",),
+        ("ix_settlements__market_created",),
+        True,
+        ("out_01j00000000000000000000001",),
+        True,
+        "1.000000000000000000",
+    )
+    asyncio.run(_assert_pnl_settlements_constraints())
 
     command.downgrade(alembic_config, "base")
     assert asyncio.run(_schemas()) == ()
 
     command.upgrade(alembic_config, "head")
     assert asyncio.run(_migration_state()) == (
-        "0014_portfolio_storage",
+        "0015_pnl_settlements",
         LOGICAL_SCHEMAS,
         True,
     )
@@ -3885,6 +3907,258 @@ async def _assert_portfolio_storage_constraints() -> None:
             'cash',
             1.000000000000000000,
             'USD'
+        )
+        """
+    )
+
+
+async def _pnl_settlements_state() -> tuple[
+    bool,
+    tuple[str, ...],
+    tuple[str, ...],
+    str,
+    str,
+    str,
+    str,
+    str,
+    str,
+    str,
+    bool,
+    bool,
+    tuple[str, ...],
+    tuple[str, ...],
+    tuple[str, ...],
+    bool,
+    tuple[str, ...],
+    bool,
+    str,
+]:
+    engine = create_database_engine(
+        database_config_from_environment(os.environ, fallback_url=None),
+    )
+    try:
+        async with engine.begin() as connection:
+            pnl_attribution_table_exists = await _table_exists(
+                connection,
+                schema_name="pmrp_portfolio",
+                table_name="pnl_attributions",
+            )
+            pnl_attribution_primary_key_columns = await _primary_key_columns(
+                connection,
+                "pmrp_portfolio.pnl_attributions",
+            )
+            pnl_attribution_index_names = await _index_names(
+                connection,
+                schema_name="pmrp_portfolio",
+                table_name="pnl_attributions",
+                expected_names=("ix_pnl_attributions__strategy_period",),
+            )
+            settlement_table_exists = await _table_exists(
+                connection,
+                schema_name="pmrp_portfolio",
+                table_name="settlements",
+            )
+            settlement_primary_key_columns = await _primary_key_columns(
+                connection,
+                "pmrp_portfolio.settlements",
+            )
+            settlement_foreign_key_names = await _constraint_names(
+                connection,
+                "pmrp_portfolio.settlements",
+                constraint_type="f",
+            )
+            settlement_index_names = await _index_names(
+                connection,
+                schema_name="pmrp_portfolio",
+                table_name="settlements",
+                expected_names=("ix_settlements__market_created",),
+            )
+            settlement_market_index_descending = bool(
+                (
+                    await connection.execute(
+                        text(
+                            """
+                            SELECT indexdef LIKE '%created_at DESC%'
+                            FROM pg_indexes
+                            WHERE schemaname = 'pmrp_portfolio'
+                              AND tablename = 'settlements'
+                              AND indexname = 'ix_settlements__market_created'
+                            """
+                        )
+                    )
+                ).scalar_one()
+            )
+
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO pmrp_portfolio.pnl_attributions (
+                        attribution_id,
+                        strategy_id,
+                        market_id,
+                        exchange,
+                        starts_at,
+                        ends_at,
+                        currency,
+                        realized_trading_pnl,
+                        unrealized_pnl_change,
+                        fees,
+                        rebates,
+                        slippage,
+                        settlement_pnl,
+                        total_pnl,
+                        calculation_version
+                    )
+                    VALUES (
+                        'pnl_01j00000000000000000000001',
+                        'strat_fed_value_v1',
+                        'mkt_01j00000000000000000000001',
+                        'kalshi',
+                        '2026-07-29T00:00:00Z',
+                        '2026-07-30T00:00:00Z',
+                        'USD',
+                        1.250000000000000000,
+                        0.100000000000000000,
+                        0.010000000000000000,
+                        0.005000000000000000,
+                        0.020000000000000000,
+                        0.500000000000000000,
+                        1.825000000000000000,
+                        'weighted-average-v1'
+                    )
+                    """
+                )
+            )
+            inserted_pnl_attribution = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT
+                            realized_trading_pnl,
+                            unrealized_pnl_change,
+                            fees,
+                            rebates,
+                            slippage,
+                            settlement_pnl,
+                            total_pnl,
+                            created_at IS NOT NULL
+                        FROM pmrp_portfolio.pnl_attributions
+                        WHERE attribution_id = 'pnl_01j00000000000000000000001'
+                        """
+                    )
+                )
+            ).one()
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO pmrp_portfolio.settlements (
+                        settlement_id,
+                        market_id,
+                        exchange,
+                        status,
+                        source
+                    )
+                    VALUES (
+                        'settle_01j00000000000000000000001',
+                        'mkt_01j00000000000000000000001',
+                        'kalshi',
+                        'pending',
+                        'exchange'
+                    )
+                    """
+                )
+            )
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO pmrp_portfolio.settlements (
+                        settlement_id,
+                        market_id,
+                        exchange,
+                        status,
+                        winning_outcome_ids,
+                        resolved_at,
+                        finalized_at,
+                        settled_at,
+                        payout_per_unit,
+                        source,
+                        source_reference,
+                        correction_of_settlement_id
+                    )
+                    VALUES (
+                        'settle_01j00000000000000000000002',
+                        'mkt_01j00000000000000000000001',
+                        'kalshi',
+                        'finalized',
+                        ARRAY['out_01j00000000000000000000001']::text[],
+                        '2026-07-29T12:15:00Z',
+                        '2026-07-29T12:16:00Z',
+                        '2026-07-29T12:17:00Z',
+                        1.000000000000000000,
+                        'operator',
+                        'manual-correction-1',
+                        'settle_01j00000000000000000000001'
+                    )
+                    """
+                )
+            )
+            inserted_settlement = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT
+                            winning_outcome_ids,
+                            created_at IS NOT NULL,
+                            payout_per_unit
+                        FROM pmrp_portfolio.settlements
+                        WHERE settlement_id = 'settle_01j00000000000000000000002'
+                        """
+                    )
+                )
+            ).one()
+            return (
+                pnl_attribution_table_exists,
+                pnl_attribution_primary_key_columns,
+                pnl_attribution_index_names,
+                _numeric_18_text(inserted_pnl_attribution[0]),
+                _numeric_18_text(inserted_pnl_attribution[1]),
+                _numeric_18_text(inserted_pnl_attribution[2]),
+                _numeric_18_text(inserted_pnl_attribution[3]),
+                _numeric_18_text(inserted_pnl_attribution[4]),
+                _numeric_18_text(inserted_pnl_attribution[5]),
+                _numeric_18_text(inserted_pnl_attribution[6]),
+                bool(inserted_pnl_attribution[7]),
+                settlement_table_exists,
+                settlement_primary_key_columns,
+                settlement_foreign_key_names,
+                settlement_index_names,
+                settlement_market_index_descending,
+                tuple(str(outcome_id) for outcome_id in inserted_settlement[0]),
+                bool(inserted_settlement[1]),
+                _numeric_18_text(inserted_settlement[2]),
+            )
+    finally:
+        await engine.dispose()
+
+
+async def _assert_pnl_settlements_constraints() -> None:
+    await _assert_integrity_error(
+        """
+        INSERT INTO pmrp_portfolio.settlements (
+            settlement_id,
+            market_id,
+            exchange,
+            status,
+            source,
+            correction_of_settlement_id
+        )
+        VALUES (
+            'settle_01j00000000000000000000003',
+            'mkt_01j00000000000000000000001',
+            'kalshi',
+            'corrected',
+            'operator',
+            'settle_missing'
         )
         """
     )

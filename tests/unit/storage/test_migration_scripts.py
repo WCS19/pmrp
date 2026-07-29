@@ -42,6 +42,7 @@ SIGNALS_FEATURES_MIGRATION_PATH = REPOSITORY_ROOT / "migrations/versions/0011_si
 ORDER_STORAGE_MIGRATION_PATH = REPOSITORY_ROOT / "migrations/versions/0012_order_storage.py"
 FILLS_REGISTRY_MIGRATION_PATH = REPOSITORY_ROOT / "migrations/versions/0013_fills_registry.py"
 PORTFOLIO_STORAGE_MIGRATION_PATH = REPOSITORY_ROOT / "migrations/versions/0014_portfolio_storage.py"
+PNL_SETTLEMENTS_MIGRATION_PATH = REPOSITORY_ROOT / "migrations/versions/0015_pnl_settlements.py"
 MAX_ALEMBIC_REVISION_ID_LENGTH = 32
 EXPECTED_LOGICAL_SCHEMAS = (
     "pmrp_core",
@@ -198,6 +199,16 @@ def test_portfolio_storage_migration_revision_metadata_is_stable() -> None:
 
 
 @pytest.mark.unit
+def test_pnl_settlements_migration_revision_metadata_is_stable() -> None:
+    migration = _load_migration(PNL_SETTLEMENTS_MIGRATION_PATH)
+
+    assert migration.revision == "0015_pnl_settlements"
+    assert migration.down_revision == "0014_portfolio_storage"
+    assert migration.branch_labels is None
+    assert migration.depends_on is None
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "migration_path",
     [
@@ -215,6 +226,7 @@ def test_portfolio_storage_migration_revision_metadata_is_stable() -> None:
         ORDER_STORAGE_MIGRATION_PATH,
         FILLS_REGISTRY_MIGRATION_PATH,
         PORTFOLIO_STORAGE_MIGRATION_PATH,
+        PNL_SETTLEMENTS_MIGRATION_PATH,
     ],
 )
 def test_migration_revision_ids_fit_alembic_version_column(migration_path: Path) -> None:
@@ -897,6 +909,56 @@ def test_portfolio_storage_migration_marks_constraint_names_as_final(
         "ck_cash_balances__balance_identity",
         "uq_journal_entries__source_event_id",
         "fk_journal_lines__journal_entry_id__journal_entries",
+    ]
+    assert final_constraint_names == [f"final:{name}" for name in formatted_names]
+
+
+@pytest.mark.unit
+def test_pnl_settlements_migration_uses_expected_names() -> None:
+    migration = _load_migration(PNL_SETTLEMENTS_MIGRATION_PATH)
+
+    assert migration.SCHEMA_NAME == "pmrp_portfolio"
+    assert migration.PNL_ATTRIBUTIONS_TABLE_NAME == "pnl_attributions"
+    assert migration.SETTLEMENTS_TABLE_NAME == "settlements"
+    assert (
+        migration.PNL_ATTRIBUTIONS_STRATEGY_PERIOD_INDEX_NAME
+        == "ix_pnl_attributions__strategy_period"
+    )
+    assert migration.SETTLEMENTS_MARKET_CREATED_INDEX_NAME == "ix_settlements__market_created"
+    assert (
+        migration.SETTLEMENTS_CORRECTION_FOREIGN_KEY_NAME
+        == "fk_settlements__correction_of_settlement_id__settlements"
+    )
+
+
+@pytest.mark.unit
+def test_pnl_settlements_migration_marks_constraint_names_as_final(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    migration = _load_migration(PNL_SETTLEMENTS_MIGRATION_PATH)
+    formatted_names: list[str] = []
+    created_table_arguments: list[object] = []
+
+    def fake_format_name(name: str) -> str:
+        formatted_names.append(name)
+        return f"final:{name}"
+
+    def fake_create_table(*arguments: object, **_kwargs: object) -> None:
+        created_table_arguments.extend(arguments)
+
+    monkeypatch.setattr(migration.op, "f", fake_format_name)
+    monkeypatch.setattr(migration.op, "create_table", fake_create_table)
+    monkeypatch.setattr(migration.op, "create_index", lambda *_args, **_kwargs: None)
+
+    migration.upgrade()
+
+    final_constraint_names = [
+        constraint.name
+        for constraint in created_table_arguments
+        if isinstance(constraint, ForeignKeyConstraint)
+    ]
+    assert formatted_names == [
+        "fk_settlements__correction_of_settlement_id__settlements",
     ]
     assert final_constraint_names == [f"final:{name}" for name in formatted_names]
 
