@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 from sqlalchemy import Numeric, Table
+from sqlalchemy.dialects import postgresql
 
 from pmrp.storage.models import (
     CashBalanceRow,
@@ -229,11 +230,17 @@ def test_settlement_row_mapping_matches_database_spec() -> None:
 @pytest.mark.unit
 def test_settlement_constraints_and_indexes_match_database_spec() -> None:
     table = SettlementRow.__table__
+    market_created_index = next(
+        index for index in table.indexes if index.name == "ix_settlements__market_created"
+    )
 
     assert {"fk_settlements__correction_of_settlement_id__settlements"} <= {
         constraint.name for constraint in table.constraints
     }
     assert {"ix_settlements__market_created"} <= {index.name for index in table.indexes}
+    assert str(market_created_index.expressions[1].compile(dialect=postgresql.dialect())) == (
+        "created_at DESC"
+    )
 
 
 @pytest.mark.unit

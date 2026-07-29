@@ -16,6 +16,7 @@ from sqlalchemy import (
     Numeric,
     Text,
     UniqueConstraint,
+    desc,
     text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY
@@ -195,7 +196,7 @@ class SettlementRow(StorageBase):
             ["pmrp_portfolio.settlements.settlement_id"],
             name="fk_settlements__correction_of_settlement_id__settlements",
         ),
-        Index("ix_settlements__market_created", "market_id", "created_at"),
+        Index("ix_settlements__market_created", "market_id", desc("created_at")),
         {"schema": "pmrp_portfolio"},
     )
 
