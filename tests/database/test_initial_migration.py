@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -2979,7 +2980,7 @@ async def _order_storage_state() -> tuple[
                 intent_index_names,
                 intent_index_descending,
                 tuple(str(signal_id) for signal_id in inserted_intent[0]),
-                str(inserted_intent[1]),
+                _numeric_18_text(inserted_intent[1]),
                 order_table_exists,
                 order_primary_key_columns,
                 order_check_constraint_names,
@@ -2988,9 +2989,9 @@ async def _order_storage_state() -> tuple[
                 order_strategy_index_partial,
                 order_active_index_partial,
                 int(inserted_order[0]),
-                str(inserted_order[1]),
-                str(inserted_order[2]),
-                str(inserted_order[3]),
+                _numeric_18_text(inserted_order[1]),
+                _numeric_18_text(inserted_order[2]),
+                _numeric_18_text(inserted_order[3]),
                 transition_table_exists,
                 transition_primary_key_columns,
                 transition_foreign_key_names,
@@ -3381,6 +3382,12 @@ async def _assert_integrity_error(statement: str) -> None:
                 await transaction.rollback()
     finally:
         await engine.dispose()
+
+
+def _numeric_18_text(value: object) -> str:
+    if not isinstance(value, Decimal):
+        value = Decimal(str(value))
+    return format(value, ".18f")
 
 
 async def _schemas_for_connection(connection: AsyncConnection) -> tuple[str, ...]:
