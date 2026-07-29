@@ -35,6 +35,9 @@ MARKET_CATALOG_MIGRATION_PATH = (
 ORDER_BOOKS_TRADES_MIGRATION_PATH = (
     REPOSITORY_ROOT / "migrations/versions/0009_order_books_trades.py"
 )
+STRATEGY_MODEL_METADATA_MIGRATION_PATH = (
+    REPOSITORY_ROOT / "migrations/versions/0010_strategy_model_metadata.py"
+)
 MAX_ALEMBIC_REVISION_ID_LENGTH = 32
 EXPECTED_LOGICAL_SCHEMAS = (
     "pmrp_core",
@@ -141,6 +144,16 @@ def test_order_books_trades_migration_revision_metadata_is_stable() -> None:
 
 
 @pytest.mark.unit
+def test_strategy_model_metadata_migration_revision_metadata_is_stable() -> None:
+    migration = _load_migration(STRATEGY_MODEL_METADATA_MIGRATION_PATH)
+
+    assert migration.revision == "0010_strategy_model_metadata"
+    assert migration.down_revision == "0009_order_books_trades"
+    assert migration.branch_labels is None
+    assert migration.depends_on is None
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "migration_path",
     [
@@ -153,6 +166,7 @@ def test_order_books_trades_migration_revision_metadata_is_stable() -> None:
         IDEMPOTENCY_DEAD_LETTERS_MIGRATION_PATH,
         MARKET_CATALOG_MIGRATION_PATH,
         ORDER_BOOKS_TRADES_MIGRATION_PATH,
+        STRATEGY_MODEL_METADATA_MIGRATION_PATH,
     ],
 )
 def test_migration_revision_ids_fit_alembic_version_column(migration_path: Path) -> None:
@@ -540,6 +554,64 @@ def test_order_books_trades_migration_marks_constraint_names_as_final(
         "fk_order_book_snapshots__market_id__markets",
         "fk_order_book_snapshots__contract_id__contracts",
         "ck_trades__quantity",
+    ]
+    assert final_constraint_names == [f"final:{name}" for name in formatted_names]
+
+
+@pytest.mark.unit
+def test_strategy_model_metadata_migration_uses_expected_names() -> None:
+    migration = _load_migration(STRATEGY_MODEL_METADATA_MIGRATION_PATH)
+
+    assert migration.SCHEMA_NAME == "pmrp_research"
+    assert migration.STRATEGY_DEFINITIONS_TABLE_NAME == "strategy_definitions"
+    assert migration.STRATEGY_INSTANCES_TABLE_NAME == "strategy_instances"
+    assert migration.STRATEGY_CONFIGURATIONS_TABLE_NAME == "strategy_configurations"
+    assert migration.MODEL_ARTIFACTS_TABLE_NAME == "model_artifacts"
+    assert migration.STRATEGY_INSTANCES_STATE_HEALTH_INDEX_NAME == (
+        "ix_strategy_instances__state_health"
+    )
+    assert migration.MODEL_ARTIFACTS_APPROVAL_INDEX_NAME == "ix_model_artifacts__approval"
+    assert migration.STRATEGY_INSTANCES_DEFINITION_FOREIGN_KEY_NAME == (
+        "fk_strategy_instances__type_version__strategy_definitions"
+    )
+    assert migration.STRATEGY_CONFIGURATIONS_INSTANCE_FOREIGN_KEY_NAME == (
+        "fk_strategy_configurations__strategy_id__strategy_instances"
+    )
+    assert migration.STRATEGY_CONFIGURATIONS_HASH_UNIQUE_NAME == (
+        "uq_strategy_configurations__strategy_id_configuration_hash"
+    )
+
+
+@pytest.mark.unit
+def test_strategy_model_metadata_migration_marks_constraint_names_as_final(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    migration = _load_migration(STRATEGY_MODEL_METADATA_MIGRATION_PATH)
+    formatted_names: list[str] = []
+    created_table_arguments: list[object] = []
+
+    def fake_format_name(name: str) -> str:
+        formatted_names.append(name)
+        return f"final:{name}"
+
+    def fake_create_table(*arguments: object, **_kwargs: object) -> None:
+        created_table_arguments.extend(arguments)
+
+    monkeypatch.setattr(migration.op, "f", fake_format_name)
+    monkeypatch.setattr(migration.op, "create_table", fake_create_table)
+    monkeypatch.setattr(migration.op, "create_index", lambda *_args, **_kwargs: None)
+
+    migration.upgrade()
+
+    final_constraint_names = [
+        constraint.name
+        for constraint in created_table_arguments
+        if isinstance(constraint, ForeignKeyConstraint | UniqueConstraint)
+    ]
+    assert formatted_names == [
+        "fk_strategy_instances__type_version__strategy_definitions",
+        "fk_strategy_configurations__strategy_id__strategy_instances",
+        "uq_strategy_configurations__strategy_id_configuration_hash",
     ]
     assert final_constraint_names == [f"final:{name}" for name in formatted_names]
 

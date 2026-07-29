@@ -9,6 +9,12 @@ from pmrp.storage.models.idempotency import IdempotencyRecordRow
 from pmrp.storage.models.market_catalog import ContractRow, MarketRow, OutcomeRow
 from pmrp.storage.models.market_data import OrderBookSnapshotRow, TradeRow
 from pmrp.storage.models.raw_exchange import RawExchangeRecordRow
+from pmrp.storage.models.research_metadata import (
+    ModelArtifactRow,
+    StrategyConfigurationRow,
+    StrategyDefinitionRow,
+    StrategyInstanceRow,
+)
 from pmrp.storage.models.schema_registry import SchemaRegistryRow
 
 __all__ = [
@@ -21,6 +27,7 @@ __all__ = [
     "ExchangeRow",
     "IdempotencyRecordRow",
     "MarketRow",
+    "ModelArtifactRow",
     "OrderBookSnapshotRow",
     "OutboxMessageRow",
     "OutcomeRow",
@@ -28,5 +35,8 @@ __all__ = [
     "RawExchangeRecordRow",
     "SchemaRegistryRow",
     "StorageBase",
+    "StrategyConfigurationRow",
+    "StrategyDefinitionRow",
+    "StrategyInstanceRow",
     "TradeRow",
 ]
