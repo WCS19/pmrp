@@ -39,7 +39,7 @@ def test_migrations_upgrade_downgrade_and_reupgrade_empty_database() -> None:
     command.downgrade(alembic_config, "base")
     command.upgrade(alembic_config, "head")
     assert asyncio.run(_migration_state()) == (
-        "0002_create_schema_registry",
+        "0003_create_exchange_and_account_registries",
         LOGICAL_SCHEMAS,
         True,
     )
@@ -52,13 +52,26 @@ def test_migrations_upgrade_downgrade_and_reupgrade_empty_database() -> None:
         (),
     )
     asyncio.run(_assert_schema_registry_version_constraint())
+    assert asyncio.run(_exchange_registry_state()) == (
+        True,
+        ("exchange",),
+        True,
+        ("account_id",),
+        ("fk_exchange_accounts__exchange__exchanges",),
+        ("ix_exchange_accounts__exchange_environment",),
+        False,
+        "{}",
+        False,
+        "{}",
+    )
+    asyncio.run(_assert_exchange_account_foreign_key_constraint())
 
     command.downgrade(alembic_config, "base")
     assert asyncio.run(_schemas()) == ()
 
     command.upgrade(alembic_config, "head")
     assert asyncio.run(_migration_state()) == (
-        "0002_create_schema_registry",
+        "0003_create_exchange_and_account_registries",
         LOGICAL_SCHEMAS,
         True,
     )
@@ -264,6 +277,189 @@ async def _assert_schema_registry_version_constraint() -> None:
                 await transaction.rollback()
     finally:
         await engine.dispose()
+
+
+async def _exchange_registry_state() -> tuple[
+    bool,
+    tuple[str, ...],
+    bool,
+    tuple[str, ...],
+    tuple[str, ...],
+    tuple[str, ...],
+    bool,
+    str,
+    bool,
+    str,
+]:
+    engine = create_database_engine(
+        database_config_from_environment(os.environ, fallback_url=None),
+    )
+    try:
+        async with engine.begin() as connection:
+            exchange_table_exists = await _table_exists(connection, "exchanges")
+            exchange_primary_key_columns = await _primary_key_columns(
+                connection,
+                "pmrp_core.exchanges",
+            )
+            account_table_exists = await _table_exists(connection, "exchange_accounts")
+            account_primary_key_columns = await _primary_key_columns(
+                connection,
+                "pmrp_core.exchange_accounts",
+            )
+            account_foreign_key_names = tuple(
+                str(row[0])
+                for row in await connection.execute(
+                    text(
+                        """
+                        SELECT conname
+                        FROM pg_constraint
+                        WHERE conrelid = 'pmrp_core.exchange_accounts'::regclass
+                          AND contype = 'f'
+                        ORDER BY conname
+                        """
+                    )
+                )
+            )
+            account_index_names = tuple(
+                str(row[0])
+                for row in await connection.execute(
+                    text(
+                        """
+                        SELECT indexname
+                        FROM pg_indexes
+                        WHERE schemaname = 'pmrp_core'
+                          AND tablename = 'exchange_accounts'
+                          AND indexname = 'ix_exchange_accounts__exchange_environment'
+                        ORDER BY indexname
+                        """
+                    )
+                )
+            )
+
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO pmrp_core.exchanges (exchange, display_name)
+                    VALUES ('kalshi', 'Kalshi')
+                    """
+                )
+            )
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO pmrp_core.exchange_accounts (
+                        account_id,
+                        exchange,
+                        environment
+                    )
+                    VALUES ('acct_shadow', 'kalshi', 'shadow')
+                    """
+                )
+            )
+            exchange_defaults = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT enabled, capabilities::text
+                        FROM pmrp_core.exchanges
+                        WHERE exchange = 'kalshi'
+                        """
+                    )
+                )
+            ).one()
+            account_defaults = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT enabled, metadata::text
+                        FROM pmrp_core.exchange_accounts
+                        WHERE account_id = 'acct_shadow'
+                        """
+                    )
+                )
+            ).one()
+            return (
+                exchange_table_exists,
+                exchange_primary_key_columns,
+                account_table_exists,
+                account_primary_key_columns,
+                account_foreign_key_names,
+                account_index_names,
+                bool(exchange_defaults[0]),
+                str(exchange_defaults[1]),
+                bool(account_defaults[0]),
+                str(account_defaults[1]),
+            )
+    finally:
+        await engine.dispose()
+
+
+async def _assert_exchange_account_foreign_key_constraint() -> None:
+    engine = create_database_engine(
+        database_config_from_environment(os.environ, fallback_url=None),
+    )
+    try:
+        async with engine.connect() as connection:
+            transaction = await connection.begin()
+            try:
+                with pytest.raises(IntegrityError):
+                    await connection.execute(
+                        text(
+                            """
+                            INSERT INTO pmrp_core.exchange_accounts (
+                                account_id,
+                                exchange,
+                                environment
+                            )
+                            VALUES ('acct_invalid', 'missing', 'shadow')
+                            """
+                        )
+                    )
+            finally:
+                await transaction.rollback()
+    finally:
+        await engine.dispose()
+
+
+async def _table_exists(connection: AsyncConnection, table_name: str) -> bool:
+    return bool(
+        (
+            await connection.execute(
+                text(
+                    """
+                    SELECT EXISTS (
+                        SELECT 1
+                        FROM information_schema.tables
+                        WHERE table_schema = 'pmrp_core'
+                          AND table_name = :table_name
+                    )
+                    """
+                ),
+                {"table_name": table_name},
+            )
+        ).scalar_one()
+    )
+
+
+async def _primary_key_columns(connection: AsyncConnection, table_name: str) -> tuple[str, ...]:
+    return tuple(
+        str(row[0])
+        for row in await connection.execute(
+            text(
+                """
+                SELECT a.attname
+                FROM pg_index i
+                JOIN pg_attribute a
+                  ON a.attrelid = i.indrelid
+                 AND a.attnum = ANY(i.indkey)
+                WHERE i.indrelid = CAST(:table_name AS regclass)
+                  AND i.indisprimary
+                ORDER BY array_position(i.indkey, a.attnum)
+                """
+            ),
+            {"table_name": table_name},
+        )
+    )
 
 
 async def _schemas_for_connection(connection: AsyncConnection) -> tuple[str, ...]:
