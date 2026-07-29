@@ -39,7 +39,7 @@ def test_migrations_upgrade_downgrade_and_reupgrade_empty_database() -> None:
     command.downgrade(alembic_config, "base")
     command.upgrade(alembic_config, "head")
     assert asyncio.run(_migration_state()) == (
-        "0008_market_catalog_tables",
+        "0009_order_books_trades",
         LOGICAL_SCHEMAS,
         True,
     )
@@ -165,13 +165,36 @@ def test_migrations_upgrade_downgrade_and_reupgrade_empty_database() -> None:
         "0.010000000000000000",
     )
     asyncio.run(_assert_market_catalog_constraints())
+    assert asyncio.run(_order_books_trades_state()) == (
+        True,
+        ("market_id", "contract_id"),
+        (
+            "fk_order_book_snapshots__contract_id__contracts",
+            "fk_order_book_snapshots__market_id__markets",
+        ),
+        ("ix_order_book_snapshots__exchange_updated",),
+        0,
+        True,
+        True,
+        ("exchange_occurred_at", "trade_id"),
+        ("ck_trades__quantity",),
+        True,
+        (
+            "ix_trades__contract_time",
+            "ix_trades__market_time",
+        ),
+        True,
+        "0.420000000000000000",
+        "12.500000000000000000",
+    )
+    asyncio.run(_assert_order_books_trades_constraints())
 
     command.downgrade(alembic_config, "base")
     assert asyncio.run(_schemas()) == ()
 
     command.upgrade(alembic_config, "head")
     assert asyncio.run(_migration_state()) == (
-        "0008_market_catalog_tables",
+        "0009_order_books_trades",
         LOGICAL_SCHEMAS,
         True,
     )
@@ -1663,6 +1686,266 @@ async def _assert_market_catalog_constraints() -> None:
     )
 
 
+async def _order_books_trades_state() -> tuple[
+    bool,
+    tuple[str, ...],
+    tuple[str, ...],
+    tuple[str, ...],
+    int,
+    bool,
+    bool,
+    tuple[str, ...],
+    tuple[str, ...],
+    bool,
+    tuple[str, ...],
+    bool,
+    str,
+    str,
+]:
+    engine = create_database_engine(
+        database_config_from_environment(os.environ, fallback_url=None),
+    )
+    try:
+        async with engine.begin() as connection:
+            await _create_trade_test_partition(connection)
+            order_book_table_exists = await _table_exists(
+                connection,
+                schema_name="pmrp_market",
+                table_name="order_book_snapshots",
+            )
+            order_book_primary_key_columns = await _primary_key_columns(
+                connection,
+                "pmrp_market.order_book_snapshots",
+            )
+            order_book_foreign_key_names = await _constraint_names(
+                connection,
+                "pmrp_market.order_book_snapshots",
+                constraint_type="f",
+            )
+            order_book_index_names = await _index_names(
+                connection,
+                schema_name="pmrp_market",
+                table_name="order_book_snapshots",
+                expected_names=("ix_order_book_snapshots__exchange_updated",),
+            )
+            trade_primary_key_columns = await _primary_key_columns(
+                connection,
+                "pmrp_market.trades",
+            )
+            trade_check_constraint_names = await _check_constraint_names(
+                connection,
+                "pmrp_market.trades",
+            )
+            trade_partitioned = bool(
+                (
+                    await connection.execute(
+                        text(
+                            """
+                            SELECT EXISTS (
+                                SELECT 1
+                                FROM pg_partitioned_table
+                                WHERE partrelid = 'pmrp_market.trades'::regclass
+                                  AND partstrat = 'r'
+                            )
+                            """
+                        )
+                    )
+                ).scalar_one()
+            )
+            trade_index_names = await _index_names(
+                connection,
+                schema_name="pmrp_market",
+                table_name="trades",
+                expected_names=("ix_trades__contract_time", "ix_trades__market_time"),
+            )
+            trade_indexes_descending = bool(
+                (
+                    await connection.execute(
+                        text(
+                            """
+                            SELECT bool_and(indexdef LIKE '%exchange_occurred_at DESC%')
+                            FROM pg_indexes
+                            WHERE schemaname = 'pmrp_market'
+                              AND tablename = 'trades'
+                              AND indexname IN (
+                                  'ix_trades__contract_time',
+                                  'ix_trades__market_time'
+                              )
+                            """
+                        )
+                    )
+                ).scalar_one()
+            )
+
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO pmrp_market.order_book_snapshots (
+                        market_id,
+                        contract_id,
+                        exchange,
+                        exchange_occurred_at,
+                        received_at,
+                        bids,
+                        asks,
+                        is_valid,
+                        snapshot_reason
+                    )
+                    VALUES (
+                        'mkt_01j00000000000000000000001',
+                        'ctr_01j00000000000000000000001',
+                        'kalshi',
+                        '2026-07-29T12:03:00Z',
+                        '2026-07-29T12:03:00.100000Z',
+                        '{"levels": [{"price": "0.41", "quantity": "10"}]}'::jsonb,
+                        '{"levels": [{"price": "0.42", "quantity": "12.5"}]}'::jsonb,
+                        true,
+                        'exchange_snapshot'
+                    )
+                    """
+                )
+            )
+            order_book_inserted = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT
+                            aggregate_version,
+                            updated_at IS NOT NULL,
+                            bids ? 'levels'
+                        FROM pmrp_market.order_book_snapshots
+                        WHERE market_id = 'mkt_01j00000000000000000000001'
+                          AND contract_id = 'ctr_01j00000000000000000000001'
+                        """
+                    )
+                )
+            ).one()
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO pmrp_market.trades (
+                        exchange_occurred_at,
+                        trade_id,
+                        exchange,
+                        exchange_trade_id,
+                        market_id,
+                        contract_id,
+                        outcome_id,
+                        price,
+                        quantity,
+                        liquidity_role,
+                        received_at,
+                        sequence,
+                        source_event_id
+                    )
+                    VALUES (
+                        '2026-07-29T12:04:00Z',
+                        'trd_01j00000000000000000000001',
+                        'kalshi',
+                        'kalshi-trade-1',
+                        'mkt_01j00000000000000000000001',
+                        'ctr_01j00000000000000000000001',
+                        'out_01j00000000000000000000001',
+                        0.420000000000000000,
+                        12.500000000000000000,
+                        'taker',
+                        '2026-07-29T12:04:00.100000Z',
+                        1001,
+                        'evt_01j00000000000000000000003'
+                    )
+                    """
+                )
+            )
+            inserted_trade = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT price, quantity
+                        FROM pmrp_market.trades
+                        WHERE trade_id = 'trd_01j00000000000000000000001'
+                        """
+                    )
+                )
+            ).one()
+            return (
+                order_book_table_exists,
+                order_book_primary_key_columns,
+                order_book_foreign_key_names,
+                order_book_index_names,
+                int(order_book_inserted[0]),
+                bool(order_book_inserted[1]),
+                bool(order_book_inserted[2]),
+                trade_primary_key_columns,
+                trade_check_constraint_names,
+                trade_partitioned,
+                trade_index_names,
+                trade_indexes_descending,
+                str(inserted_trade[0]),
+                str(inserted_trade[1]),
+            )
+    finally:
+        await engine.dispose()
+
+
+async def _assert_order_books_trades_constraints() -> None:
+    await _assert_integrity_error(
+        """
+        INSERT INTO pmrp_market.order_book_snapshots (
+            market_id,
+            contract_id,
+            exchange,
+            received_at,
+            bids,
+            asks,
+            is_valid,
+            snapshot_reason
+        )
+        VALUES (
+            'mkt_missing',
+            'ctr_01j00000000000000000000001',
+            'kalshi',
+            '2026-07-29T12:05:00Z',
+            '{}'::jsonb,
+            '{}'::jsonb,
+            false,
+            'missing_market'
+        )
+        """
+    )
+    await _assert_integrity_error(
+        """
+        INSERT INTO pmrp_market.trades (
+            exchange_occurred_at,
+            trade_id,
+            exchange,
+            exchange_trade_id,
+            market_id,
+            contract_id,
+            outcome_id,
+            price,
+            quantity,
+            liquidity_role,
+            received_at,
+            source_event_id
+        )
+        VALUES (
+            '2026-07-29T12:05:00Z',
+            'trd_01j00000000000000000000002',
+            'kalshi',
+            'kalshi-trade-invalid',
+            'mkt_01j00000000000000000000001',
+            'ctr_01j00000000000000000000001',
+            'out_01j00000000000000000000001',
+            0.420000000000000000,
+            0.000000000000000000,
+            'taker',
+            '2026-07-29T12:05:00.100000Z',
+            'evt_01j00000000000000000000003'
+        )
+        """
+    )
+
+
 async def _create_raw_exchange_record_test_partition(connection: AsyncConnection) -> None:
     await connection.execute(
         text(
@@ -1681,6 +1964,18 @@ async def _create_canonical_event_test_partition(connection: AsyncConnection) ->
             """
             CREATE TABLE IF NOT EXISTS pmrp_event.canonical_events_2026_07
             PARTITION OF pmrp_event.canonical_events
+            FOR VALUES FROM ('2026-07-01T00:00:00Z') TO ('2026-08-01T00:00:00Z')
+            """
+        )
+    )
+
+
+async def _create_trade_test_partition(connection: AsyncConnection) -> None:
+    await connection.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS pmrp_market.trades_2026_07
+            PARTITION OF pmrp_market.trades
             FOR VALUES FROM ('2026-07-01T00:00:00Z') TO ('2026-08-01T00:00:00Z')
             """
         )
