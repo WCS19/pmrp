@@ -1765,7 +1765,7 @@ async def _constraint_names(
                 SELECT conname
                 FROM pg_constraint
                 WHERE conrelid = CAST(:table_name AS regclass)
-                  AND contype = :constraint_type
+                  AND contype::text = :constraint_type
                 ORDER BY conname
                 """
             ),
