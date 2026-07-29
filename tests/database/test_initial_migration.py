@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -39,7 +40,7 @@ def test_migrations_upgrade_downgrade_and_reupgrade_empty_database() -> None:
     command.downgrade(alembic_config, "base")
     command.upgrade(alembic_config, "head")
     assert asyncio.run(_migration_state()) == (
-        "0011_signals_features",
+        "0012_order_storage",
         LOGICAL_SCHEMAS,
         True,
     )
@@ -231,13 +232,57 @@ def test_migrations_upgrade_downgrade_and_reupgrade_empty_database() -> None:
         True,
     )
     asyncio.run(_assert_signals_features_constraints())
+    assert asyncio.run(_order_storage_state()) == (
+        True,
+        ("intent_id",),
+        (
+            "ck_order_intents__limit_price",
+            "ck_order_intents__quantity",
+        ),
+        ("uq_order_intents__strategy_id_idempotency_key",),
+        ("ix_order_intents__strategy_time",),
+        True,
+        ("sig_01j00000000000000000000001",),
+        "10.000000000000000000",
+        True,
+        ("order_id",),
+        (
+            "ck_orders__fill_balance",
+            "ck_orders__filled_quantity",
+            "ck_orders__quantity",
+            "ck_orders__remaining_quantity",
+        ),
+        (
+            "uq_orders__exchange_account_client_order_id",
+            "uq_orders__exchange_account_exchange_order_id",
+        ),
+        (
+            "ix_orders__account_status",
+            "ix_orders__active",
+            "ix_orders__strategy_created",
+        ),
+        True,
+        True,
+        0,
+        "10.000000000000000000",
+        "0.000000000000000000",
+        "10.000000000000000000",
+        True,
+        ("transition_id",),
+        ("fk_order_transitions__order_id__orders",),
+        ("uq_order_transitions__order_version",),
+        ("ix_order_transitions__order_time",),
+        True,
+        True,
+    )
+    asyncio.run(_assert_order_storage_constraints())
 
     command.downgrade(alembic_config, "base")
     assert asyncio.run(_schemas()) == ()
 
     command.upgrade(alembic_config, "head")
     assert asyncio.run(_migration_state()) == (
-        "0011_signals_features",
+        "0012_order_storage",
         LOGICAL_SCHEMAS,
         True,
     )
@@ -2606,6 +2651,528 @@ async def _assert_signals_features_constraints() -> None:
     )
 
 
+async def _order_storage_state() -> tuple[
+    bool,
+    tuple[str, ...],
+    tuple[str, ...],
+    tuple[str, ...],
+    tuple[str, ...],
+    bool,
+    tuple[str, ...],
+    str,
+    bool,
+    tuple[str, ...],
+    tuple[str, ...],
+    tuple[str, ...],
+    tuple[str, ...],
+    bool,
+    bool,
+    int,
+    str,
+    str,
+    str,
+    bool,
+    tuple[str, ...],
+    tuple[str, ...],
+    tuple[str, ...],
+    tuple[str, ...],
+    bool,
+    bool,
+]:
+    engine = create_database_engine(
+        database_config_from_environment(os.environ, fallback_url=None),
+    )
+    try:
+        async with engine.begin() as connection:
+            intent_table_exists = await _table_exists(
+                connection,
+                schema_name="pmrp_execution",
+                table_name="order_intents",
+            )
+            intent_primary_key_columns = await _primary_key_columns(
+                connection,
+                "pmrp_execution.order_intents",
+            )
+            intent_check_constraint_names = await _check_constraint_names(
+                connection,
+                "pmrp_execution.order_intents",
+            )
+            intent_unique_constraint_names = await _constraint_names(
+                connection,
+                "pmrp_execution.order_intents",
+                constraint_type="u",
+            )
+            intent_index_names = await _index_names(
+                connection,
+                schema_name="pmrp_execution",
+                table_name="order_intents",
+                expected_names=("ix_order_intents__strategy_time",),
+            )
+            intent_index_descending = bool(
+                (
+                    await connection.execute(
+                        text(
+                            """
+                            SELECT indexdef LIKE '%created_at DESC%'
+                            FROM pg_indexes
+                            WHERE schemaname = 'pmrp_execution'
+                              AND tablename = 'order_intents'
+                              AND indexname = 'ix_order_intents__strategy_time'
+                            """
+                        )
+                    )
+                ).scalar_one()
+            )
+            order_table_exists = await _table_exists(
+                connection,
+                schema_name="pmrp_execution",
+                table_name="orders",
+            )
+            order_primary_key_columns = await _primary_key_columns(
+                connection,
+                "pmrp_execution.orders",
+            )
+            order_check_constraint_names = await _check_constraint_names(
+                connection,
+                "pmrp_execution.orders",
+            )
+            order_unique_constraint_names = await _constraint_names(
+                connection,
+                "pmrp_execution.orders",
+                constraint_type="u",
+            )
+            order_index_names = await _index_names(
+                connection,
+                schema_name="pmrp_execution",
+                table_name="orders",
+                expected_names=(
+                    "ix_orders__account_status",
+                    "ix_orders__active",
+                    "ix_orders__strategy_created",
+                ),
+            )
+            order_strategy_index_partial = bool(
+                (
+                    await connection.execute(
+                        text(
+                            """
+                            SELECT indexdef LIKE '%WHERE (strategy_id IS NOT NULL)%'
+                            FROM pg_indexes
+                            WHERE schemaname = 'pmrp_execution'
+                              AND tablename = 'orders'
+                              AND indexname = 'ix_orders__strategy_created'
+                            """
+                        )
+                    )
+                ).scalar_one()
+            )
+            order_active_index_partial = bool(
+                (
+                    await connection.execute(
+                        text(
+                            """
+                            SELECT indexdef LIKE '%WHERE (status = ANY%'
+                            FROM pg_indexes
+                            WHERE schemaname = 'pmrp_execution'
+                              AND tablename = 'orders'
+                              AND indexname = 'ix_orders__active'
+                            """
+                        )
+                    )
+                ).scalar_one()
+            )
+            transition_table_exists = await _table_exists(
+                connection,
+                schema_name="pmrp_execution",
+                table_name="order_state_transitions",
+            )
+            transition_primary_key_columns = await _primary_key_columns(
+                connection,
+                "pmrp_execution.order_state_transitions",
+            )
+            transition_foreign_key_names = await _constraint_names(
+                connection,
+                "pmrp_execution.order_state_transitions",
+                constraint_type="f",
+            )
+            transition_unique_constraint_names = await _constraint_names(
+                connection,
+                "pmrp_execution.order_state_transitions",
+                constraint_type="u",
+            )
+            transition_index_names = await _index_names(
+                connection,
+                schema_name="pmrp_execution",
+                table_name="order_state_transitions",
+                expected_names=("ix_order_transitions__order_time",),
+            )
+
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO pmrp_execution.order_intents (
+                        intent_id,
+                        strategy_id,
+                        market_id,
+                        contract_id,
+                        outcome_id,
+                        side,
+                        quantity,
+                        limit_price,
+                        order_type,
+                        time_in_force,
+                        post_only,
+                        reduce_only,
+                        urgency,
+                        created_at,
+                        expires_at,
+                        signal_ids,
+                        correlation_id,
+                        idempotency_key,
+                        payload_hash
+                    )
+                    VALUES (
+                        'intent_01j00000000000000000000001',
+                        'strat_fed_value_v1',
+                        'mkt_01j00000000000000000000001',
+                        'ctr_01j00000000000000000000001',
+                        'out_01j00000000000000000000001',
+                        'buy',
+                        10.000000000000000000,
+                        0.420000000000000000,
+                        'limit',
+                        'gtc',
+                        false,
+                        false,
+                        0.800000000000000000,
+                        '2026-07-29T12:08:00Z',
+                        '2026-07-29T12:18:00Z',
+                        ARRAY['sig_01j00000000000000000000001']::text[],
+                        'corr_01j00000000000000000000001',
+                        'intent-key-1',
+                        'sha256:order-intent'
+                    )
+                    """
+                )
+            )
+            inserted_intent = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT signal_ids, quantity
+                        FROM pmrp_execution.order_intents
+                        WHERE intent_id = 'intent_01j00000000000000000000001'
+                        """
+                    )
+                )
+            ).one()
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO pmrp_execution.orders (
+                        order_id,
+                        intent_id,
+                        strategy_id,
+                        exchange,
+                        account_id,
+                        market_id,
+                        contract_id,
+                        outcome_id,
+                        side,
+                        quantity,
+                        remaining_quantity,
+                        limit_price,
+                        order_type,
+                        time_in_force,
+                        post_only,
+                        reduce_only,
+                        status,
+                        client_order_id,
+                        exchange_order_id,
+                        created_at,
+                        last_updated_at
+                    )
+                    VALUES (
+                        'ord_01j00000000000000000000001',
+                        'intent_01j00000000000000000000001',
+                        'strat_fed_value_v1',
+                        'kalshi',
+                        'acct_01j00000000000000000000001',
+                        'mkt_01j00000000000000000000001',
+                        'ctr_01j00000000000000000000001',
+                        'out_01j00000000000000000000001',
+                        'buy',
+                        10.000000000000000000,
+                        10.000000000000000000,
+                        0.420000000000000000,
+                        'limit',
+                        'gtc',
+                        false,
+                        false,
+                        'created',
+                        'client-order-1',
+                        'exchange-order-1',
+                        '2026-07-29T12:08:00Z',
+                        '2026-07-29T12:08:00Z'
+                    )
+                    """
+                )
+            )
+            inserted_order = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT
+                            aggregate_version,
+                            quantity,
+                            filled_quantity,
+                            remaining_quantity
+                        FROM pmrp_execution.orders
+                        WHERE order_id = 'ord_01j00000000000000000000001'
+                        """
+                    )
+                )
+            ).one()
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO pmrp_execution.order_state_transitions (
+                        transition_id,
+                        order_id,
+                        previous_status,
+                        current_status,
+                        occurred_at,
+                        source_event_id,
+                        reason_code,
+                        aggregate_version_before,
+                        aggregate_version_after
+                    )
+                    VALUES (
+                        'transition_01j00000000000000000000001',
+                        'ord_01j00000000000000000000001',
+                        NULL,
+                        'created',
+                        '2026-07-29T12:08:00Z',
+                        'evt_01j00000000000000000000005',
+                        'intent_created',
+                        0,
+                        1
+                    )
+                    """
+                )
+            )
+            inserted_transition = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT created_at IS NOT NULL, current_status = 'created'
+                        FROM pmrp_execution.order_state_transitions
+                        WHERE transition_id = 'transition_01j00000000000000000000001'
+                        """
+                    )
+                )
+            ).one()
+            return (
+                intent_table_exists,
+                intent_primary_key_columns,
+                intent_check_constraint_names,
+                intent_unique_constraint_names,
+                intent_index_names,
+                intent_index_descending,
+                tuple(str(signal_id) for signal_id in inserted_intent[0]),
+                _numeric_18_text(inserted_intent[1]),
+                order_table_exists,
+                order_primary_key_columns,
+                order_check_constraint_names,
+                order_unique_constraint_names,
+                order_index_names,
+                order_strategy_index_partial,
+                order_active_index_partial,
+                int(inserted_order[0]),
+                _numeric_18_text(inserted_order[1]),
+                _numeric_18_text(inserted_order[2]),
+                _numeric_18_text(inserted_order[3]),
+                transition_table_exists,
+                transition_primary_key_columns,
+                transition_foreign_key_names,
+                transition_unique_constraint_names,
+                transition_index_names,
+                bool(inserted_transition[0]),
+                bool(inserted_transition[1]),
+            )
+    finally:
+        await engine.dispose()
+
+
+async def _assert_order_storage_constraints() -> None:
+    await _assert_integrity_error(
+        """
+        INSERT INTO pmrp_execution.order_intents (
+            intent_id,
+            strategy_id,
+            market_id,
+            contract_id,
+            outcome_id,
+            side,
+            quantity,
+            order_type,
+            time_in_force,
+            post_only,
+            reduce_only,
+            created_at,
+            correlation_id,
+            idempotency_key,
+            payload_hash
+        )
+        VALUES (
+            'intent_01j00000000000000000000002',
+            'strat_fed_value_v1',
+            'mkt_01j00000000000000000000001',
+            'ctr_01j00000000000000000000001',
+            'out_01j00000000000000000000001',
+            'buy',
+            1.000000000000000000,
+            'limit',
+            'gtc',
+            false,
+            false,
+            '2026-07-29T12:09:00Z',
+            'corr_01j00000000000000000000001',
+            'intent-key-2',
+            'sha256:order-intent-invalid'
+        )
+        """
+    )
+    await _assert_integrity_error(
+        """
+        INSERT INTO pmrp_execution.order_intents (
+            intent_id,
+            strategy_id,
+            market_id,
+            contract_id,
+            outcome_id,
+            side,
+            quantity,
+            limit_price,
+            order_type,
+            time_in_force,
+            post_only,
+            reduce_only,
+            created_at,
+            correlation_id,
+            idempotency_key,
+            payload_hash
+        )
+        VALUES (
+            'intent_01j00000000000000000000003',
+            'strat_fed_value_v1',
+            'mkt_01j00000000000000000000001',
+            'ctr_01j00000000000000000000001',
+            'out_01j00000000000000000000001',
+            'buy',
+            1.000000000000000000,
+            0.420000000000000000,
+            'limit',
+            'gtc',
+            false,
+            false,
+            '2026-07-29T12:09:00Z',
+            'corr_01j00000000000000000000001',
+            'intent-key-1',
+            'sha256:order-intent-duplicate'
+        )
+        """
+    )
+    await _assert_integrity_error(
+        """
+        INSERT INTO pmrp_execution.orders (
+            order_id,
+            exchange,
+            account_id,
+            market_id,
+            contract_id,
+            outcome_id,
+            side,
+            quantity,
+            filled_quantity,
+            remaining_quantity,
+            order_type,
+            time_in_force,
+            post_only,
+            reduce_only,
+            status,
+            client_order_id,
+            created_at,
+            last_updated_at
+        )
+        VALUES (
+            'ord_01j00000000000000000000002',
+            'kalshi',
+            'acct_01j00000000000000000000001',
+            'mkt_01j00000000000000000000001',
+            'ctr_01j00000000000000000000001',
+            'out_01j00000000000000000000001',
+            'buy',
+            10.000000000000000000,
+            2.000000000000000000,
+            7.000000000000000000,
+            'limit',
+            'gtc',
+            false,
+            false,
+            'created',
+            'client-order-2',
+            '2026-07-29T12:09:00Z',
+            '2026-07-29T12:09:00Z'
+        )
+        """
+    )
+    await _assert_integrity_error(
+        """
+        INSERT INTO pmrp_execution.order_state_transitions (
+            transition_id,
+            order_id,
+            current_status,
+            occurred_at,
+            source_event_id,
+            aggregate_version_before,
+            aggregate_version_after
+        )
+        VALUES (
+            'transition_01j00000000000000000000002',
+            'ord_missing',
+            'created',
+            '2026-07-29T12:09:00Z',
+            'evt_01j00000000000000000000005',
+            0,
+            1
+        )
+        """
+    )
+    await _assert_integrity_error(
+        """
+        INSERT INTO pmrp_execution.order_state_transitions (
+            transition_id,
+            order_id,
+            current_status,
+            occurred_at,
+            source_event_id,
+            aggregate_version_before,
+            aggregate_version_after
+        )
+        VALUES (
+            'transition_01j00000000000000000000003',
+            'ord_01j00000000000000000000001',
+            'accepted',
+            '2026-07-29T12:10:00Z',
+            'evt_01j00000000000000000000006',
+            1,
+            1
+        )
+        """
+    )
+
+
 async def _create_raw_exchange_record_test_partition(connection: AsyncConnection) -> None:
     await connection.execute(
         text(
@@ -2815,6 +3382,12 @@ async def _assert_integrity_error(statement: str) -> None:
                 await transaction.rollback()
     finally:
         await engine.dispose()
+
+
+def _numeric_18_text(value: object) -> str:
+    if not isinstance(value, Decimal):
+        value = Decimal(str(value))
+    return format(value, ".18f")
 
 
 async def _schemas_for_connection(connection: AsyncConnection) -> tuple[str, ...]:

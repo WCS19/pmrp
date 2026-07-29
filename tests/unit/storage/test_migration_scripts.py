@@ -39,6 +39,7 @@ STRATEGY_MODEL_METADATA_MIGRATION_PATH = (
     REPOSITORY_ROOT / "migrations/versions/0010_strategy_model_metadata.py"
 )
 SIGNALS_FEATURES_MIGRATION_PATH = REPOSITORY_ROOT / "migrations/versions/0011_signals_features.py"
+ORDER_STORAGE_MIGRATION_PATH = REPOSITORY_ROOT / "migrations/versions/0012_order_storage.py"
 MAX_ALEMBIC_REVISION_ID_LENGTH = 32
 EXPECTED_LOGICAL_SCHEMAS = (
     "pmrp_core",
@@ -165,6 +166,16 @@ def test_signals_features_migration_revision_metadata_is_stable() -> None:
 
 
 @pytest.mark.unit
+def test_order_storage_migration_revision_metadata_is_stable() -> None:
+    migration = _load_migration(ORDER_STORAGE_MIGRATION_PATH)
+
+    assert migration.revision == "0012_order_storage"
+    assert migration.down_revision == "0011_signals_features"
+    assert migration.branch_labels is None
+    assert migration.depends_on is None
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "migration_path",
     [
@@ -179,6 +190,7 @@ def test_signals_features_migration_revision_metadata_is_stable() -> None:
         ORDER_BOOKS_TRADES_MIGRATION_PATH,
         STRATEGY_MODEL_METADATA_MIGRATION_PATH,
         SIGNALS_FEATURES_MIGRATION_PATH,
+        ORDER_STORAGE_MIGRATION_PATH,
     ],
 )
 def test_migration_revision_ids_fit_alembic_version_column(migration_path: Path) -> None:
@@ -670,6 +682,84 @@ def test_signals_features_migration_marks_constraint_names_as_final(
         if isinstance(constraint, CheckConstraint)
     ]
     assert formatted_names == ["ck_signals__fair_probability"]
+    assert final_constraint_names == [f"final:{name}" for name in formatted_names]
+
+
+@pytest.mark.unit
+def test_order_storage_migration_uses_expected_names() -> None:
+    migration = _load_migration(ORDER_STORAGE_MIGRATION_PATH)
+
+    assert migration.SCHEMA_NAME == "pmrp_execution"
+    assert migration.ORDER_INTENTS_TABLE_NAME == "order_intents"
+    assert migration.ORDERS_TABLE_NAME == "orders"
+    assert migration.ORDER_STATE_TRANSITIONS_TABLE_NAME == "order_state_transitions"
+    assert migration.ORDER_INTENTS_STRATEGY_TIME_INDEX_NAME == "ix_order_intents__strategy_time"
+    assert migration.ORDERS_ACCOUNT_STATUS_INDEX_NAME == "ix_orders__account_status"
+    assert migration.ORDERS_STRATEGY_CREATED_INDEX_NAME == "ix_orders__strategy_created"
+    assert migration.ORDERS_ACTIVE_INDEX_NAME == "ix_orders__active"
+    assert migration.ORDER_TRANSITIONS_ORDER_TIME_INDEX_NAME == ("ix_order_transitions__order_time")
+    assert migration.ORDER_INTENTS_IDEMPOTENCY_UNIQUE_NAME == (
+        "uq_order_intents__strategy_id_idempotency_key"
+    )
+    assert migration.ORDERS_CLIENT_ORDER_UNIQUE_NAME == (
+        "uq_orders__exchange_account_client_order_id"
+    )
+    assert migration.ORDERS_EXCHANGE_ORDER_UNIQUE_NAME == (
+        "uq_orders__exchange_account_exchange_order_id"
+    )
+    assert migration.ORDER_TRANSITIONS_ORDER_VERSION_UNIQUE_NAME == (
+        "uq_order_transitions__order_version"
+    )
+    assert migration.ORDER_TRANSITIONS_ORDER_FOREIGN_KEY_NAME == (
+        "fk_order_transitions__order_id__orders"
+    )
+    assert migration.ORDER_INTENTS_QUANTITY_CHECK_NAME == "ck_order_intents__quantity"
+    assert migration.ORDER_INTENTS_LIMIT_PRICE_CHECK_NAME == "ck_order_intents__limit_price"
+    assert migration.ORDERS_QUANTITY_CHECK_NAME == "ck_orders__quantity"
+    assert migration.ORDERS_FILLED_QUANTITY_CHECK_NAME == "ck_orders__filled_quantity"
+    assert migration.ORDERS_REMAINING_QUANTITY_CHECK_NAME == "ck_orders__remaining_quantity"
+    assert migration.ORDERS_FILL_BALANCE_CHECK_NAME == "ck_orders__fill_balance"
+
+
+@pytest.mark.unit
+def test_order_storage_migration_marks_constraint_names_as_final(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    migration = _load_migration(ORDER_STORAGE_MIGRATION_PATH)
+    formatted_names: list[str] = []
+    created_table_arguments: list[object] = []
+
+    def fake_format_name(name: str) -> str:
+        formatted_names.append(name)
+        return f"final:{name}"
+
+    def fake_create_table(*arguments: object, **_kwargs: object) -> None:
+        created_table_arguments.extend(arguments)
+
+    monkeypatch.setattr(migration.op, "f", fake_format_name)
+    monkeypatch.setattr(migration.op, "create_table", fake_create_table)
+    monkeypatch.setattr(migration.op, "create_index", lambda *_args, **_kwargs: None)
+
+    migration.upgrade()
+
+    final_constraint_names = [
+        constraint.name
+        for constraint in created_table_arguments
+        if isinstance(constraint, CheckConstraint | ForeignKeyConstraint | UniqueConstraint)
+    ]
+    assert formatted_names == [
+        "uq_order_intents__strategy_id_idempotency_key",
+        "ck_order_intents__quantity",
+        "ck_order_intents__limit_price",
+        "uq_orders__exchange_account_client_order_id",
+        "uq_orders__exchange_account_exchange_order_id",
+        "ck_orders__quantity",
+        "ck_orders__filled_quantity",
+        "ck_orders__remaining_quantity",
+        "ck_orders__fill_balance",
+        "fk_order_transitions__order_id__orders",
+        "uq_order_transitions__order_version",
+    ]
     assert final_constraint_names == [f"final:{name}" for name in formatted_names]
 
 

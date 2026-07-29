@@ -8,6 +8,7 @@ from pmrp.storage.models.exchange_registry import ExchangeAccountRow, ExchangeRo
 from pmrp.storage.models.idempotency import IdempotencyRecordRow
 from pmrp.storage.models.market_catalog import ContractRow, MarketRow, OutcomeRow
 from pmrp.storage.models.market_data import OrderBookSnapshotRow, TradeRow
+from pmrp.storage.models.orders import OrderIntentRow, OrderRow, OrderStateTransitionRow
 from pmrp.storage.models.raw_exchange import RawExchangeRecordRow
 from pmrp.storage.models.research_metadata import (
     ModelArtifactRow,
@@ -31,6 +32,9 @@ __all__ = [
     "MarketRow",
     "ModelArtifactRow",
     "OrderBookSnapshotRow",
+    "OrderIntentRow",
+    "OrderRow",
+    "OrderStateTransitionRow",
     "OutboxMessageRow",
     "OutcomeRow",
     "ProcessedEventRow",
