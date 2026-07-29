@@ -26,6 +26,9 @@ CANONICAL_EVENTS_MIGRATION_PATH = REPOSITORY_ROOT / "migrations/versions/0005_ca
 PROCESSED_EVENTS_OUTBOX_MIGRATION_PATH = (
     REPOSITORY_ROOT / "migrations/versions/0006_processed_events_outbox.py"
 )
+IDEMPOTENCY_DEAD_LETTERS_MIGRATION_PATH = (
+    REPOSITORY_ROOT / "migrations/versions/0007_idempotency_dead_letters.py"
+)
 MAX_ALEMBIC_REVISION_ID_LENGTH = 32
 EXPECTED_LOGICAL_SCHEMAS = (
     "pmrp_core",
@@ -102,6 +105,16 @@ def test_processed_events_outbox_migration_revision_metadata_is_stable() -> None
 
 
 @pytest.mark.unit
+def test_idempotency_dead_letters_migration_revision_metadata_is_stable() -> None:
+    migration = _load_migration(IDEMPOTENCY_DEAD_LETTERS_MIGRATION_PATH)
+
+    assert migration.revision == "0007_idempotency_dead_letters"
+    assert migration.down_revision == "0006_processed_events_outbox"
+    assert migration.branch_labels is None
+    assert migration.depends_on is None
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "migration_path",
     [
@@ -111,6 +124,7 @@ def test_processed_events_outbox_migration_revision_metadata_is_stable() -> None
         RAW_EXCHANGE_RECORDS_MIGRATION_PATH,
         CANONICAL_EVENTS_MIGRATION_PATH,
         PROCESSED_EVENTS_OUTBOX_MIGRATION_PATH,
+        IDEMPOTENCY_DEAD_LETTERS_MIGRATION_PATH,
     ],
 )
 def test_migration_revision_ids_fit_alembic_version_column(migration_path: Path) -> None:
@@ -374,6 +388,18 @@ def test_processed_events_outbox_migration_marks_unique_constraint_name_as_final
     assert [constraint.name for constraint in unique_constraints] == [
         "final:uq_outbox_messages__event_id_topic"
     ]
+
+
+@pytest.mark.unit
+def test_idempotency_dead_letters_migration_uses_expected_names() -> None:
+    migration = _load_migration(IDEMPOTENCY_DEAD_LETTERS_MIGRATION_PATH)
+
+    assert migration.CORE_SCHEMA_NAME == "pmrp_core"
+    assert migration.OPS_SCHEMA_NAME == "pmrp_ops"
+    assert migration.IDEMPOTENCY_RECORDS_TABLE_NAME == "idempotency_records"
+    assert migration.DEAD_LETTER_RECORDS_TABLE_NAME == "dead_letter_records"
+    assert migration.IDEMPOTENCY_EXPIRES_INDEX_NAME == "ix_idempotency_records__expires"
+    assert migration.DEAD_LETTER_UNRESOLVED_INDEX_NAME == ("ix_dead_letter_records__unresolved")
 
 
 def _load_initial_migration() -> ModuleType:
