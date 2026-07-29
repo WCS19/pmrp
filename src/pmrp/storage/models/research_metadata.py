@@ -60,7 +60,7 @@ class StrategyInstanceRow(StorageBase):
                 "pmrp_research.strategy_definitions.strategy_type",
                 "pmrp_research.strategy_definitions.strategy_version",
             ],
-            name="fk_strategy_instances__strategy_type_strategy_version__strategy_definitions",
+            name="fk_strategy_instances__type_version__strategy_definitions",
         ),
         Index("ix_strategy_instances__state_health", "state", "health_status"),
         {"schema": "pmrp_research"},

@@ -194,7 +194,7 @@ def test_migrations_upgrade_downgrade_and_reupgrade_empty_database() -> None:
         True,
         True,
         ("strategy_id",),
-        ("fk_strategy_instances__strategy_type_strategy_version__strategy_definitions",),
+        ("fk_strategy_instances__type_version__strategy_definitions",),
         ("ix_strategy_instances__state_health",),
         0,
         "1000.000000000000000000",

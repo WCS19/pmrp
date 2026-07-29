@@ -33,7 +33,7 @@ MODEL_ARTIFACTS_TABLE_NAME = "model_artifacts"
 STRATEGY_INSTANCES_STATE_HEALTH_INDEX_NAME = "ix_strategy_instances__state_health"
 MODEL_ARTIFACTS_APPROVAL_INDEX_NAME = "ix_model_artifacts__approval"
 STRATEGY_INSTANCES_DEFINITION_FOREIGN_KEY_NAME = (
-    "fk_strategy_instances__strategy_type_strategy_version__strategy_definitions"
+    "fk_strategy_instances__type_version__strategy_definitions"
 )
 STRATEGY_CONFIGURATIONS_INSTANCE_FOREIGN_KEY_NAME = (
     "fk_strategy_configurations__strategy_id__strategy_instances"

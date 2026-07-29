@@ -572,7 +572,7 @@ def test_strategy_model_metadata_migration_uses_expected_names() -> None:
     )
     assert migration.MODEL_ARTIFACTS_APPROVAL_INDEX_NAME == "ix_model_artifacts__approval"
     assert migration.STRATEGY_INSTANCES_DEFINITION_FOREIGN_KEY_NAME == (
-        "fk_strategy_instances__strategy_type_strategy_version__strategy_definitions"
+        "fk_strategy_instances__type_version__strategy_definitions"
     )
     assert migration.STRATEGY_CONFIGURATIONS_INSTANCE_FOREIGN_KEY_NAME == (
         "fk_strategy_configurations__strategy_id__strategy_instances"
@@ -609,7 +609,7 @@ def test_strategy_model_metadata_migration_marks_constraint_names_as_final(
         if isinstance(constraint, ForeignKeyConstraint | UniqueConstraint)
     ]
     assert formatted_names == [
-        "fk_strategy_instances__strategy_type_strategy_version__strategy_definitions",
+        "fk_strategy_instances__type_version__strategy_definitions",
         "fk_strategy_configurations__strategy_id__strategy_instances",
         "uq_strategy_configurations__strategy_id_configuration_hash",
     ]

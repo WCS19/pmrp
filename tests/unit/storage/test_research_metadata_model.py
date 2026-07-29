@@ -72,7 +72,7 @@ def test_strategy_instance_row_mapping_matches_database_spec() -> None:
 def test_strategy_instance_constraints_and_indexes_match_database_spec() -> None:
     table = StrategyInstanceRow.__table__
 
-    assert {"fk_strategy_instances__strategy_type_strategy_version__strategy_definitions"} <= {
+    assert {"fk_strategy_instances__type_version__strategy_definitions"} <= {
         constraint.name for constraint in table.constraints
     }
     assert {"ix_strategy_instances__state_health"} <= {index.name for index in table.indexes}
