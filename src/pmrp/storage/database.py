@@ -9,7 +9,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from pmrp.storage.config import DatabaseConfig
-from pmrp.storage.errors import classify_storage_error
+from pmrp.storage.errors import PersistenceUnavailableError, classify_storage_error
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,9 +49,16 @@ async def check_database_health(engine: AsyncEngine) -> DatabaseHealth:
     except SQLAlchemyError as exc:
         raise classify_storage_error(exc) from exc
 
-    return DatabaseHealth(
+    health = DatabaseHealth(
         reachable=True,
         server_version=server_version,
         session_timezone=session_timezone,
         is_utc=session_timezone.upper() == "UTC",
     )
+    if not health.is_utc:
+        raise PersistenceUnavailableError(
+            "database session timezone is not UTC",
+            retryable=False,
+            context={"session_timezone": session_timezone},
+        )
+    return health

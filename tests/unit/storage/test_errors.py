@@ -34,6 +34,7 @@ def test_classify_storage_error_returns_existing_storage_error() -> None:
         ("40001", ConcurrencyConflictError, True),
         ("40P01", ConcurrencyConflictError, True),
         ("57014", PersistenceTimeoutError, True),
+        ("55P03", PersistenceTimeoutError, True),
         ("08006", PersistenceUnavailableError, True),
     ],
 )

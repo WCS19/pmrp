@@ -61,13 +61,14 @@ async def test_check_database_health_reports_version_timezone_and_utc() -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_check_database_health_reports_non_utc_timezone() -> None:
+async def test_check_database_health_rejects_non_utc_timezone() -> None:
     engine = _FakeEngine(version="16.4", timezone="America/Denver")
 
-    health = await database_module.check_database_health(engine)
+    with pytest.raises(PersistenceUnavailableError) as exc_info:
+        await database_module.check_database_health(engine)
 
-    assert health.is_utc is False
-    assert health.session_timezone == "America/Denver"
+    assert exc_info.value.retryable is False
+    assert exc_info.value.context == {"session_timezone": "America/Denver"}
 
 
 @pytest.mark.unit

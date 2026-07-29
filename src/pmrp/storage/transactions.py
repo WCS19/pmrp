@@ -39,9 +39,8 @@ class SqlAlchemyUnitOfWork:
             return False
 
         try:
-            if exc_type is None and self._finished:
-                return False
-            await self._rollback_on_exit(preserve_existing_error=exc_type is not None)
+            if not self._finished:
+                await self._rollback_on_exit(preserve_existing_error=exc_type is not None)
             return False
         finally:
             await session.close()
@@ -54,6 +53,8 @@ class SqlAlchemyUnitOfWork:
 
         if self._session is None:
             raise UnitOfWorkStateError("unit of work is not active")
+        if self._finished:
+            raise UnitOfWorkStateError("unit of work transaction is already finished")
         return self._session
 
     async def commit(self) -> None:

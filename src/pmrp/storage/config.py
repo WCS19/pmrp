@@ -77,6 +77,7 @@ class DatabaseConfig(BaseModel):
             "timeout": self.connect_timeout_seconds,
             "server_settings": {
                 "application_name": self.application_name,
+                "timezone": "UTC",
                 "statement_timeout": f"{self.statement_timeout_milliseconds}ms",
                 "lock_timeout": f"{self.lock_timeout_milliseconds}ms",
                 "idle_in_transaction_session_timeout": (

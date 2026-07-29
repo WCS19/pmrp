@@ -87,6 +87,7 @@ def test_database_config_connect_args_include_timeouts_and_tls() -> None:
     assert args["ssl"] is True
     assert args["server_settings"] == {
         "application_name": "pmrp-test",
+        "timezone": "UTC",
         "statement_timeout": "200ms",
         "lock_timeout": "100ms",
         "idle_in_transaction_session_timeout": "500ms",

@@ -24,6 +24,8 @@ async def test_unit_of_work_commit_does_not_rollback_on_exit() -> None:
     async with SqlAlchemyUnitOfWork(session_factory=_SessionFactory(session)) as unit_of_work:
         assert unit_of_work.session is session
         await unit_of_work.commit()
+        with pytest.raises(UnitOfWorkStateError, match="already finished"):
+            _ = unit_of_work.session
 
     assert session.committed == 1
     assert session.rolled_back == 0
@@ -63,8 +65,40 @@ async def test_unit_of_work_explicit_rollback_prevents_exit_rollback() -> None:
 
     async with SqlAlchemyUnitOfWork(session_factory=_SessionFactory(session)) as unit_of_work:
         await unit_of_work.rollback()
+        with pytest.raises(UnitOfWorkStateError, match="already finished"):
+            _ = unit_of_work.session
 
     assert session.rolled_back == 1
+    assert session.closed == 1
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_unit_of_work_rejects_repeated_terminal_operations() -> None:
+    session = _FakeSession()
+
+    async with SqlAlchemyUnitOfWork(session_factory=_SessionFactory(session)) as unit_of_work:
+        await unit_of_work.commit()
+        with pytest.raises(UnitOfWorkStateError, match="already finished"):
+            await unit_of_work.commit()
+        with pytest.raises(UnitOfWorkStateError, match="already finished"):
+            await unit_of_work.rollback()
+
+    assert session.committed == 1
+    assert session.rolled_back == 0
+    assert session.closed == 1
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_unit_of_work_does_not_rollback_after_terminal_operation_then_error() -> None:
+    session = _FakeSession()
+
+    with pytest.raises(RuntimeError, match="post-commit failure"):
+        await _commit_then_raise(session)
+
+    assert session.committed == 1
+    assert session.rolled_back == 0
     assert session.closed == 1
 
 
@@ -100,6 +134,12 @@ class _SessionFactory:
 
     def __call__(self) -> _FakeSession:
         return self._session
+
+
+async def _commit_then_raise(session: _FakeSession) -> None:
+    async with SqlAlchemyUnitOfWork(session_factory=_SessionFactory(session)) as unit_of_work:
+        await unit_of_work.commit()
+        raise RuntimeError("post-commit failure")
 
 
 class _FakeSession:

@@ -59,6 +59,7 @@ _CHECK_VIOLATION = "23514"
 _SERIALIZATION_FAILURE = "40001"
 _DEADLOCK_DETECTED = "40P01"
 _STATEMENT_TIMEOUT = "57014"
+_LOCK_NOT_AVAILABLE = "55P03"
 
 
 def classify_storage_error(error: BaseException) -> StorageError:
@@ -97,7 +98,7 @@ def classify_storage_error(error: BaseException) -> StorageError:
             retryable=True,
             context=context,
         )
-    if sqlstate == _STATEMENT_TIMEOUT:
+    if sqlstate in {_STATEMENT_TIMEOUT, _LOCK_NOT_AVAILABLE}:
         return PersistenceTimeoutError(
             "database statement timed out",
             retryable=True,
