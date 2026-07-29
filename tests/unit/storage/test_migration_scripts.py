@@ -22,6 +22,7 @@ EXCHANGE_REGISTRY_MIGRATION_PATH = (
 RAW_EXCHANGE_RECORDS_MIGRATION_PATH = (
     REPOSITORY_ROOT / "migrations/versions/0004_raw_exchange_records.py"
 )
+CANONICAL_EVENTS_MIGRATION_PATH = REPOSITORY_ROOT / "migrations/versions/0005_canonical_events.py"
 MAX_ALEMBIC_REVISION_ID_LENGTH = 32
 EXPECTED_LOGICAL_SCHEMAS = (
     "pmrp_core",
@@ -78,6 +79,16 @@ def test_raw_exchange_records_migration_revision_metadata_is_stable() -> None:
 
 
 @pytest.mark.unit
+def test_canonical_events_migration_revision_metadata_is_stable() -> None:
+    migration = _load_migration(CANONICAL_EVENTS_MIGRATION_PATH)
+
+    assert migration.revision == "0005_canonical_events"
+    assert migration.down_revision == "0004_raw_exchange_records"
+    assert migration.branch_labels is None
+    assert migration.depends_on is None
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "migration_path",
     [
@@ -85,6 +96,7 @@ def test_raw_exchange_records_migration_revision_metadata_is_stable() -> None:
         SCHEMA_REGISTRY_MIGRATION_PATH,
         EXCHANGE_REGISTRY_MIGRATION_PATH,
         RAW_EXCHANGE_RECORDS_MIGRATION_PATH,
+        CANONICAL_EVENTS_MIGRATION_PATH,
     ],
 )
 def test_migration_revision_ids_fit_alembic_version_column(migration_path: Path) -> None:
@@ -261,6 +273,50 @@ def test_raw_exchange_records_migration_marks_check_constraint_name_as_final(
     assert formatted_names == ["ck_exchange_records__payload_storage"]
     assert [constraint.name for constraint in check_constraints] == [
         "final:ck_exchange_records__payload_storage"
+    ]
+
+
+@pytest.mark.unit
+def test_canonical_events_migration_uses_expected_names() -> None:
+    migration = _load_migration(CANONICAL_EVENTS_MIGRATION_PATH)
+
+    assert migration.SCHEMA_NAME == "pmrp_event"
+    assert migration.EVENT_IDS_TABLE_NAME == "event_ids"
+    assert migration.CANONICAL_EVENTS_TABLE_NAME == "canonical_events"
+    assert migration.TYPE_TIME_INDEX_NAME == "ix_canonical_events__type_time"
+    assert migration.MARKET_TIME_INDEX_NAME == "ix_canonical_events__market_time"
+    assert migration.ORDER_TIME_INDEX_NAME == "ix_canonical_events__order_time"
+    assert migration.CORRELATION_INDEX_NAME == "ix_canonical_events__correlation"
+    assert migration.SCHEMA_VERSION_CHECK_NAME == "ck_canonical_events__schema_version"
+
+
+@pytest.mark.unit
+def test_canonical_events_migration_marks_check_constraint_name_as_final(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    migration = _load_migration(CANONICAL_EVENTS_MIGRATION_PATH)
+    formatted_names: list[str] = []
+    created_table_arguments: list[object] = []
+
+    def fake_format_name(name: str) -> str:
+        formatted_names.append(name)
+        return f"final:{name}"
+
+    def fake_create_table(*arguments: object, **_kwargs: object) -> None:
+        created_table_arguments.extend(arguments)
+
+    monkeypatch.setattr(migration.op, "f", fake_format_name)
+    monkeypatch.setattr(migration.op, "create_table", fake_create_table)
+    monkeypatch.setattr(migration.op, "create_index", lambda *_args, **_kwargs: None)
+
+    migration.upgrade()
+
+    check_constraints = [
+        argument for argument in created_table_arguments if isinstance(argument, CheckConstraint)
+    ]
+    assert formatted_names == ["ck_canonical_events__schema_version"]
+    assert [constraint.name for constraint in check_constraints] == [
+        "final:ck_canonical_events__schema_version"
     ]
 
 

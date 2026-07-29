@@ -39,7 +39,7 @@ def test_migrations_upgrade_downgrade_and_reupgrade_empty_database() -> None:
     command.downgrade(alembic_config, "base")
     command.upgrade(alembic_config, "head")
     assert asyncio.run(_migration_state()) == (
-        "0004_raw_exchange_records",
+        "0005_canonical_events",
         LOGICAL_SCHEMAS,
         True,
     )
@@ -80,13 +80,32 @@ def test_migrations_upgrade_downgrade_and_reupgrade_empty_database() -> None:
         b"\x01\x02",
     )
     asyncio.run(_assert_raw_exchange_record_payload_constraint())
+    assert asyncio.run(_canonical_event_state()) == (
+        True,
+        ("event_id",),
+        True,
+        ("occurred_at", "event_id"),
+        ("ck_canonical_events__schema_version",),
+        (
+            "ix_canonical_events__correlation",
+            "ix_canonical_events__market_time",
+            "ix_canonical_events__order_time",
+            "ix_canonical_events__type_time",
+        ),
+        True,
+        "{}",
+        "{}",
+        "sha256:event",
+    )
+    asyncio.run(_assert_event_id_unique_constraint())
+    asyncio.run(_assert_canonical_event_schema_version_constraint())
 
     command.downgrade(alembic_config, "base")
     assert asyncio.run(_schemas()) == ()
 
     command.upgrade(alembic_config, "head")
     assert asyncio.run(_migration_state()) == (
-        "0004_raw_exchange_records",
+        "0005_canonical_events",
         LOGICAL_SCHEMAS,
         True,
     )
@@ -622,12 +641,239 @@ async def _assert_raw_exchange_record_payload_constraint() -> None:
         await engine.dispose()
 
 
+async def _canonical_event_state() -> tuple[
+    bool,
+    tuple[str, ...],
+    bool,
+    tuple[str, ...],
+    tuple[str, ...],
+    tuple[str, ...],
+    bool,
+    str,
+    str,
+    str,
+]:
+    engine = create_database_engine(
+        database_config_from_environment(os.environ, fallback_url=None),
+    )
+    try:
+        async with engine.begin() as connection:
+            await _create_canonical_event_test_partition(connection)
+            event_id_table_exists = await _table_exists(
+                connection,
+                schema_name="pmrp_event",
+                table_name="event_ids",
+            )
+            event_id_primary_key_columns = await _primary_key_columns(
+                connection,
+                "pmrp_event.event_ids",
+            )
+            canonical_table_exists = await _table_exists(
+                connection,
+                schema_name="pmrp_event",
+                table_name="canonical_events",
+            )
+            canonical_primary_key_columns = await _primary_key_columns(
+                connection,
+                "pmrp_event.canonical_events",
+            )
+            canonical_check_constraint_names = await _check_constraint_names(
+                connection,
+                "pmrp_event.canonical_events",
+            )
+            canonical_index_names = tuple(
+                str(row[0])
+                for row in await connection.execute(
+                    text(
+                        """
+                        SELECT indexname
+                        FROM pg_indexes
+                        WHERE schemaname = 'pmrp_event'
+                          AND tablename = 'canonical_events'
+                          AND indexname IN (
+                              'ix_canonical_events__type_time',
+                              'ix_canonical_events__market_time',
+                              'ix_canonical_events__order_time',
+                              'ix_canonical_events__correlation'
+                          )
+                        ORDER BY indexname
+                        """
+                    )
+                )
+            )
+            partitioned = bool(
+                (
+                    await connection.execute(
+                        text(
+                            """
+                            SELECT EXISTS (
+                                SELECT 1
+                                FROM pg_partitioned_table
+                                WHERE partrelid = 'pmrp_event.canonical_events'::regclass
+                                  AND partstrat = 'r'
+                            )
+                            """
+                        )
+                    )
+                ).scalar_one()
+            )
+
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO pmrp_event.event_ids (event_id, occurred_at)
+                    VALUES ('evt_01j00000000000000000000001', '2026-07-29T12:00:00Z')
+                    """
+                )
+            )
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO pmrp_event.canonical_events (
+                        occurred_at,
+                        event_id,
+                        event_type,
+                        schema_version,
+                        received_at,
+                        published_at,
+                        producer,
+                        correlation_id,
+                        payload,
+                        payload_hash
+                    )
+                    VALUES (
+                        '2026-07-29T12:00:00Z',
+                        'evt_01j00000000000000000000001',
+                        'market.discovered',
+                        1,
+                        '2026-07-29T12:00:00.100000Z',
+                        '2026-07-29T12:00:00.200000Z',
+                        'test-producer',
+                        'corr_01j00000000000000000000001',
+                        '{"event": "ok"}'::jsonb,
+                        'sha256:event'
+                    )
+                    """
+                )
+            )
+            inserted = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT quality_flags::text, attributes::text, payload_hash
+                        FROM pmrp_event.canonical_events
+                        WHERE event_id = 'evt_01j00000000000000000000001'
+                        """
+                    )
+                )
+            ).one()
+            return (
+                event_id_table_exists,
+                event_id_primary_key_columns,
+                canonical_table_exists,
+                canonical_primary_key_columns,
+                canonical_check_constraint_names,
+                canonical_index_names,
+                partitioned,
+                str(inserted[0]),
+                str(inserted[1]),
+                str(inserted[2]),
+            )
+    finally:
+        await engine.dispose()
+
+
+async def _assert_event_id_unique_constraint() -> None:
+    engine = create_database_engine(
+        database_config_from_environment(os.environ, fallback_url=None),
+    )
+    try:
+        async with engine.connect() as connection:
+            transaction = await connection.begin()
+            try:
+                with pytest.raises(IntegrityError):
+                    await connection.execute(
+                        text(
+                            """
+                            INSERT INTO pmrp_event.event_ids (event_id, occurred_at)
+                            VALUES (
+                                'evt_01j00000000000000000000001',
+                                '2026-07-29T12:00:01Z'
+                            )
+                            """
+                        )
+                    )
+            finally:
+                await transaction.rollback()
+    finally:
+        await engine.dispose()
+
+
+async def _assert_canonical_event_schema_version_constraint() -> None:
+    engine = create_database_engine(
+        database_config_from_environment(os.environ, fallback_url=None),
+    )
+    try:
+        async with engine.begin() as connection:
+            await _create_canonical_event_test_partition(connection)
+        async with engine.connect() as connection:
+            transaction = await connection.begin()
+            try:
+                with pytest.raises(IntegrityError):
+                    await connection.execute(
+                        text(
+                            """
+                            INSERT INTO pmrp_event.canonical_events (
+                                occurred_at,
+                                event_id,
+                                event_type,
+                                schema_version,
+                                received_at,
+                                published_at,
+                                producer,
+                                correlation_id,
+                                payload,
+                                payload_hash
+                            )
+                            VALUES (
+                                '2026-07-29T12:00:02Z',
+                                'evt_01j00000000000000000000002',
+                                'market.discovered',
+                                0,
+                                '2026-07-29T12:00:02.100000Z',
+                                '2026-07-29T12:00:02.200000Z',
+                                'test-producer',
+                                'corr_01j00000000000000000000002',
+                                '{}'::jsonb,
+                                'sha256:invalid-event'
+                            )
+                            """
+                        )
+                    )
+            finally:
+                await transaction.rollback()
+    finally:
+        await engine.dispose()
+
+
 async def _create_raw_exchange_record_test_partition(connection: AsyncConnection) -> None:
     await connection.execute(
         text(
             """
             CREATE TABLE IF NOT EXISTS pmrp_raw.exchange_records_2026_07
             PARTITION OF pmrp_raw.exchange_records
+            FOR VALUES FROM ('2026-07-01T00:00:00Z') TO ('2026-08-01T00:00:00Z')
+            """
+        )
+    )
+
+
+async def _create_canonical_event_test_partition(connection: AsyncConnection) -> None:
+    await connection.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS pmrp_event.canonical_events_2026_07
+            PARTITION OF pmrp_event.canonical_events
             FOR VALUES FROM ('2026-07-01T00:00:00Z') TO ('2026-08-01T00:00:00Z')
             """
         )
