@@ -41,6 +41,7 @@ STRATEGY_MODEL_METADATA_MIGRATION_PATH = (
 SIGNALS_FEATURES_MIGRATION_PATH = REPOSITORY_ROOT / "migrations/versions/0011_signals_features.py"
 ORDER_STORAGE_MIGRATION_PATH = REPOSITORY_ROOT / "migrations/versions/0012_order_storage.py"
 FILLS_REGISTRY_MIGRATION_PATH = REPOSITORY_ROOT / "migrations/versions/0013_fills_registry.py"
+PORTFOLIO_STORAGE_MIGRATION_PATH = REPOSITORY_ROOT / "migrations/versions/0014_portfolio_storage.py"
 MAX_ALEMBIC_REVISION_ID_LENGTH = 32
 EXPECTED_LOGICAL_SCHEMAS = (
     "pmrp_core",
@@ -187,6 +188,16 @@ def test_fills_registry_migration_revision_metadata_is_stable() -> None:
 
 
 @pytest.mark.unit
+def test_portfolio_storage_migration_revision_metadata_is_stable() -> None:
+    migration = _load_migration(PORTFOLIO_STORAGE_MIGRATION_PATH)
+
+    assert migration.revision == "0014_portfolio_storage"
+    assert migration.down_revision == "0013_fills_registry"
+    assert migration.branch_labels is None
+    assert migration.depends_on is None
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "migration_path",
     [
@@ -203,6 +214,7 @@ def test_fills_registry_migration_revision_metadata_is_stable() -> None:
         SIGNALS_FEATURES_MIGRATION_PATH,
         ORDER_STORAGE_MIGRATION_PATH,
         FILLS_REGISTRY_MIGRATION_PATH,
+        PORTFOLIO_STORAGE_MIGRATION_PATH,
     ],
 )
 def test_migration_revision_ids_fit_alembic_version_column(migration_path: Path) -> None:
@@ -817,6 +829,74 @@ def test_fills_registry_migration_marks_constraint_names_as_final(
     assert formatted_names == [
         "ck_fills__quantity",
         "uq_fill_ids__fill_id",
+    ]
+    assert final_constraint_names == [f"final:{name}" for name in formatted_names]
+
+
+@pytest.mark.unit
+def test_portfolio_storage_migration_uses_expected_names() -> None:
+    migration = _load_migration(PORTFOLIO_STORAGE_MIGRATION_PATH)
+
+    assert migration.SCHEMA_NAME == "pmrp_portfolio"
+    assert migration.POSITIONS_TABLE_NAME == "positions"
+    assert migration.CASH_BALANCES_TABLE_NAME == "cash_balances"
+    assert migration.JOURNAL_ENTRIES_TABLE_NAME == "journal_entries"
+    assert migration.JOURNAL_LINES_TABLE_NAME == "journal_lines"
+    assert migration.POSITIONS_ACCOUNT_MARKET_INDEX_NAME == "ix_positions__account_market"
+    assert migration.JOURNAL_ENTRIES_REFERENCE_INDEX_NAME == "ix_journal_entries__reference"
+    assert (
+        migration.JOURNAL_LINES_ACCOUNT_CURRENCY_INDEX_NAME == "ix_journal_lines__account_currency"
+    )
+    assert (
+        migration.POSITIONS_ACCOUNT_CONTRACT_UNIQUE_NAME
+        == "uq_positions__exchange_account_contract"
+    )
+    assert (
+        migration.CASH_BALANCES_ACCOUNT_CURRENCY_UNIQUE_NAME
+        == "uq_cash_balances__exchange_account_currency"
+    )
+    assert migration.CASH_BALANCES_IDENTITY_CHECK_NAME == "ck_cash_balances__balance_identity"
+    assert (
+        migration.JOURNAL_ENTRIES_SOURCE_EVENT_UNIQUE_NAME == "uq_journal_entries__source_event_id"
+    )
+    assert (
+        migration.JOURNAL_LINES_ENTRY_FOREIGN_KEY_NAME
+        == "fk_journal_lines__journal_entry_id__journal_entries"
+    )
+
+
+@pytest.mark.unit
+def test_portfolio_storage_migration_marks_constraint_names_as_final(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    migration = _load_migration(PORTFOLIO_STORAGE_MIGRATION_PATH)
+    formatted_names: list[str] = []
+    created_table_arguments: list[object] = []
+
+    def fake_format_name(name: str) -> str:
+        formatted_names.append(name)
+        return f"final:{name}"
+
+    def fake_create_table(*arguments: object, **_kwargs: object) -> None:
+        created_table_arguments.extend(arguments)
+
+    monkeypatch.setattr(migration.op, "f", fake_format_name)
+    monkeypatch.setattr(migration.op, "create_table", fake_create_table)
+    monkeypatch.setattr(migration.op, "create_index", lambda *_args, **_kwargs: None)
+
+    migration.upgrade()
+
+    final_constraint_names = [
+        constraint.name
+        for constraint in created_table_arguments
+        if isinstance(constraint, CheckConstraint | ForeignKeyConstraint | UniqueConstraint)
+    ]
+    assert formatted_names == [
+        "uq_positions__exchange_account_contract",
+        "uq_cash_balances__exchange_account_currency",
+        "ck_cash_balances__balance_identity",
+        "uq_journal_entries__source_event_id",
+        "fk_journal_lines__journal_entry_id__journal_entries",
     ]
     assert final_constraint_names == [f"final:{name}" for name in formatted_names]
 

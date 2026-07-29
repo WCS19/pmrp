@@ -10,6 +10,12 @@ from pmrp.storage.models.idempotency import IdempotencyRecordRow
 from pmrp.storage.models.market_catalog import ContractRow, MarketRow, OutcomeRow
 from pmrp.storage.models.market_data import OrderBookSnapshotRow, TradeRow
 from pmrp.storage.models.orders import OrderIntentRow, OrderRow, OrderStateTransitionRow
+from pmrp.storage.models.portfolio import (
+    CashBalanceRow,
+    JournalEntryRow,
+    JournalLineRow,
+    PositionRow,
+)
 from pmrp.storage.models.raw_exchange import RawExchangeRecordRow
 from pmrp.storage.models.research_metadata import (
     ModelArtifactRow,
@@ -23,6 +29,7 @@ from pmrp.storage.models.schema_registry import SchemaRegistryRow
 __all__ = [
     "NAMING_CONVENTION",
     "CanonicalEventRow",
+    "CashBalanceRow",
     "ContractRow",
     "DeadLetterRecordRow",
     "EventIdRow",
@@ -32,6 +39,8 @@ __all__ = [
     "FillIdRow",
     "FillRow",
     "IdempotencyRecordRow",
+    "JournalEntryRow",
+    "JournalLineRow",
     "MarketRow",
     "ModelArtifactRow",
     "OrderBookSnapshotRow",
@@ -40,6 +49,7 @@ __all__ = [
     "OrderStateTransitionRow",
     "OutboxMessageRow",
     "OutcomeRow",
+    "PositionRow",
     "ProcessedEventRow",
     "RawExchangeRecordRow",
     "SchemaRegistryRow",
