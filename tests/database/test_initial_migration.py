@@ -40,7 +40,7 @@ def test_migrations_upgrade_downgrade_and_reupgrade_empty_database() -> None:
     command.downgrade(alembic_config, "base")
     command.upgrade(alembic_config, "head")
     assert asyncio.run(_migration_state()) == (
-        "0012_order_storage",
+        "0013_fills_registry",
         LOGICAL_SCHEMAS,
         True,
     )
@@ -276,13 +276,33 @@ def test_migrations_upgrade_downgrade_and_reupgrade_empty_database() -> None:
         True,
     )
     asyncio.run(_assert_order_storage_constraints())
+    assert asyncio.run(_fills_registry_state()) == (
+        True,
+        ("exchange_occurred_at", "fill_id"),
+        ("ck_fills__quantity",),
+        True,
+        (
+            "ix_fills__account_time",
+            "ix_fills__order_time",
+        ),
+        True,
+        "0.420000000000000000",
+        "2.500000000000000000",
+        "0.010000000000000000",
+        "0.005000000000000000",
+        True,
+        ("exchange", "account_id", "exchange_fill_id"),
+        ("uq_fill_ids__fill_id",),
+        True,
+    )
+    asyncio.run(_assert_fills_registry_constraints())
 
     command.downgrade(alembic_config, "base")
     assert asyncio.run(_schemas()) == ()
 
     command.upgrade(alembic_config, "head")
     assert asyncio.run(_migration_state()) == (
-        "0012_order_storage",
+        "0013_fills_registry",
         LOGICAL_SCHEMAS,
         True,
     )
@@ -3173,6 +3193,262 @@ async def _assert_order_storage_constraints() -> None:
     )
 
 
+async def _fills_registry_state() -> tuple[
+    bool,
+    tuple[str, ...],
+    tuple[str, ...],
+    bool,
+    tuple[str, ...],
+    bool,
+    str,
+    str,
+    str,
+    str,
+    bool,
+    tuple[str, ...],
+    tuple[str, ...],
+    bool,
+]:
+    engine = create_database_engine(
+        database_config_from_environment(os.environ, fallback_url=None),
+    )
+    try:
+        async with engine.begin() as connection:
+            fill_table_exists = await _table_exists(
+                connection,
+                schema_name="pmrp_execution",
+                table_name="fills",
+            )
+            fill_primary_key_columns = await _primary_key_columns(
+                connection,
+                "pmrp_execution.fills",
+            )
+            fill_check_constraint_names = await _check_constraint_names(
+                connection,
+                "pmrp_execution.fills",
+            )
+            fill_partitioned = await _partitioned_table_exists(
+                connection,
+                "pmrp_execution.fills",
+            )
+            fill_index_names = await _index_names(
+                connection,
+                schema_name="pmrp_execution",
+                table_name="fills",
+                expected_names=("ix_fills__account_time", "ix_fills__order_time"),
+            )
+            fill_account_index_descending = bool(
+                (
+                    await connection.execute(
+                        text(
+                            """
+                            SELECT indexdef LIKE '%exchange_occurred_at DESC%'
+                            FROM pg_indexes
+                            WHERE schemaname = 'pmrp_execution'
+                              AND tablename = 'fills'
+                              AND indexname = 'ix_fills__account_time'
+                            """
+                        )
+                    )
+                ).scalar_one()
+            )
+            fill_id_table_exists = await _table_exists(
+                connection,
+                schema_name="pmrp_execution",
+                table_name="fill_ids",
+            )
+            fill_id_primary_key_columns = await _primary_key_columns(
+                connection,
+                "pmrp_execution.fill_ids",
+            )
+            fill_id_unique_constraint_names = await _constraint_names(
+                connection,
+                "pmrp_execution.fill_ids",
+                constraint_type="u",
+            )
+
+            await _create_fill_test_partition(connection)
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO pmrp_execution.fills (
+                        exchange_occurred_at,
+                        fill_id,
+                        exchange_fill_id,
+                        order_id,
+                        exchange_order_id,
+                        client_order_id,
+                        exchange,
+                        account_id,
+                        market_id,
+                        contract_id,
+                        outcome_id,
+                        side,
+                        price,
+                        quantity,
+                        liquidity_role,
+                        fee_amount,
+                        fee_currency,
+                        rebate_amount,
+                        rebate_currency,
+                        received_at,
+                        trade_id,
+                        source_event_id
+                    )
+                    VALUES (
+                        '2026-07-29T12:11:00Z',
+                        'fill_01j00000000000000000000001',
+                        'exchange-fill-1',
+                        'ord_01j00000000000000000000001',
+                        'exchange-order-1',
+                        'client-order-1',
+                        'kalshi',
+                        'acct_01j00000000000000000000001',
+                        'mkt_01j00000000000000000000001',
+                        'ctr_01j00000000000000000000001',
+                        'out_01j00000000000000000000001',
+                        'buy',
+                        0.420000000000000000,
+                        2.500000000000000000,
+                        'taker',
+                        0.010000000000000000,
+                        'USD',
+                        0.005000000000000000,
+                        'USD',
+                        '2026-07-29T12:11:00.100000Z',
+                        'trd_01j00000000000000000000001',
+                        'evt_01j00000000000000000000007'
+                    )
+                    """
+                )
+            )
+            inserted_fill = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT price, quantity, fee_amount, rebate_amount
+                        FROM pmrp_execution.fills
+                        WHERE fill_id = 'fill_01j00000000000000000000001'
+                        """
+                    )
+                )
+            ).one()
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO pmrp_execution.fill_ids (
+                        exchange,
+                        account_id,
+                        exchange_fill_id,
+                        fill_id,
+                        exchange_occurred_at
+                    )
+                    VALUES (
+                        'kalshi',
+                        'acct_01j00000000000000000000001',
+                        'exchange-fill-1',
+                        'fill_01j00000000000000000000001',
+                        '2026-07-29T12:11:00Z'
+                    )
+                    """
+                )
+            )
+            inserted_fill_id = bool(
+                (
+                    await connection.execute(
+                        text(
+                            """
+                            SELECT created_at IS NOT NULL
+                            FROM pmrp_execution.fill_ids
+                            WHERE exchange = 'kalshi'
+                              AND account_id = 'acct_01j00000000000000000000001'
+                              AND exchange_fill_id = 'exchange-fill-1'
+                            """
+                        )
+                    )
+                ).scalar_one()
+            )
+            return (
+                fill_table_exists,
+                fill_primary_key_columns,
+                fill_check_constraint_names,
+                fill_partitioned,
+                fill_index_names,
+                fill_account_index_descending,
+                _numeric_18_text(inserted_fill[0]),
+                _numeric_18_text(inserted_fill[1]),
+                _numeric_18_text(inserted_fill[2]),
+                _numeric_18_text(inserted_fill[3]),
+                fill_id_table_exists,
+                fill_id_primary_key_columns,
+                fill_id_unique_constraint_names,
+                inserted_fill_id,
+            )
+    finally:
+        await engine.dispose()
+
+
+async def _assert_fills_registry_constraints() -> None:
+    await _assert_integrity_error(
+        """
+        INSERT INTO pmrp_execution.fills (
+            exchange_occurred_at,
+            fill_id,
+            exchange_fill_id,
+            order_id,
+            client_order_id,
+            exchange,
+            account_id,
+            market_id,
+            contract_id,
+            outcome_id,
+            side,
+            price,
+            quantity,
+            liquidity_role,
+            received_at,
+            source_event_id
+        )
+        VALUES (
+            '2026-07-29T12:12:00Z',
+            'fill_01j00000000000000000000002',
+            'exchange-fill-invalid',
+            'ord_01j00000000000000000000001',
+            'client-order-1',
+            'kalshi',
+            'acct_01j00000000000000000000001',
+            'mkt_01j00000000000000000000001',
+            'ctr_01j00000000000000000000001',
+            'out_01j00000000000000000000001',
+            'buy',
+            0.420000000000000000,
+            0.000000000000000000,
+            'taker',
+            '2026-07-29T12:12:00.100000Z',
+            'evt_01j00000000000000000000007'
+        )
+        """
+    )
+    await _assert_integrity_error(
+        """
+        INSERT INTO pmrp_execution.fill_ids (
+            exchange,
+            account_id,
+            exchange_fill_id,
+            fill_id,
+            exchange_occurred_at
+        )
+        VALUES (
+            'kalshi',
+            'acct_01j00000000000000000000001',
+            'exchange-fill-duplicate',
+            'fill_01j00000000000000000000001',
+            '2026-07-29T12:12:00Z'
+        )
+        """
+    )
+
+
 async def _create_raw_exchange_record_test_partition(connection: AsyncConnection) -> None:
     await connection.execute(
         text(
@@ -3227,6 +3503,18 @@ async def _create_feature_snapshot_test_partition(connection: AsyncConnection) -
             """
             CREATE TABLE IF NOT EXISTS pmrp_research.feature_snapshots_2026_07
             PARTITION OF pmrp_research.feature_snapshots
+            FOR VALUES FROM ('2026-07-01T00:00:00Z') TO ('2026-08-01T00:00:00Z')
+            """
+        )
+    )
+
+
+async def _create_fill_test_partition(connection: AsyncConnection) -> None:
+    await connection.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS pmrp_execution.fills_2026_07
+            PARTITION OF pmrp_execution.fills
             FOR VALUES FROM ('2026-07-01T00:00:00Z') TO ('2026-08-01T00:00:00Z')
             """
         )
