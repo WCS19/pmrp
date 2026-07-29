@@ -29,6 +29,9 @@ PROCESSED_EVENTS_OUTBOX_MIGRATION_PATH = (
 IDEMPOTENCY_DEAD_LETTERS_MIGRATION_PATH = (
     REPOSITORY_ROOT / "migrations/versions/0007_idempotency_dead_letters.py"
 )
+MARKET_CATALOG_MIGRATION_PATH = (
+    REPOSITORY_ROOT / "migrations/versions/0008_market_catalog_tables.py"
+)
 MAX_ALEMBIC_REVISION_ID_LENGTH = 32
 EXPECTED_LOGICAL_SCHEMAS = (
     "pmrp_core",
@@ -115,6 +118,16 @@ def test_idempotency_dead_letters_migration_revision_metadata_is_stable() -> Non
 
 
 @pytest.mark.unit
+def test_market_catalog_migration_revision_metadata_is_stable() -> None:
+    migration = _load_migration(MARKET_CATALOG_MIGRATION_PATH)
+
+    assert migration.revision == "0008_market_catalog_tables"
+    assert migration.down_revision == "0007_idempotency_dead_letters"
+    assert migration.branch_labels is None
+    assert migration.depends_on is None
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "migration_path",
     [
@@ -125,6 +138,7 @@ def test_idempotency_dead_letters_migration_revision_metadata_is_stable() -> Non
         CANONICAL_EVENTS_MIGRATION_PATH,
         PROCESSED_EVENTS_OUTBOX_MIGRATION_PATH,
         IDEMPOTENCY_DEAD_LETTERS_MIGRATION_PATH,
+        MARKET_CATALOG_MIGRATION_PATH,
     ],
 )
 def test_migration_revision_ids_fit_alembic_version_column(migration_path: Path) -> None:
@@ -400,6 +414,65 @@ def test_idempotency_dead_letters_migration_uses_expected_names() -> None:
     assert migration.DEAD_LETTER_RECORDS_TABLE_NAME == "dead_letter_records"
     assert migration.IDEMPOTENCY_EXPIRES_INDEX_NAME == "ix_idempotency_records__expires"
     assert migration.DEAD_LETTER_UNRESOLVED_INDEX_NAME == ("ix_dead_letter_records__unresolved")
+
+
+@pytest.mark.unit
+def test_market_catalog_migration_uses_expected_names() -> None:
+    migration = _load_migration(MARKET_CATALOG_MIGRATION_PATH)
+
+    assert migration.SCHEMA_NAME == "pmrp_market"
+    assert migration.MARKETS_TABLE_NAME == "markets"
+    assert migration.OUTCOMES_TABLE_NAME == "outcomes"
+    assert migration.CONTRACTS_TABLE_NAME == "contracts"
+    assert migration.MARKETS_EXCHANGE_STATUS_INDEX_NAME == "ix_markets__exchange_status"
+    assert migration.MARKETS_STATUS_CLOSES_INDEX_NAME == "ix_markets__status_closes"
+    assert migration.MARKETS_UPDATED_INDEX_NAME == "ix_markets__updated"
+    assert migration.OUTCOMES_MARKET_INDEX_NAME == "ix_outcomes__market"
+    assert migration.CONTRACTS_MARKET_ACTIVE_INDEX_NAME == "ix_contracts__market_active"
+    assert migration.MARKETS_PAYOUT_CHECK_NAME == "ck_markets__payout_per_unit"
+    assert migration.MARKETS_TICK_SIZE_CHECK_NAME == "ck_markets__tick_size"
+    assert migration.MARKETS_QUANTITY_INCREMENT_CHECK_NAME == ("ck_markets__quantity_increment")
+
+
+@pytest.mark.unit
+def test_market_catalog_migration_marks_constraint_names_as_final(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    migration = _load_migration(MARKET_CATALOG_MIGRATION_PATH)
+    formatted_names: list[str] = []
+    created_table_arguments: list[object] = []
+
+    def fake_format_name(name: str) -> str:
+        formatted_names.append(name)
+        return f"final:{name}"
+
+    def fake_create_table(*arguments: object, **_kwargs: object) -> None:
+        created_table_arguments.extend(arguments)
+
+    monkeypatch.setattr(migration.op, "f", fake_format_name)
+    monkeypatch.setattr(migration.op, "create_table", fake_create_table)
+    monkeypatch.setattr(migration.op, "create_index", lambda *_args, **_kwargs: None)
+
+    migration.upgrade()
+
+    final_constraint_names = [
+        constraint.name
+        for constraint in created_table_arguments
+        if isinstance(constraint, CheckConstraint | ForeignKeyConstraint | UniqueConstraint)
+    ]
+    assert formatted_names == [
+        "uq_markets__exchange_exchange_market_id",
+        "ck_markets__payout_per_unit",
+        "ck_markets__tick_size",
+        "ck_markets__quantity_increment",
+        "fk_outcomes__market_id__markets",
+        "uq_outcomes__market_id_outcome_index",
+        "uq_outcomes__market_id_normalized_name",
+        "fk_contracts__market_id__markets",
+        "fk_contracts__outcome_id__outcomes",
+        "uq_contracts__market_id_outcome_id",
+    ]
+    assert final_constraint_names == [f"final:{name}" for name in formatted_names]
 
 
 def _load_initial_migration() -> ModuleType:

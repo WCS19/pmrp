@@ -39,7 +39,7 @@ def test_migrations_upgrade_downgrade_and_reupgrade_empty_database() -> None:
     command.downgrade(alembic_config, "base")
     command.upgrade(alembic_config, "head")
     assert asyncio.run(_migration_state()) == (
-        "0007_idempotency_dead_letters",
+        "0008_market_catalog_tables",
         LOGICAL_SCHEMAS,
         True,
     )
@@ -127,13 +127,51 @@ def test_migrations_upgrade_downgrade_and_reupgrade_empty_database() -> None:
         True,
     )
     asyncio.run(_assert_idempotency_primary_key_constraint())
+    assert asyncio.run(_market_catalog_state()) == (
+        True,
+        ("market_id",),
+        ("uq_markets__exchange_exchange_market_id",),
+        (
+            "ck_markets__payout_per_unit",
+            "ck_markets__quantity_increment",
+            "ck_markets__tick_size",
+        ),
+        (
+            "ix_markets__exchange_status",
+            "ix_markets__status_closes",
+            "ix_markets__updated",
+        ),
+        True,
+        "{}",
+        0,
+        True,
+        ("outcome_id",),
+        ("fk_outcomes__market_id__markets",),
+        (
+            "uq_outcomes__market_id_normalized_name",
+            "uq_outcomes__market_id_outcome_index",
+        ),
+        ("ix_outcomes__market",),
+        True,
+        "{}",
+        True,
+        ("contract_id",),
+        (
+            "fk_contracts__market_id__markets",
+            "fk_contracts__outcome_id__outcomes",
+        ),
+        ("uq_contracts__market_id_outcome_id",),
+        ("ix_contracts__market_active",),
+        "0.010000000000000000",
+    )
+    asyncio.run(_assert_market_catalog_constraints())
 
     command.downgrade(alembic_config, "base")
     assert asyncio.run(_schemas()) == ()
 
     command.upgrade(alembic_config, "head")
     assert asyncio.run(_migration_state()) == (
-        "0007_idempotency_dead_letters",
+        "0008_market_catalog_tables",
         LOGICAL_SCHEMAS,
         True,
     )
@@ -1274,6 +1312,357 @@ async def _assert_idempotency_primary_key_constraint() -> None:
         await engine.dispose()
 
 
+async def _market_catalog_state() -> tuple[
+    bool,
+    tuple[str, ...],
+    tuple[str, ...],
+    tuple[str, ...],
+    tuple[str, ...],
+    bool,
+    str,
+    int,
+    bool,
+    tuple[str, ...],
+    tuple[str, ...],
+    tuple[str, ...],
+    tuple[str, ...],
+    bool,
+    str,
+    bool,
+    tuple[str, ...],
+    tuple[str, ...],
+    tuple[str, ...],
+    tuple[str, ...],
+    str,
+]:
+    engine = create_database_engine(
+        database_config_from_environment(os.environ, fallback_url=None),
+    )
+    try:
+        async with engine.begin() as connection:
+            market_table_exists = await _table_exists(
+                connection,
+                schema_name="pmrp_market",
+                table_name="markets",
+            )
+            market_primary_key_columns = await _primary_key_columns(
+                connection,
+                "pmrp_market.markets",
+            )
+            market_unique_constraint_names = await _constraint_names(
+                connection,
+                "pmrp_market.markets",
+                constraint_type="u",
+            )
+            market_check_constraint_names = await _check_constraint_names(
+                connection,
+                "pmrp_market.markets",
+            )
+            market_index_names = await _index_names(
+                connection,
+                schema_name="pmrp_market",
+                table_name="markets",
+                expected_names=(
+                    "ix_markets__exchange_status",
+                    "ix_markets__status_closes",
+                    "ix_markets__updated",
+                ),
+            )
+            market_updated_index_descending = bool(
+                (
+                    await connection.execute(
+                        text(
+                            """
+                            SELECT indexdef LIKE '%updated_at DESC%'
+                            FROM pg_indexes
+                            WHERE schemaname = 'pmrp_market'
+                              AND tablename = 'markets'
+                              AND indexname = 'ix_markets__updated'
+                            """
+                        )
+                    )
+                ).scalar_one()
+            )
+            outcome_table_exists = await _table_exists(
+                connection,
+                schema_name="pmrp_market",
+                table_name="outcomes",
+            )
+            outcome_primary_key_columns = await _primary_key_columns(
+                connection,
+                "pmrp_market.outcomes",
+            )
+            outcome_foreign_key_names = await _constraint_names(
+                connection,
+                "pmrp_market.outcomes",
+                constraint_type="f",
+            )
+            outcome_unique_constraint_names = await _constraint_names(
+                connection,
+                "pmrp_market.outcomes",
+                constraint_type="u",
+            )
+            outcome_index_names = await _index_names(
+                connection,
+                schema_name="pmrp_market",
+                table_name="outcomes",
+                expected_names=("ix_outcomes__market",),
+            )
+            contract_table_exists = await _table_exists(
+                connection,
+                schema_name="pmrp_market",
+                table_name="contracts",
+            )
+            contract_primary_key_columns = await _primary_key_columns(
+                connection,
+                "pmrp_market.contracts",
+            )
+            contract_foreign_key_names = await _constraint_names(
+                connection,
+                "pmrp_market.contracts",
+                constraint_type="f",
+            )
+            contract_unique_constraint_names = await _constraint_names(
+                connection,
+                "pmrp_market.contracts",
+                constraint_type="u",
+            )
+            contract_index_names = await _index_names(
+                connection,
+                schema_name="pmrp_market",
+                table_name="contracts",
+                expected_names=("ix_contracts__market_active",),
+            )
+
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO pmrp_market.markets (
+                        market_id,
+                        exchange,
+                        exchange_market_id,
+                        title,
+                        outcome_type,
+                        status,
+                        closes_at,
+                        currency,
+                        payout_per_unit,
+                        tick_size,
+                        quantity_increment,
+                        created_at,
+                        updated_at
+                    )
+                    VALUES (
+                        'mkt_01j00000000000000000000001',
+                        'kalshi',
+                        'FED-26SEP-T4.50',
+                        'Federal funds target rate above 4.50%',
+                        'binary',
+                        'open',
+                        '2026-09-30T20:00:00Z',
+                        'USD',
+                        1.000000000000000000,
+                        0.010000000000000000,
+                        1.000000000000000000,
+                        '2026-07-29T12:00:00Z',
+                        '2026-07-29T12:00:00Z'
+                    )
+                    """
+                )
+            )
+            market_inserted = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT tags::text, aggregate_version
+                        FROM pmrp_market.markets
+                        WHERE market_id = 'mkt_01j00000000000000000000001'
+                        """
+                    )
+                )
+            ).one()
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO pmrp_market.outcomes (
+                        outcome_id,
+                        market_id,
+                        name,
+                        normalized_name,
+                        outcome_index,
+                        payout_per_unit
+                    )
+                    VALUES (
+                        'out_01j00000000000000000000001',
+                        'mkt_01j00000000000000000000001',
+                        'Yes',
+                        'yes',
+                        0,
+                        1.000000000000000000
+                    )
+                    """
+                )
+            )
+            outcome_inserted = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT is_tradeable, metadata::text
+                        FROM pmrp_market.outcomes
+                        WHERE outcome_id = 'out_01j00000000000000000000001'
+                        """
+                    )
+                )
+            ).one()
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO pmrp_market.contracts (
+                        contract_id,
+                        market_id,
+                        outcome_id,
+                        display_name,
+                        tick_size,
+                        quantity_increment,
+                        min_order_quantity,
+                        active,
+                        created_at,
+                        updated_at
+                    )
+                    VALUES (
+                        'ctr_01j00000000000000000000001',
+                        'mkt_01j00000000000000000000001',
+                        'out_01j00000000000000000000001',
+                        'Yes',
+                        0.010000000000000000,
+                        1.000000000000000000,
+                        1.000000000000000000,
+                        true,
+                        '2026-07-29T12:00:00Z',
+                        '2026-07-29T12:00:00Z'
+                    )
+                    """
+                )
+            )
+            contract_tick_size = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT tick_size
+                        FROM pmrp_market.contracts
+                        WHERE contract_id = 'ctr_01j00000000000000000000001'
+                        """
+                    )
+                )
+            ).scalar_one()
+            return (
+                market_table_exists,
+                market_primary_key_columns,
+                market_unique_constraint_names,
+                market_check_constraint_names,
+                market_index_names,
+                market_updated_index_descending,
+                str(market_inserted[0]),
+                int(market_inserted[1]),
+                outcome_table_exists,
+                outcome_primary_key_columns,
+                outcome_foreign_key_names,
+                outcome_unique_constraint_names,
+                outcome_index_names,
+                bool(outcome_inserted[0]),
+                str(outcome_inserted[1]),
+                contract_table_exists,
+                contract_primary_key_columns,
+                contract_foreign_key_names,
+                contract_unique_constraint_names,
+                contract_index_names,
+                str(contract_tick_size),
+            )
+    finally:
+        await engine.dispose()
+
+
+async def _assert_market_catalog_constraints() -> None:
+    await _assert_integrity_error(
+        """
+        INSERT INTO pmrp_market.markets (
+            market_id,
+            exchange,
+            exchange_market_id,
+            title,
+            outcome_type,
+            status,
+            currency,
+            payout_per_unit,
+            tick_size,
+            quantity_increment,
+            created_at,
+            updated_at
+        )
+        VALUES (
+            'mkt_01j00000000000000000000002',
+            'kalshi',
+            'NEGATIVE-PAYOUT',
+            'Invalid market',
+            'binary',
+            'open',
+            'USD',
+            -1.000000000000000000,
+            0.010000000000000000,
+            1.000000000000000000,
+            '2026-07-29T12:00:00Z',
+            '2026-07-29T12:00:00Z'
+        )
+        """
+    )
+    await _assert_integrity_error(
+        """
+        INSERT INTO pmrp_market.outcomes (
+            outcome_id,
+            market_id,
+            name,
+            normalized_name,
+            outcome_index,
+            payout_per_unit
+        )
+        VALUES (
+            'out_01j00000000000000000000002',
+            'mkt_missing',
+            'No',
+            'no',
+            1,
+            1.000000000000000000
+        )
+        """
+    )
+    await _assert_integrity_error(
+        """
+        INSERT INTO pmrp_market.contracts (
+            contract_id,
+            market_id,
+            outcome_id,
+            display_name,
+            tick_size,
+            quantity_increment,
+            active,
+            created_at,
+            updated_at
+        )
+        VALUES (
+            'ctr_01j00000000000000000000002',
+            'mkt_01j00000000000000000000001',
+            'out_01j00000000000000000000001',
+            'Duplicate Yes',
+            0.010000000000000000,
+            1.000000000000000000,
+            true,
+            '2026-07-29T12:00:00Z',
+            '2026-07-29T12:00:00Z'
+        )
+        """
+    )
+
+
 async def _create_raw_exchange_record_test_partition(connection: AsyncConnection) -> None:
     await connection.execute(
         text(
@@ -1360,6 +1749,73 @@ async def _check_constraint_names(connection: AsyncConnection, table_name: str) 
             {"table_name": table_name},
         )
     )
+
+
+async def _constraint_names(
+    connection: AsyncConnection,
+    table_name: str,
+    *,
+    constraint_type: str,
+) -> tuple[str, ...]:
+    return tuple(
+        str(row[0])
+        for row in await connection.execute(
+            text(
+                """
+                SELECT conname
+                FROM pg_constraint
+                WHERE conrelid = CAST(:table_name AS regclass)
+                  AND contype::text = :constraint_type
+                ORDER BY conname
+                """
+            ),
+            {"table_name": table_name, "constraint_type": constraint_type},
+        )
+    )
+
+
+async def _index_names(
+    connection: AsyncConnection,
+    *,
+    schema_name: str,
+    table_name: str,
+    expected_names: tuple[str, ...],
+) -> tuple[str, ...]:
+    statement = text(
+        """
+        SELECT indexname
+        FROM pg_indexes
+        WHERE schemaname = :schema_name
+          AND tablename = :table_name
+          AND indexname IN :expected_names
+        ORDER BY indexname
+        """
+    ).bindparams(bindparam("expected_names", expanding=True))
+    result = await connection.execute(
+        statement,
+        {
+            "schema_name": schema_name,
+            "table_name": table_name,
+            "expected_names": expected_names,
+        },
+    )
+    return tuple(str(row[0]) for row in result)
+
+
+async def _assert_integrity_error(statement: str) -> None:
+    engine = create_database_engine(
+        database_config_from_environment(os.environ, fallback_url=None),
+    )
+    try:
+        async with engine.connect() as connection:
+            transaction = await connection.begin()
+            try:
+                with pytest.raises(IntegrityError):
+                    await connection.execute(text(statement))
+            finally:
+                await transaction.rollback()
+    finally:
+        await engine.dispose()
 
 
 async def _schemas_for_connection(connection: AsyncConnection) -> tuple[str, ...]:
