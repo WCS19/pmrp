@@ -8,7 +8,7 @@ from types import ModuleType
 from typing import cast
 
 import pytest
-from sqlalchemy import CheckConstraint, ForeignKeyConstraint
+from sqlalchemy import CheckConstraint, ForeignKeyConstraint, UniqueConstraint
 from sqlalchemy.schema import CreateSchema, DropSchema
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
@@ -23,6 +23,9 @@ RAW_EXCHANGE_RECORDS_MIGRATION_PATH = (
     REPOSITORY_ROOT / "migrations/versions/0004_raw_exchange_records.py"
 )
 CANONICAL_EVENTS_MIGRATION_PATH = REPOSITORY_ROOT / "migrations/versions/0005_canonical_events.py"
+PROCESSED_EVENTS_OUTBOX_MIGRATION_PATH = (
+    REPOSITORY_ROOT / "migrations/versions/0006_processed_events_outbox.py"
+)
 MAX_ALEMBIC_REVISION_ID_LENGTH = 32
 EXPECTED_LOGICAL_SCHEMAS = (
     "pmrp_core",
@@ -89,6 +92,16 @@ def test_canonical_events_migration_revision_metadata_is_stable() -> None:
 
 
 @pytest.mark.unit
+def test_processed_events_outbox_migration_revision_metadata_is_stable() -> None:
+    migration = _load_migration(PROCESSED_EVENTS_OUTBOX_MIGRATION_PATH)
+
+    assert migration.revision == "0006_processed_events_outbox"
+    assert migration.down_revision == "0005_canonical_events"
+    assert migration.branch_labels is None
+    assert migration.depends_on is None
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "migration_path",
     [
@@ -97,6 +110,7 @@ def test_canonical_events_migration_revision_metadata_is_stable() -> None:
         EXCHANGE_REGISTRY_MIGRATION_PATH,
         RAW_EXCHANGE_RECORDS_MIGRATION_PATH,
         CANONICAL_EVENTS_MIGRATION_PATH,
+        PROCESSED_EVENTS_OUTBOX_MIGRATION_PATH,
     ],
 )
 def test_migration_revision_ids_fit_alembic_version_column(migration_path: Path) -> None:
@@ -317,6 +331,48 @@ def test_canonical_events_migration_marks_check_constraint_name_as_final(
     assert formatted_names == ["ck_canonical_events__schema_version"]
     assert [constraint.name for constraint in check_constraints] == [
         "final:ck_canonical_events__schema_version"
+    ]
+
+
+@pytest.mark.unit
+def test_processed_events_outbox_migration_uses_expected_names() -> None:
+    migration = _load_migration(PROCESSED_EVENTS_OUTBOX_MIGRATION_PATH)
+
+    assert migration.SCHEMA_NAME == "pmrp_event"
+    assert migration.PROCESSED_EVENTS_TABLE_NAME == "processed_events"
+    assert migration.OUTBOX_MESSAGES_TABLE_NAME == "outbox_messages"
+    assert migration.PROCESSED_EVENTS_TIME_INDEX_NAME == "ix_processed_events__time"
+    assert migration.OUTBOX_PENDING_INDEX_NAME == "ix_outbox_messages__pending"
+    assert migration.OUTBOX_EVENT_TOPIC_UNIQUE_NAME == "uq_outbox_messages__event_id_topic"
+
+
+@pytest.mark.unit
+def test_processed_events_outbox_migration_marks_unique_constraint_name_as_final(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    migration = _load_migration(PROCESSED_EVENTS_OUTBOX_MIGRATION_PATH)
+    formatted_names: list[str] = []
+    created_table_arguments: list[object] = []
+
+    def fake_format_name(name: str) -> str:
+        formatted_names.append(name)
+        return f"final:{name}"
+
+    def fake_create_table(*arguments: object, **_kwargs: object) -> None:
+        created_table_arguments.extend(arguments)
+
+    monkeypatch.setattr(migration.op, "f", fake_format_name)
+    monkeypatch.setattr(migration.op, "create_table", fake_create_table)
+    monkeypatch.setattr(migration.op, "create_index", lambda *_args, **_kwargs: None)
+
+    migration.upgrade()
+
+    unique_constraints = [
+        argument for argument in created_table_arguments if isinstance(argument, UniqueConstraint)
+    ]
+    assert formatted_names == ["uq_outbox_messages__event_id_topic"]
+    assert [constraint.name for constraint in unique_constraints] == [
+        "final:uq_outbox_messages__event_id_topic"
     ]
 
 
