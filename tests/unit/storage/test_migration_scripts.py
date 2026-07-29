@@ -38,6 +38,7 @@ ORDER_BOOKS_TRADES_MIGRATION_PATH = (
 STRATEGY_MODEL_METADATA_MIGRATION_PATH = (
     REPOSITORY_ROOT / "migrations/versions/0010_strategy_model_metadata.py"
 )
+SIGNALS_FEATURES_MIGRATION_PATH = REPOSITORY_ROOT / "migrations/versions/0011_signals_features.py"
 MAX_ALEMBIC_REVISION_ID_LENGTH = 32
 EXPECTED_LOGICAL_SCHEMAS = (
     "pmrp_core",
@@ -154,6 +155,16 @@ def test_strategy_model_metadata_migration_revision_metadata_is_stable() -> None
 
 
 @pytest.mark.unit
+def test_signals_features_migration_revision_metadata_is_stable() -> None:
+    migration = _load_migration(SIGNALS_FEATURES_MIGRATION_PATH)
+
+    assert migration.revision == "0011_signals_features"
+    assert migration.down_revision == "0010_strategy_model_metadata"
+    assert migration.branch_labels is None
+    assert migration.depends_on is None
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "migration_path",
     [
@@ -167,6 +178,7 @@ def test_strategy_model_metadata_migration_revision_metadata_is_stable() -> None
         MARKET_CATALOG_MIGRATION_PATH,
         ORDER_BOOKS_TRADES_MIGRATION_PATH,
         STRATEGY_MODEL_METADATA_MIGRATION_PATH,
+        SIGNALS_FEATURES_MIGRATION_PATH,
     ],
 )
 def test_migration_revision_ids_fit_alembic_version_column(migration_path: Path) -> None:
@@ -613,6 +625,51 @@ def test_strategy_model_metadata_migration_marks_constraint_names_as_final(
         "fk_strategy_configurations__strategy_id__strategy_instances",
         "uq_strategy_configurations__strategy_id_configuration_hash",
     ]
+    assert final_constraint_names == [f"final:{name}" for name in formatted_names]
+
+
+@pytest.mark.unit
+def test_signals_features_migration_uses_expected_names() -> None:
+    migration = _load_migration(SIGNALS_FEATURES_MIGRATION_PATH)
+
+    assert migration.SCHEMA_NAME == "pmrp_research"
+    assert migration.SIGNALS_TABLE_NAME == "signals"
+    assert migration.FEATURE_SNAPSHOTS_TABLE_NAME == "feature_snapshots"
+    assert migration.SIGNALS_STRATEGY_TIME_INDEX_NAME == "ix_signals__strategy_time"
+    assert migration.SIGNALS_MARKET_TIME_INDEX_NAME == "ix_signals__market_time"
+    assert migration.FEATURE_SNAPSHOTS_MARKET_TIME_INDEX_NAME == (
+        "ix_feature_snapshots__market_time"
+    )
+    assert migration.SIGNALS_FAIR_PROBABILITY_CHECK_NAME == "ck_signals__fair_probability"
+
+
+@pytest.mark.unit
+def test_signals_features_migration_marks_constraint_names_as_final(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    migration = _load_migration(SIGNALS_FEATURES_MIGRATION_PATH)
+    formatted_names: list[str] = []
+    created_table_arguments: list[object] = []
+
+    def fake_format_name(name: str) -> str:
+        formatted_names.append(name)
+        return f"final:{name}"
+
+    def fake_create_table(*arguments: object, **_kwargs: object) -> None:
+        created_table_arguments.extend(arguments)
+
+    monkeypatch.setattr(migration.op, "f", fake_format_name)
+    monkeypatch.setattr(migration.op, "create_table", fake_create_table)
+    monkeypatch.setattr(migration.op, "create_index", lambda *_args, **_kwargs: None)
+
+    migration.upgrade()
+
+    final_constraint_names = [
+        constraint.name
+        for constraint in created_table_arguments
+        if isinstance(constraint, CheckConstraint)
+    ]
+    assert formatted_names == ["ck_signals__fair_probability"]
     assert final_constraint_names == [f"final:{name}" for name in formatted_names]
 
 

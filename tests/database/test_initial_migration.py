@@ -39,7 +39,7 @@ def test_migrations_upgrade_downgrade_and_reupgrade_empty_database() -> None:
     command.downgrade(alembic_config, "base")
     command.upgrade(alembic_config, "head")
     assert asyncio.run(_migration_state()) == (
-        "0010_strategy_model_metadata",
+        "0011_signals_features",
         LOGICAL_SCHEMAS,
         True,
     )
@@ -210,13 +210,34 @@ def test_migrations_upgrade_downgrade_and_reupgrade_empty_database() -> None:
         True,
     )
     asyncio.run(_assert_strategy_model_metadata_constraints())
+    assert asyncio.run(_signals_features_state()) == (
+        True,
+        ("generated_at", "signal_id"),
+        ("ck_signals__fair_probability",),
+        True,
+        (
+            "ix_signals__market_time",
+            "ix_signals__strategy_time",
+        ),
+        True,
+        "0.050000000000000000",
+        "0.620000000000000000",
+        "0.900000000000000000",
+        True,
+        ("observed_at", "feature_snapshot_id"),
+        True,
+        ("ix_feature_snapshots__market_time",),
+        True,
+        True,
+    )
+    asyncio.run(_assert_signals_features_constraints())
 
     command.downgrade(alembic_config, "base")
     assert asyncio.run(_schemas()) == ()
 
     command.upgrade(alembic_config, "head")
     assert asyncio.run(_migration_state()) == (
-        "0010_strategy_model_metadata",
+        "0011_signals_features",
         LOGICAL_SCHEMAS,
         True,
     )
@@ -2326,6 +2347,265 @@ async def _assert_strategy_model_metadata_constraints() -> None:
     )
 
 
+async def _signals_features_state() -> tuple[
+    bool,
+    tuple[str, ...],
+    tuple[str, ...],
+    bool,
+    tuple[str, ...],
+    bool,
+    str,
+    str,
+    str,
+    bool,
+    tuple[str, ...],
+    bool,
+    tuple[str, ...],
+    bool,
+    bool,
+]:
+    engine = create_database_engine(
+        database_config_from_environment(os.environ, fallback_url=None),
+    )
+    try:
+        async with engine.begin() as connection:
+            signal_table_exists = await _table_exists(
+                connection,
+                schema_name="pmrp_research",
+                table_name="signals",
+            )
+            signal_primary_key_columns = await _primary_key_columns(
+                connection,
+                "pmrp_research.signals",
+            )
+            signal_check_constraint_names = await _check_constraint_names(
+                connection,
+                "pmrp_research.signals",
+            )
+            signal_partitioned = await _partitioned_table_exists(
+                connection,
+                "pmrp_research.signals",
+            )
+            signal_index_names = await _index_names(
+                connection,
+                schema_name="pmrp_research",
+                table_name="signals",
+                expected_names=("ix_signals__market_time", "ix_signals__strategy_time"),
+            )
+            signal_indexes_descending = bool(
+                (
+                    await connection.execute(
+                        text(
+                            """
+                            SELECT bool_and(indexdef LIKE '%generated_at DESC%')
+                            FROM pg_indexes
+                            WHERE schemaname = 'pmrp_research'
+                              AND tablename = 'signals'
+                              AND indexname IN (
+                                  'ix_signals__market_time',
+                                  'ix_signals__strategy_time'
+                              )
+                            """
+                        )
+                    )
+                ).scalar_one()
+            )
+            feature_snapshot_table_exists = await _table_exists(
+                connection,
+                schema_name="pmrp_research",
+                table_name="feature_snapshots",
+            )
+            feature_snapshot_primary_key_columns = await _primary_key_columns(
+                connection,
+                "pmrp_research.feature_snapshots",
+            )
+            feature_snapshot_partitioned = await _partitioned_table_exists(
+                connection,
+                "pmrp_research.feature_snapshots",
+            )
+            feature_snapshot_index_names = await _index_names(
+                connection,
+                schema_name="pmrp_research",
+                table_name="feature_snapshots",
+                expected_names=("ix_feature_snapshots__market_time",),
+            )
+            feature_snapshot_index_descending = bool(
+                (
+                    await connection.execute(
+                        text(
+                            """
+                            SELECT indexdef LIKE '%observed_at DESC%'
+                            FROM pg_indexes
+                            WHERE schemaname = 'pmrp_research'
+                              AND tablename = 'feature_snapshots'
+                              AND indexname = 'ix_feature_snapshots__market_time'
+                            """
+                        )
+                    )
+                ).scalar_one()
+            )
+
+            await _create_signal_test_partition(connection)
+            await _create_feature_snapshot_test_partition(connection)
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO pmrp_research.signals (
+                        generated_at,
+                        signal_id,
+                        strategy_id,
+                        market_id,
+                        contract_id,
+                        outcome_id,
+                        signal_type,
+                        direction,
+                        strength,
+                        fair_probability,
+                        confidence,
+                        valid_from,
+                        valid_until,
+                        model_id,
+                        model_version,
+                        feature_snapshot_id,
+                        reason_code,
+                        reason_text,
+                        correlation_id,
+                        source_event_id
+                    )
+                    VALUES (
+                        '2026-07-29T12:06:00Z',
+                        'sig_01j00000000000000000000001',
+                        'strat_fed_value_v1',
+                        'mkt_01j00000000000000000000001',
+                        'ctr_01j00000000000000000000001',
+                        'out_01j00000000000000000000001',
+                        'fair_value',
+                        'buy',
+                        0.050000000000000000,
+                        0.620000000000000000,
+                        0.900000000000000000,
+                        '2026-07-29T12:06:00Z',
+                        '2026-07-29T12:16:00Z',
+                        'mdl_fed_probability',
+                        '1.0.0',
+                        'feat_01j00000000000000000000001',
+                        'edge_above_threshold',
+                        'Fair probability exceeds market implied price.',
+                        'corr_01j00000000000000000000001',
+                        'evt_01j00000000000000000000004'
+                    )
+                    """
+                )
+            )
+            inserted_signal = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT strength, fair_probability, confidence
+                        FROM pmrp_research.signals
+                        WHERE signal_id = 'sig_01j00000000000000000000001'
+                        """
+                    )
+                )
+            ).one()
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO pmrp_research.feature_snapshots (
+                        observed_at,
+                        feature_snapshot_id,
+                        market_id,
+                        strategy_id,
+                        generated_at,
+                        schema_version,
+                        calculation_version,
+                        features,
+                        source_event_ids,
+                        payload_hash
+                    )
+                    VALUES (
+                        '2026-07-29T12:06:00Z',
+                        'feat_01j00000000000000000000001',
+                        'mkt_01j00000000000000000000001',
+                        'strat_fed_value_v1',
+                        '2026-07-29T12:06:00.050000Z',
+                        1,
+                        'calc-v1',
+                        '{"values": [{"name": "best_bid", "value_decimal": "0.57"}]}'::jsonb,
+                        ARRAY['evt_01j00000000000000000000004']::text[],
+                        'sha256:feature-snapshot'
+                    )
+                    """
+                )
+            )
+            inserted_feature_snapshot = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT
+                            features ? 'values',
+                            source_event_ids = ARRAY['evt_01j00000000000000000000004']::text[],
+                            payload_hash
+                        FROM pmrp_research.feature_snapshots
+                        WHERE feature_snapshot_id = 'feat_01j00000000000000000000001'
+                        """
+                    )
+                )
+            ).one()
+            return (
+                signal_table_exists,
+                signal_primary_key_columns,
+                signal_check_constraint_names,
+                signal_partitioned,
+                signal_index_names,
+                signal_indexes_descending,
+                str(inserted_signal[0]),
+                str(inserted_signal[1]),
+                str(inserted_signal[2]),
+                feature_snapshot_table_exists,
+                feature_snapshot_primary_key_columns,
+                feature_snapshot_partitioned,
+                feature_snapshot_index_names,
+                feature_snapshot_index_descending,
+                bool(inserted_feature_snapshot[0])
+                and bool(inserted_feature_snapshot[1])
+                and inserted_feature_snapshot[2] == "sha256:feature-snapshot",
+            )
+    finally:
+        await engine.dispose()
+
+
+async def _assert_signals_features_constraints() -> None:
+    await _assert_integrity_error(
+        """
+        INSERT INTO pmrp_research.signals (
+            generated_at,
+            signal_id,
+            strategy_id,
+            market_id,
+            signal_type,
+            direction,
+            fair_probability,
+            valid_from,
+            reason_code,
+            correlation_id
+        )
+        VALUES (
+            '2026-07-29T12:07:00Z',
+            'sig_01j00000000000000000000002',
+            'strat_fed_value_v1',
+            'mkt_01j00000000000000000000001',
+            'fair_value',
+            'buy',
+            1.010000000000000000,
+            '2026-07-29T12:07:00Z',
+            'invalid_probability',
+            'corr_01j00000000000000000000001'
+        )
+        """
+    )
+
+
 async def _create_raw_exchange_record_test_partition(connection: AsyncConnection) -> None:
     await connection.execute(
         text(
@@ -2362,6 +2642,30 @@ async def _create_trade_test_partition(connection: AsyncConnection) -> None:
     )
 
 
+async def _create_signal_test_partition(connection: AsyncConnection) -> None:
+    await connection.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS pmrp_research.signals_2026_07
+            PARTITION OF pmrp_research.signals
+            FOR VALUES FROM ('2026-07-01T00:00:00Z') TO ('2026-08-01T00:00:00Z')
+            """
+        )
+    )
+
+
+async def _create_feature_snapshot_test_partition(connection: AsyncConnection) -> None:
+    await connection.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS pmrp_research.feature_snapshots_2026_07
+            PARTITION OF pmrp_research.feature_snapshots
+            FOR VALUES FROM ('2026-07-01T00:00:00Z') TO ('2026-08-01T00:00:00Z')
+            """
+        )
+    )
+
+
 async def _table_exists(
     connection: AsyncConnection,
     table_name: str,
@@ -2382,6 +2686,26 @@ async def _table_exists(
                     """
                 ),
                 {"schema_name": schema_name, "table_name": table_name},
+            )
+        ).scalar_one()
+    )
+
+
+async def _partitioned_table_exists(connection: AsyncConnection, table_name: str) -> bool:
+    return bool(
+        (
+            await connection.execute(
+                text(
+                    """
+                    SELECT EXISTS (
+                        SELECT 1
+                        FROM pg_partitioned_table
+                        WHERE partrelid = CAST(:table_name AS regclass)
+                          AND partstrat = 'r'
+                    )
+                    """
+                ),
+                {"table_name": table_name},
             )
         ).scalar_one()
     )
