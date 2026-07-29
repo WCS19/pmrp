@@ -18,6 +18,20 @@ permissions:
 jobs:
   quality:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: pmrp_test
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_USER: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d pmrp_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -44,6 +58,12 @@ jobs:
 
       - name: Test unit and property suites
         run: uv run pytest -m "unit or property"
+
+      - name: Test database migrations
+        env:
+          PMRP_DATABASE_REQUIRE_TLS: "false"
+          PMRP_DATABASE_URL: postgresql+asyncpg://postgres@127.0.0.1:5432/pmrp_test
+        run: uv run pytest -m database
 
       - name: Test with branch coverage
         run: >
