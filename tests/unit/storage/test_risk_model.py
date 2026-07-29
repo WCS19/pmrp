@@ -7,7 +7,14 @@ from sqlalchemy import Numeric, Table
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.dialects.postgresql import JSONB
 
-from pmrp.storage.models import RiskBreachRow, RiskDecisionRow, RiskLimitRow, StorageBase
+from pmrp.storage.models import (
+    CapitalReservationRow,
+    KillSwitchRow,
+    RiskBreachRow,
+    RiskDecisionRow,
+    RiskLimitRow,
+    StorageBase,
+)
 
 
 @pytest.mark.unit
@@ -166,3 +173,108 @@ def test_risk_rows_are_registered_in_storage_metadata() -> None:
     assert StorageBase.metadata.tables["pmrp_risk.risk_limits"] is RiskLimitRow.__table__
     assert StorageBase.metadata.tables["pmrp_risk.risk_decisions"] is RiskDecisionRow.__table__
     assert StorageBase.metadata.tables["pmrp_risk.risk_breaches"] is RiskBreachRow.__table__
+
+
+@pytest.mark.unit
+def test_kill_switch_row_mapping_matches_database_spec() -> None:
+    table = KillSwitchRow.__table__
+
+    assert table.schema == "pmrp_risk"
+    assert table.name == "kill_switches"
+    assert [column.name for column in table.primary_key.columns] == ["kill_switch_id"]
+    assert set(table.columns.keys()) == {
+        "kill_switch_id",
+        "scope",
+        "scope_id",
+        "active",
+        "activated_at",
+        "activated_by",
+        "activation_reason",
+        "released_at",
+        "released_by",
+        "release_reason",
+        "aggregate_version",
+        "created_at",
+        "updated_at",
+    }
+
+
+@pytest.mark.unit
+def test_kill_switch_active_scope_index_matches_database_spec() -> None:
+    active_index = next(
+        index
+        for index in KillSwitchRow.__table__.indexes
+        if index.name == "uq_kill_switches__active_scope"
+    )
+
+    assert active_index.unique is True
+    assert str(active_index.expressions[1]) == "COALESCE(scope_id, '')"
+    assert str(active_index.dialect_options["postgresql"]["where"]) == "active = true"
+
+
+@pytest.mark.unit
+def test_capital_reservation_row_mapping_matches_database_spec() -> None:
+    table = CapitalReservationRow.__table__
+
+    assert table.schema == "pmrp_risk"
+    assert table.name == "capital_reservations"
+    assert [column.name for column in table.primary_key.columns] == ["reservation_id"]
+    assert set(table.columns.keys()) == {
+        "reservation_id",
+        "intent_id",
+        "strategy_id",
+        "exchange",
+        "account_id",
+        "market_id",
+        "quantity",
+        "notional",
+        "currency",
+        "status",
+        "created_at",
+        "expires_at",
+        "released_at",
+    }
+
+
+@pytest.mark.unit
+def test_capital_reservation_constraints_and_indexes_match_database_spec() -> None:
+    table = CapitalReservationRow.__table__
+    active_expiry_index = next(
+        index for index in table.indexes if index.name == "ix_capital_reservations__active_expiry"
+    )
+
+    assert {"uq_capital_reservations__intent_id"} <= {
+        constraint.name for constraint in table.constraints
+    }
+    assert [column.name for column in active_expiry_index.columns] == ["expires_at"]
+    assert str(active_expiry_index.dialect_options["postgresql"]["where"]) == (
+        "released_at IS NULL"
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("table", "column_name"),
+    [
+        (CapitalReservationRow.__table__, "quantity"),
+        (CapitalReservationRow.__table__, "notional"),
+    ],
+)
+def test_reservation_numeric_columns_use_exact_database_scale(
+    table: Table,
+    column_name: str,
+) -> None:
+    column = table.columns[column_name]
+
+    assert isinstance(column.type, Numeric)
+    assert column.type.precision == 38
+    assert column.type.scale == 18
+
+
+@pytest.mark.unit
+def test_kill_switch_and_reservation_rows_are_registered_in_storage_metadata() -> None:
+    assert StorageBase.metadata.tables["pmrp_risk.kill_switches"] is KillSwitchRow.__table__
+    assert (
+        StorageBase.metadata.tables["pmrp_risk.capital_reservations"]
+        is CapitalReservationRow.__table__
+    )

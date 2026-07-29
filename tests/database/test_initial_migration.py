@@ -40,7 +40,7 @@ def test_migrations_upgrade_downgrade_and_reupgrade_empty_database() -> None:
     command.downgrade(alembic_config, "base")
     command.upgrade(alembic_config, "head")
     assert asyncio.run(_migration_state()) == (
-        "0016_risk_storage",
+        "0017_kill_switch_reservations",
         LOGICAL_SCHEMAS,
         True,
     )
@@ -379,13 +379,31 @@ def test_migrations_upgrade_downgrade_and_reupgrade_empty_database() -> None:
         "100.000000000000000000",
     )
     asyncio.run(_assert_risk_storage_constraints())
+    assert asyncio.run(_kill_switch_reservations_state()) == (
+        True,
+        ("kill_switch_id",),
+        ("uq_kill_switches__active_scope",),
+        True,
+        True,
+        True,
+        0,
+        True,
+        ("reservation_id",),
+        ("uq_capital_reservations__intent_id",),
+        ("ix_capital_reservations__active_expiry",),
+        True,
+        True,
+        "10.000000000000000000",
+        "4.200000000000000000",
+    )
+    asyncio.run(_assert_kill_switch_reservations_constraints())
 
     command.downgrade(alembic_config, "base")
     assert asyncio.run(_schemas()) == ()
 
     command.upgrade(alembic_config, "head")
     assert asyncio.run(_migration_state()) == (
-        "0016_risk_storage",
+        "0017_kill_switch_reservations",
         LOGICAL_SCHEMAS,
         True,
     )
@@ -4575,6 +4593,260 @@ async def _assert_risk_storage_constraints() -> None:
             'high',
             '2026-07-29T12:18:30Z',
             'corr_01j00000000000000000000001'
+        )
+        """
+    )
+
+
+async def _kill_switch_reservations_state() -> tuple[
+    bool,
+    tuple[str, ...],
+    tuple[str, ...],
+    bool,
+    bool,
+    bool,
+    int,
+    bool,
+    tuple[str, ...],
+    tuple[str, ...],
+    tuple[str, ...],
+    bool,
+    bool,
+    str,
+    str,
+]:
+    engine = create_database_engine(
+        database_config_from_environment(os.environ, fallback_url=None),
+    )
+    try:
+        async with engine.begin() as connection:
+            kill_switch_table_exists = await _table_exists(
+                connection,
+                schema_name="pmrp_risk",
+                table_name="kill_switches",
+            )
+            kill_switch_primary_key_columns = await _primary_key_columns(
+                connection,
+                "pmrp_risk.kill_switches",
+            )
+            kill_switch_index_names = await _index_names(
+                connection,
+                schema_name="pmrp_risk",
+                table_name="kill_switches",
+                expected_names=("uq_kill_switches__active_scope",),
+            )
+            kill_switch_active_index_partial = bool(
+                (
+                    await connection.execute(
+                        text(
+                            """
+                            SELECT indexdef LIKE '%WHERE (active = true)%'
+                            FROM pg_indexes
+                            WHERE schemaname = 'pmrp_risk'
+                              AND tablename = 'kill_switches'
+                              AND indexname = 'uq_kill_switches__active_scope'
+                            """
+                        )
+                    )
+                ).scalar_one()
+            )
+            kill_switch_active_index_functional = bool(
+                (
+                    await connection.execute(
+                        text(
+                            """
+                            SELECT indexdef LIKE '%COALESCE(scope_id,%'
+                            FROM pg_indexes
+                            WHERE schemaname = 'pmrp_risk'
+                              AND tablename = 'kill_switches'
+                              AND indexname = 'uq_kill_switches__active_scope'
+                            """
+                        )
+                    )
+                ).scalar_one()
+            )
+            reservation_table_exists = await _table_exists(
+                connection,
+                schema_name="pmrp_risk",
+                table_name="capital_reservations",
+            )
+            reservation_primary_key_columns = await _primary_key_columns(
+                connection,
+                "pmrp_risk.capital_reservations",
+            )
+            reservation_unique_constraint_names = await _constraint_names(
+                connection,
+                "pmrp_risk.capital_reservations",
+                constraint_type="u",
+            )
+            reservation_index_names = await _index_names(
+                connection,
+                schema_name="pmrp_risk",
+                table_name="capital_reservations",
+                expected_names=("ix_capital_reservations__active_expiry",),
+            )
+            reservation_active_expiry_index_partial = bool(
+                (
+                    await connection.execute(
+                        text(
+                            """
+                            SELECT indexdef LIKE '%WHERE (released_at IS NULL)%'
+                            FROM pg_indexes
+                            WHERE schemaname = 'pmrp_risk'
+                              AND tablename = 'capital_reservations'
+                              AND indexname = 'ix_capital_reservations__active_expiry'
+                            """
+                        )
+                    )
+                ).scalar_one()
+            )
+
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO pmrp_risk.kill_switches (
+                        kill_switch_id,
+                        scope,
+                        active,
+                        activated_at,
+                        activated_by,
+                        activation_reason
+                    )
+                    VALUES (
+                        'kill_01j00000000000000000000001',
+                        'global',
+                        true,
+                        '2026-07-29T12:20:00Z',
+                        'operator',
+                        'risk incident'
+                    )
+                    """
+                )
+            )
+            inserted_kill_switch = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT
+                            created_at IS NOT NULL,
+                            updated_at IS NOT NULL,
+                            aggregate_version
+                        FROM pmrp_risk.kill_switches
+                        WHERE kill_switch_id = 'kill_01j00000000000000000000001'
+                        """
+                    )
+                )
+            ).one()
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO pmrp_risk.capital_reservations (
+                        reservation_id,
+                        intent_id,
+                        strategy_id,
+                        exchange,
+                        account_id,
+                        market_id,
+                        quantity,
+                        notional,
+                        currency,
+                        status,
+                        created_at,
+                        expires_at
+                    )
+                    VALUES (
+                        'reserve_01j00000000000000000000001',
+                        'intent_01j00000000000000000000001',
+                        'strat_fed_value_v1',
+                        'kalshi',
+                        'acct_01j00000000000000000000001',
+                        'mkt_01j00000000000000000000001',
+                        10.000000000000000000,
+                        4.200000000000000000,
+                        'USD',
+                        'active',
+                        '2026-07-29T12:20:00Z',
+                        '2026-07-29T12:25:00Z'
+                    )
+                    """
+                )
+            )
+            inserted_reservation = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT quantity, notional
+                        FROM pmrp_risk.capital_reservations
+                        WHERE reservation_id = 'reserve_01j00000000000000000000001'
+                        """
+                    )
+                )
+            ).one()
+            return (
+                kill_switch_table_exists,
+                kill_switch_primary_key_columns,
+                kill_switch_index_names,
+                kill_switch_active_index_partial,
+                kill_switch_active_index_functional,
+                bool(inserted_kill_switch[0]),
+                int(inserted_kill_switch[2]),
+                bool(inserted_kill_switch[1]),
+                reservation_table_exists,
+                reservation_primary_key_columns,
+                reservation_unique_constraint_names,
+                reservation_index_names,
+                reservation_active_expiry_index_partial,
+                _numeric_18_text(inserted_reservation[0]),
+                _numeric_18_text(inserted_reservation[1]),
+            )
+    finally:
+        await engine.dispose()
+
+
+async def _assert_kill_switch_reservations_constraints() -> None:
+    await _assert_integrity_error(
+        """
+        INSERT INTO pmrp_risk.kill_switches (
+            kill_switch_id,
+            scope,
+            active
+        )
+        VALUES (
+            'kill_01j00000000000000000000002',
+            'global',
+            true
+        )
+        """
+    )
+    await _assert_integrity_error(
+        """
+        INSERT INTO pmrp_risk.capital_reservations (
+            reservation_id,
+            intent_id,
+            strategy_id,
+            exchange,
+            account_id,
+            market_id,
+            quantity,
+            notional,
+            currency,
+            status,
+            created_at,
+            expires_at
+        )
+        VALUES (
+            'reserve_01j00000000000000000000002',
+            'intent_01j00000000000000000000001',
+            'strat_fed_value_v1',
+            'kalshi',
+            'acct_01j00000000000000000000001',
+            'mkt_01j00000000000000000000001',
+            1.000000000000000000,
+            0.420000000000000000,
+            'USD',
+            'active',
+            '2026-07-29T12:21:00Z',
+            '2026-07-29T12:26:00Z'
         )
         """
     )

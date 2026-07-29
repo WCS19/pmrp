@@ -26,12 +26,19 @@ from pmrp.storage.models.research_metadata import (
     StrategyInstanceRow,
 )
 from pmrp.storage.models.research_signals import FeatureSnapshotRow, SignalRow
-from pmrp.storage.models.risk import RiskBreachRow, RiskDecisionRow, RiskLimitRow
+from pmrp.storage.models.risk import (
+    CapitalReservationRow,
+    KillSwitchRow,
+    RiskBreachRow,
+    RiskDecisionRow,
+    RiskLimitRow,
+)
 from pmrp.storage.models.schema_registry import SchemaRegistryRow
 
 __all__ = [
     "NAMING_CONVENTION",
     "CanonicalEventRow",
+    "CapitalReservationRow",
     "CashBalanceRow",
     "ContractRow",
     "DeadLetterRecordRow",
@@ -44,6 +51,7 @@ __all__ = [
     "IdempotencyRecordRow",
     "JournalEntryRow",
     "JournalLineRow",
+    "KillSwitchRow",
     "MarketRow",
     "ModelArtifactRow",
     "OrderBookSnapshotRow",
