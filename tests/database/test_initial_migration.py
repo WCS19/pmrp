@@ -39,7 +39,7 @@ def test_migrations_upgrade_downgrade_and_reupgrade_empty_database() -> None:
     command.downgrade(alembic_config, "base")
     command.upgrade(alembic_config, "head")
     assert asyncio.run(_migration_state()) == (
-        "0009_order_books_trades",
+        "0010_strategy_model_metadata",
         LOGICAL_SCHEMAS,
         True,
     )
@@ -188,13 +188,35 @@ def test_migrations_upgrade_downgrade_and_reupgrade_empty_database() -> None:
         "12.500000000000000000",
     )
     asyncio.run(_assert_order_books_trades_constraints())
+    assert asyncio.run(_strategy_model_metadata_state()) == (
+        True,
+        ("strategy_type", "strategy_version"),
+        True,
+        True,
+        ("strategy_id",),
+        ("fk_strategy_instances__strategy_type_strategy_version__strategy_definitions",),
+        ("ix_strategy_instances__state_health",),
+        0,
+        "1000.000000000000000000",
+        True,
+        ("strategy_id", "configuration_version"),
+        ("fk_strategy_configurations__strategy_id__strategy_instances",),
+        ("uq_strategy_configurations__strategy_id_configuration_hash",),
+        False,
+        True,
+        ("model_id", "model_version"),
+        ("ix_model_artifacts__approval",),
+        True,
+        True,
+    )
+    asyncio.run(_assert_strategy_model_metadata_constraints())
 
     command.downgrade(alembic_config, "base")
     assert asyncio.run(_schemas()) == ()
 
     command.upgrade(alembic_config, "head")
     assert asyncio.run(_migration_state()) == (
-        "0009_order_books_trades",
+        "0010_strategy_model_metadata",
         LOGICAL_SCHEMAS,
         True,
     )
@@ -405,6 +427,7 @@ async def _assert_schema_registry_version_constraint() -> None:
 async def _exchange_registry_state() -> tuple[
     bool,
     tuple[str, ...],
+    bool,
     bool,
     tuple[str, ...],
     tuple[str, ...],
@@ -1941,6 +1964,363 @@ async def _assert_order_books_trades_constraints() -> None:
             'taker',
             '2026-07-29T12:05:00.100000Z',
             'evt_01j00000000000000000000003'
+        )
+        """
+    )
+
+
+async def _strategy_model_metadata_state() -> tuple[
+    bool,
+    tuple[str, ...],
+    bool,
+    tuple[str, ...],
+    tuple[str, ...],
+    tuple[str, ...],
+    int,
+    str,
+    bool,
+    tuple[str, ...],
+    tuple[str, ...],
+    tuple[str, ...],
+    bool,
+    bool,
+    tuple[str, ...],
+    tuple[str, ...],
+    bool,
+    bool,
+]:
+    engine = create_database_engine(
+        database_config_from_environment(os.environ, fallback_url=None),
+    )
+    try:
+        async with engine.begin() as connection:
+            definition_table_exists = await _table_exists(
+                connection,
+                schema_name="pmrp_research",
+                table_name="strategy_definitions",
+            )
+            definition_primary_key_columns = await _primary_key_columns(
+                connection,
+                "pmrp_research.strategy_definitions",
+            )
+            instance_table_exists = await _table_exists(
+                connection,
+                schema_name="pmrp_research",
+                table_name="strategy_instances",
+            )
+            instance_primary_key_columns = await _primary_key_columns(
+                connection,
+                "pmrp_research.strategy_instances",
+            )
+            instance_foreign_key_names = await _constraint_names(
+                connection,
+                "pmrp_research.strategy_instances",
+                constraint_type="f",
+            )
+            instance_index_names = await _index_names(
+                connection,
+                schema_name="pmrp_research",
+                table_name="strategy_instances",
+                expected_names=("ix_strategy_instances__state_health",),
+            )
+            configuration_table_exists = await _table_exists(
+                connection,
+                schema_name="pmrp_research",
+                table_name="strategy_configurations",
+            )
+            configuration_primary_key_columns = await _primary_key_columns(
+                connection,
+                "pmrp_research.strategy_configurations",
+            )
+            configuration_foreign_key_names = await _constraint_names(
+                connection,
+                "pmrp_research.strategy_configurations",
+                constraint_type="f",
+            )
+            configuration_unique_constraint_names = await _constraint_names(
+                connection,
+                "pmrp_research.strategy_configurations",
+                constraint_type="u",
+            )
+            model_table_exists = await _table_exists(
+                connection,
+                schema_name="pmrp_research",
+                table_name="model_artifacts",
+            )
+            model_primary_key_columns = await _primary_key_columns(
+                connection,
+                "pmrp_research.model_artifacts",
+            )
+            model_index_names = await _index_names(
+                connection,
+                schema_name="pmrp_research",
+                table_name="model_artifacts",
+                expected_names=("ix_model_artifacts__approval",),
+            )
+            model_approval_index_descending = bool(
+                (
+                    await connection.execute(
+                        text(
+                            """
+                            SELECT indexdef LIKE '%trained_at DESC%'
+                            FROM pg_indexes
+                            WHERE schemaname = 'pmrp_research'
+                              AND tablename = 'model_artifacts'
+                              AND indexname = 'ix_model_artifacts__approval'
+                            """
+                        )
+                    )
+                ).scalar_one()
+            )
+
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO pmrp_research.strategy_definitions (
+                        strategy_type,
+                        strategy_version,
+                        implementation_path,
+                        configuration_schema_version,
+                        subscribed_event_types,
+                        supports_replay,
+                        supports_simulation,
+                        supports_paper,
+                        supports_shadow,
+                        supports_live
+                    )
+                    VALUES (
+                        'fed_value',
+                        '1.0.0',
+                        'pmrp.strategies.fed_value:Strategy',
+                        1,
+                        ARRAY['market.discovered', 'book.updated']::text[],
+                        true,
+                        true,
+                        true,
+                        true,
+                        false
+                    )
+                    """
+                )
+            )
+            definition_inserted = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT created_at IS NOT NULL
+                        FROM pmrp_research.strategy_definitions
+                        WHERE strategy_type = 'fed_value'
+                          AND strategy_version = '1.0.0'
+                        """
+                    )
+                )
+            ).scalar_one()
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO pmrp_research.strategy_instances (
+                        strategy_id,
+                        strategy_type,
+                        strategy_version,
+                        name,
+                        environment,
+                        state,
+                        configuration_version,
+                        configuration_hash,
+                        capital_allocation_amount,
+                        capital_allocation_currency,
+                        health_status,
+                        created_at,
+                        updated_at
+                    )
+                    VALUES (
+                        'strat_fed_value_v1',
+                        'fed_value',
+                        '1.0.0',
+                        'Fed value shadow',
+                        'shadow',
+                        'running',
+                        1,
+                        'sha256:strategy-config',
+                        1000.000000000000000000,
+                        'USD',
+                        'healthy',
+                        '2026-07-29T12:00:00Z',
+                        '2026-07-29T12:00:00Z'
+                    )
+                    """
+                )
+            )
+            strategy_instance = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT aggregate_version, capital_allocation_amount
+                        FROM pmrp_research.strategy_instances
+                        WHERE strategy_id = 'strat_fed_value_v1'
+                        """
+                    )
+                )
+            ).one()
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO pmrp_research.strategy_configurations (
+                        strategy_id,
+                        configuration_version,
+                        effective_at,
+                        configuration,
+                        configuration_hash,
+                        created_by
+                    )
+                    VALUES (
+                        'strat_fed_value_v1',
+                        1,
+                        '2026-07-29T12:00:00Z',
+                        '{"threshold": "0.03"}'::jsonb,
+                        'sha256:strategy-config',
+                        'operator'
+                    )
+                    """
+                )
+            )
+            strategy_configuration = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT approval_required, configuration ? 'threshold'
+                        FROM pmrp_research.strategy_configurations
+                        WHERE strategy_id = 'strat_fed_value_v1'
+                          AND configuration_version = 1
+                        """
+                    )
+                )
+            ).one()
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO pmrp_research.model_artifacts (
+                        model_id,
+                        model_version,
+                        model_name,
+                        artifact_uri,
+                        artifact_checksum,
+                        training_dataset_id,
+                        training_dataset_checksum,
+                        training_code_commit,
+                        dependency_lock_hash,
+                        feature_schema_version,
+                        target_definition,
+                        trained_at,
+                        random_seed,
+                        evaluation_metrics,
+                        approval_status
+                    )
+                    VALUES (
+                        'mdl_fed_probability',
+                        '1.0.0',
+                        'Fed probability model',
+                        'artifact://models/fed-probability/1.0.0',
+                        'sha256:model-artifact',
+                        'dataset_fed_2026_07',
+                        'sha256:dataset',
+                        '0123456789abcdef',
+                        'sha256:uv-lock',
+                        'features-v1',
+                        'binary-resolution-probability',
+                        '2026-07-29T12:00:00Z',
+                        42,
+                        '{"brier": "0.12"}'::jsonb,
+                        'approved'
+                    )
+                    """
+                )
+            )
+            model_inserted = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT created_at IS NOT NULL, evaluation_metrics ? 'brier'
+                        FROM pmrp_research.model_artifacts
+                        WHERE model_id = 'mdl_fed_probability'
+                          AND model_version = '1.0.0'
+                        """
+                    )
+                )
+            ).one()
+            return (
+                definition_table_exists,
+                definition_primary_key_columns,
+                bool(definition_inserted),
+                instance_table_exists,
+                instance_primary_key_columns,
+                instance_foreign_key_names,
+                instance_index_names,
+                int(strategy_instance[0]),
+                str(strategy_instance[1]),
+                configuration_table_exists,
+                configuration_primary_key_columns,
+                configuration_foreign_key_names,
+                configuration_unique_constraint_names,
+                bool(strategy_configuration[0]),
+                bool(strategy_configuration[1]),
+                model_primary_key_columns,
+                model_index_names,
+                model_approval_index_descending,
+                model_table_exists and bool(model_inserted[0]) and bool(model_inserted[1]),
+            )
+    finally:
+        await engine.dispose()
+
+
+async def _assert_strategy_model_metadata_constraints() -> None:
+    await _assert_integrity_error(
+        """
+        INSERT INTO pmrp_research.strategy_instances (
+            strategy_id,
+            strategy_type,
+            strategy_version,
+            name,
+            environment,
+            state,
+            configuration_version,
+            configuration_hash,
+            health_status,
+            created_at,
+            updated_at
+        )
+        VALUES (
+            'strat_missing_definition',
+            'missing',
+            '1.0.0',
+            'Missing definition',
+            'shadow',
+            'stopped',
+            1,
+            'sha256:missing-config',
+            'unknown',
+            '2026-07-29T12:00:00Z',
+            '2026-07-29T12:00:00Z'
+        )
+        """
+    )
+    await _assert_integrity_error(
+        """
+        INSERT INTO pmrp_research.strategy_configurations (
+            strategy_id,
+            configuration_version,
+            effective_at,
+            configuration,
+            configuration_hash,
+            created_by
+        )
+        VALUES (
+            'strat_fed_value_v1',
+            2,
+            '2026-07-29T12:01:00Z',
+            '{"threshold": "0.04"}'::jsonb,
+            'sha256:strategy-config',
+            'operator'
         )
         """
     )
