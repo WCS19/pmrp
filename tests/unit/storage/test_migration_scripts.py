@@ -44,6 +44,9 @@ FILLS_REGISTRY_MIGRATION_PATH = REPOSITORY_ROOT / "migrations/versions/0013_fill
 PORTFOLIO_STORAGE_MIGRATION_PATH = REPOSITORY_ROOT / "migrations/versions/0014_portfolio_storage.py"
 PNL_SETTLEMENTS_MIGRATION_PATH = REPOSITORY_ROOT / "migrations/versions/0015_pnl_settlements.py"
 RISK_STORAGE_MIGRATION_PATH = REPOSITORY_ROOT / "migrations/versions/0016_risk_storage.py"
+KILL_SWITCH_RESERVATIONS_MIGRATION_PATH = (
+    REPOSITORY_ROOT / "migrations/versions/0017_kill_switch_reservations.py"
+)
 MAX_ALEMBIC_REVISION_ID_LENGTH = 32
 EXPECTED_LOGICAL_SCHEMAS = (
     "pmrp_core",
@@ -220,6 +223,16 @@ def test_risk_storage_migration_revision_metadata_is_stable() -> None:
 
 
 @pytest.mark.unit
+def test_kill_switch_reservations_migration_revision_metadata_is_stable() -> None:
+    migration = _load_migration(KILL_SWITCH_RESERVATIONS_MIGRATION_PATH)
+
+    assert migration.revision == "0017_kill_switch_reservations"
+    assert migration.down_revision == "0016_risk_storage"
+    assert migration.branch_labels is None
+    assert migration.depends_on is None
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "migration_path",
     [
@@ -239,6 +252,7 @@ def test_risk_storage_migration_revision_metadata_is_stable() -> None:
         PORTFOLIO_STORAGE_MIGRATION_PATH,
         PNL_SETTLEMENTS_MIGRATION_PATH,
         RISK_STORAGE_MIGRATION_PATH,
+        KILL_SWITCH_RESERVATIONS_MIGRATION_PATH,
     ],
 )
 def test_migration_revision_ids_fit_alembic_version_column(migration_path: Path) -> None:
@@ -987,6 +1001,54 @@ def test_risk_storage_migration_uses_expected_names() -> None:
     assert migration.RISK_DECISIONS_INTENT_INDEX_NAME == "ix_risk_decisions__intent"
     assert migration.RISK_DECISIONS_STATUS_TIME_INDEX_NAME == "ix_risk_decisions__status_time"
     assert migration.RISK_BREACHES_OPEN_SEVERITY_INDEX_NAME == ("ix_risk_breaches__open_severity")
+
+
+@pytest.mark.unit
+def test_kill_switch_reservations_migration_uses_expected_names() -> None:
+    migration = _load_migration(KILL_SWITCH_RESERVATIONS_MIGRATION_PATH)
+
+    assert migration.SCHEMA_NAME == "pmrp_risk"
+    assert migration.KILL_SWITCHES_TABLE_NAME == "kill_switches"
+    assert migration.CAPITAL_RESERVATIONS_TABLE_NAME == "capital_reservations"
+    assert migration.KILL_SWITCHES_ACTIVE_SCOPE_INDEX_NAME == "uq_kill_switches__active_scope"
+    assert migration.CAPITAL_RESERVATIONS_ACTIVE_EXPIRY_INDEX_NAME == (
+        "ix_capital_reservations__active_expiry"
+    )
+    assert migration.CAPITAL_RESERVATIONS_INTENT_UNIQUE_NAME == (
+        "uq_capital_reservations__intent_id"
+    )
+
+
+@pytest.mark.unit
+def test_kill_switch_reservations_migration_marks_constraint_names_as_final(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    migration = _load_migration(KILL_SWITCH_RESERVATIONS_MIGRATION_PATH)
+    formatted_names: list[str] = []
+    created_table_arguments: list[object] = []
+
+    def fake_format_name(name: str) -> str:
+        formatted_names.append(name)
+        return f"final:{name}"
+
+    def fake_create_table(*arguments: object, **_kwargs: object) -> None:
+        created_table_arguments.extend(arguments)
+
+    monkeypatch.setattr(migration.op, "f", fake_format_name)
+    monkeypatch.setattr(migration.op, "create_table", fake_create_table)
+    monkeypatch.setattr(migration.op, "create_index", lambda *_args, **_kwargs: None)
+
+    migration.upgrade()
+
+    final_constraint_names = [
+        constraint.name
+        for constraint in created_table_arguments
+        if isinstance(constraint, UniqueConstraint)
+    ]
+    assert formatted_names == [
+        "uq_capital_reservations__intent_id",
+    ]
+    assert final_constraint_names == [f"final:{name}" for name in formatted_names]
 
 
 def _load_initial_migration() -> ModuleType:
