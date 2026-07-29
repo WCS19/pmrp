@@ -19,6 +19,9 @@ SCHEMA_REGISTRY_MIGRATION_PATH = (
 EXCHANGE_REGISTRY_MIGRATION_PATH = (
     REPOSITORY_ROOT / "migrations/versions/0003_exchange_account_registries.py"
 )
+RAW_EXCHANGE_RECORDS_MIGRATION_PATH = (
+    REPOSITORY_ROOT / "migrations/versions/0004_raw_exchange_records.py"
+)
 MAX_ALEMBIC_REVISION_ID_LENGTH = 32
 EXPECTED_LOGICAL_SCHEMAS = (
     "pmrp_core",
@@ -65,12 +68,23 @@ def test_exchange_registry_migration_revision_metadata_is_stable() -> None:
 
 
 @pytest.mark.unit
+def test_raw_exchange_records_migration_revision_metadata_is_stable() -> None:
+    migration = _load_migration(RAW_EXCHANGE_RECORDS_MIGRATION_PATH)
+
+    assert migration.revision == "0004_raw_exchange_records"
+    assert migration.down_revision == "0003_exchange_account_registries"
+    assert migration.branch_labels is None
+    assert migration.depends_on is None
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "migration_path",
     [
         INITIAL_MIGRATION_PATH,
         SCHEMA_REGISTRY_MIGRATION_PATH,
         EXCHANGE_REGISTRY_MIGRATION_PATH,
+        RAW_EXCHANGE_RECORDS_MIGRATION_PATH,
     ],
 )
 def test_migration_revision_ids_fit_alembic_version_column(migration_path: Path) -> None:
@@ -205,6 +219,48 @@ def test_exchange_registry_migration_marks_foreign_key_name_as_final(
     assert formatted_names == ["fk_exchange_accounts__exchange__exchanges"]
     assert [constraint.name for constraint in foreign_key_constraints] == [
         "final:fk_exchange_accounts__exchange__exchanges"
+    ]
+
+
+@pytest.mark.unit
+def test_raw_exchange_records_migration_uses_expected_names() -> None:
+    migration = _load_migration(RAW_EXCHANGE_RECORDS_MIGRATION_PATH)
+
+    assert migration.SCHEMA_NAME == "pmrp_raw"
+    assert migration.TABLE_NAME == "exchange_records"
+    assert migration.EXCHANGE_RECEIVED_INDEX_NAME == "ix_exchange_records__exchange_received"
+    assert migration.CHANNEL_RECEIVED_INDEX_NAME == "ix_exchange_records__channel_received"
+    assert migration.PAYLOAD_HASH_INDEX_NAME == "ix_exchange_records__payload_hash"
+    assert migration.PAYLOAD_STORAGE_CHECK_NAME == "ck_exchange_records__payload_storage"
+
+
+@pytest.mark.unit
+def test_raw_exchange_records_migration_marks_check_constraint_name_as_final(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    migration = _load_migration(RAW_EXCHANGE_RECORDS_MIGRATION_PATH)
+    formatted_names: list[str] = []
+    created_table_arguments: list[object] = []
+
+    def fake_format_name(name: str) -> str:
+        formatted_names.append(name)
+        return f"final:{name}"
+
+    def fake_create_table(*arguments: object, **_kwargs: object) -> None:
+        created_table_arguments.extend(arguments)
+
+    monkeypatch.setattr(migration.op, "f", fake_format_name)
+    monkeypatch.setattr(migration.op, "create_table", fake_create_table)
+    monkeypatch.setattr(migration.op, "create_index", lambda *_args, **_kwargs: None)
+
+    migration.upgrade()
+
+    check_constraints = [
+        argument for argument in created_table_arguments if isinstance(argument, CheckConstraint)
+    ]
+    assert formatted_names == ["ck_exchange_records__payload_storage"]
+    assert [constraint.name for constraint in check_constraints] == [
+        "final:ck_exchange_records__payload_storage"
     ]
 
 

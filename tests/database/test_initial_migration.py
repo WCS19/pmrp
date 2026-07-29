@@ -39,7 +39,7 @@ def test_migrations_upgrade_downgrade_and_reupgrade_empty_database() -> None:
     command.downgrade(alembic_config, "base")
     command.upgrade(alembic_config, "head")
     assert asyncio.run(_migration_state()) == (
-        "0003_exchange_account_registries",
+        "0004_raw_exchange_records",
         LOGICAL_SCHEMAS,
         True,
     )
@@ -65,13 +65,28 @@ def test_migrations_upgrade_downgrade_and_reupgrade_empty_database() -> None:
         "{}",
     )
     asyncio.run(_assert_exchange_account_foreign_key_constraint())
+    assert asyncio.run(_raw_exchange_record_state()) == (
+        True,
+        ("received_at", "raw_record_id"),
+        ("ck_exchange_records__payload_storage",),
+        (
+            "ix_exchange_records__channel_received",
+            "ix_exchange_records__exchange_received",
+            "ix_exchange_records__payload_hash",
+        ),
+        True,
+        "application/json",
+        "{}",
+        b"\x01\x02",
+    )
+    asyncio.run(_assert_raw_exchange_record_payload_constraint())
 
     command.downgrade(alembic_config, "base")
     assert asyncio.run(_schemas()) == ()
 
     command.upgrade(alembic_config, "head")
     assert asyncio.run(_migration_state()) == (
-        "0003_exchange_account_registries",
+        "0004_raw_exchange_records",
         LOGICAL_SCHEMAS,
         True,
     )
@@ -421,7 +436,210 @@ async def _assert_exchange_account_foreign_key_constraint() -> None:
         await engine.dispose()
 
 
-async def _table_exists(connection: AsyncConnection, table_name: str) -> bool:
+async def _raw_exchange_record_state() -> tuple[
+    bool,
+    tuple[str, ...],
+    tuple[str, ...],
+    tuple[str, ...],
+    bool,
+    str,
+    str,
+    bytes,
+]:
+    engine = create_database_engine(
+        database_config_from_environment(os.environ, fallback_url=None),
+    )
+    try:
+        async with engine.begin() as connection:
+            await _create_raw_exchange_record_test_partition(connection)
+            table_exists = await _table_exists(
+                connection,
+                schema_name="pmrp_raw",
+                table_name="exchange_records",
+            )
+            primary_key_columns = await _primary_key_columns(
+                connection,
+                "pmrp_raw.exchange_records",
+            )
+            check_constraint_names = await _check_constraint_names(
+                connection,
+                "pmrp_raw.exchange_records",
+            )
+            index_names = tuple(
+                str(row[0])
+                for row in await connection.execute(
+                    text(
+                        """
+                        SELECT indexname
+                        FROM pg_indexes
+                        WHERE schemaname = 'pmrp_raw'
+                          AND tablename = 'exchange_records'
+                          AND indexname IN (
+                              'ix_exchange_records__exchange_received',
+                              'ix_exchange_records__channel_received',
+                              'ix_exchange_records__payload_hash'
+                          )
+                        ORDER BY indexname
+                        """
+                    )
+                )
+            )
+            partitioned = bool(
+                (
+                    await connection.execute(
+                        text(
+                            """
+                            SELECT EXISTS (
+                                SELECT 1
+                                FROM pg_partitioned_table
+                                WHERE partrelid = 'pmrp_raw.exchange_records'::regclass
+                                  AND partstrat = 'r'
+                            )
+                            """
+                        )
+                    )
+                ).scalar_one()
+            )
+
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO pmrp_raw.exchange_records (
+                        received_at,
+                        raw_record_id,
+                        exchange,
+                        environment,
+                        payload_text,
+                        payload_hash
+                    )
+                    VALUES (
+                        '2026-07-29T12:00:00Z',
+                        'raw_text',
+                        'kalshi',
+                        'shadow',
+                        '{"ok": true}',
+                        'sha256:text'
+                    )
+                    """
+                )
+            )
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO pmrp_raw.exchange_records (
+                        received_at,
+                        raw_record_id,
+                        exchange,
+                        environment,
+                        payload_bytes,
+                        payload_hash
+                    )
+                    VALUES (
+                        '2026-07-29T12:00:01Z',
+                        'raw_bytes',
+                        'kalshi',
+                        'shadow',
+                        E'\\001\\002'::bytea,
+                        'sha256:bytes'
+                    )
+                    """
+                )
+            )
+            text_record = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT content_type, transport_metadata::text
+                        FROM pmrp_raw.exchange_records
+                        WHERE raw_record_id = 'raw_text'
+                        """
+                    )
+                )
+            ).one()
+            binary_payload = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT payload_bytes
+                        FROM pmrp_raw.exchange_records
+                        WHERE raw_record_id = 'raw_bytes'
+                        """
+                    )
+                )
+            ).scalar_one()
+            return (
+                table_exists,
+                primary_key_columns,
+                check_constraint_names,
+                index_names,
+                partitioned,
+                str(text_record[0]),
+                str(text_record[1]),
+                bytes(binary_payload),
+            )
+    finally:
+        await engine.dispose()
+
+
+async def _assert_raw_exchange_record_payload_constraint() -> None:
+    engine = create_database_engine(
+        database_config_from_environment(os.environ, fallback_url=None),
+    )
+    try:
+        async with engine.begin() as connection:
+            await _create_raw_exchange_record_test_partition(connection)
+        async with engine.connect() as connection:
+            transaction = await connection.begin()
+            try:
+                with pytest.raises(IntegrityError):
+                    await connection.execute(
+                        text(
+                            """
+                            INSERT INTO pmrp_raw.exchange_records (
+                                received_at,
+                                raw_record_id,
+                                exchange,
+                                environment,
+                                payload_text,
+                                payload_bytes,
+                                payload_hash
+                            )
+                            VALUES (
+                                '2026-07-29T12:00:02Z',
+                                'raw_invalid',
+                                'kalshi',
+                                'shadow',
+                                '{}',
+                                E'\\003'::bytea,
+                                'sha256:invalid'
+                            )
+                            """
+                        )
+                    )
+            finally:
+                await transaction.rollback()
+    finally:
+        await engine.dispose()
+
+
+async def _create_raw_exchange_record_test_partition(connection: AsyncConnection) -> None:
+    await connection.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS pmrp_raw.exchange_records_2026_07
+            PARTITION OF pmrp_raw.exchange_records
+            FOR VALUES FROM ('2026-07-01T00:00:00Z') TO ('2026-08-01T00:00:00Z')
+            """
+        )
+    )
+
+
+async def _table_exists(
+    connection: AsyncConnection,
+    table_name: str,
+    *,
+    schema_name: str = "pmrp_core",
+) -> bool:
     return bool(
         (
             await connection.execute(
@@ -430,12 +648,12 @@ async def _table_exists(connection: AsyncConnection, table_name: str) -> bool:
                     SELECT EXISTS (
                         SELECT 1
                         FROM information_schema.tables
-                        WHERE table_schema = 'pmrp_core'
+                        WHERE table_schema = :schema_name
                           AND table_name = :table_name
                     )
                     """
                 ),
-                {"table_name": table_name},
+                {"schema_name": schema_name, "table_name": table_name},
             )
         ).scalar_one()
     )
@@ -455,6 +673,24 @@ async def _primary_key_columns(connection: AsyncConnection, table_name: str) -> 
                 WHERE i.indrelid = CAST(:table_name AS regclass)
                   AND i.indisprimary
                 ORDER BY array_position(i.indkey, a.attnum)
+                """
+            ),
+            {"table_name": table_name},
+        )
+    )
+
+
+async def _check_constraint_names(connection: AsyncConnection, table_name: str) -> tuple[str, ...]:
+    return tuple(
+        str(row[0])
+        for row in await connection.execute(
+            text(
+                """
+                SELECT conname
+                FROM pg_constraint
+                WHERE conrelid = CAST(:table_name AS regclass)
+                  AND contype = 'c'
+                ORDER BY conname
                 """
             ),
             {"table_name": table_name},
