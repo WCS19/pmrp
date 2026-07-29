@@ -39,7 +39,7 @@ def test_migrations_upgrade_downgrade_and_reupgrade_empty_database() -> None:
     command.downgrade(alembic_config, "base")
     command.upgrade(alembic_config, "head")
     assert asyncio.run(_migration_state()) == (
-        "0006_processed_events_outbox",
+        "0007_idempotency_dead_letters",
         LOGICAL_SCHEMAS,
         True,
     )
@@ -113,13 +113,27 @@ def test_migrations_upgrade_downgrade_and_reupgrade_empty_database() -> None:
         True,
     )
     asyncio.run(_assert_outbox_event_topic_unique_constraint())
+    assert asyncio.run(_idempotency_dead_letter_state()) == (
+        True,
+        ("subject_id", "operation", "idempotency_key"),
+        ("ix_idempotency_records__expires",),
+        True,
+        True,
+        True,
+        ("dead_letter_id",),
+        ("ix_dead_letter_records__unresolved",),
+        "(resolved_at IS NULL)",
+        True,
+        True,
+    )
+    asyncio.run(_assert_idempotency_primary_key_constraint())
 
     command.downgrade(alembic_config, "base")
     assert asyncio.run(_schemas()) == ()
 
     command.upgrade(alembic_config, "head")
     assert asyncio.run(_migration_state()) == (
-        "0006_processed_events_outbox",
+        "0007_idempotency_dead_letters",
         LOGICAL_SCHEMAS,
         True,
     )
@@ -1040,6 +1054,216 @@ async def _assert_outbox_event_topic_unique_constraint() -> None:
                                 'evt_01j00000000000000000000003',
                                 'canonical-events',
                                 '{}'::jsonb
+                            )
+                            """
+                        )
+                    )
+            finally:
+                await transaction.rollback()
+    finally:
+        await engine.dispose()
+
+
+async def _idempotency_dead_letter_state() -> tuple[
+    bool,
+    tuple[str, ...],
+    tuple[str, ...],
+    bool,
+    bool,
+    bool,
+    tuple[str, ...],
+    tuple[str, ...],
+    str,
+    bool,
+    bool,
+]:
+    engine = create_database_engine(
+        database_config_from_environment(os.environ, fallback_url=None),
+    )
+    try:
+        async with engine.begin() as connection:
+            idempotency_table_exists = await _table_exists(
+                connection,
+                schema_name="pmrp_core",
+                table_name="idempotency_records",
+            )
+            idempotency_primary_key_columns = await _primary_key_columns(
+                connection,
+                "pmrp_core.idempotency_records",
+            )
+            idempotency_index_names = tuple(
+                str(row[0])
+                for row in await connection.execute(
+                    text(
+                        """
+                        SELECT indexname
+                        FROM pg_indexes
+                        WHERE schemaname = 'pmrp_core'
+                          AND tablename = 'idempotency_records'
+                          AND indexname = 'ix_idempotency_records__expires'
+                        ORDER BY indexname
+                        """
+                    )
+                )
+            )
+            dead_letter_table_exists = await _table_exists(
+                connection,
+                schema_name="pmrp_ops",
+                table_name="dead_letter_records",
+            )
+            dead_letter_primary_key_columns = await _primary_key_columns(
+                connection,
+                "pmrp_ops.dead_letter_records",
+            )
+            dead_letter_unresolved_index = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT
+                            idx.relname,
+                            pg_get_expr(i.indpred, i.indrelid)
+                        FROM pg_index i
+                        JOIN pg_class idx ON idx.oid = i.indexrelid
+                        WHERE i.indrelid = 'pmrp_ops.dead_letter_records'::regclass
+                          AND idx.relname = 'ix_dead_letter_records__unresolved'
+                        """
+                    )
+                )
+            ).one()
+
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO pmrp_core.idempotency_records (
+                        subject_id,
+                        operation,
+                        idempotency_key,
+                        request_hash,
+                        status,
+                        response_status,
+                        response_headers,
+                        response_body,
+                        expires_at
+                    )
+                    VALUES (
+                        'operator_01j00000000000000000000001',
+                        'submit-order-intent',
+                        'idem_01j00000000000000000000001',
+                        'sha256:request',
+                        'completed',
+                        201,
+                        '{"content-type": "application/json"}'::jsonb,
+                        '{"ok": true}'::jsonb,
+                        '2026-07-30T12:00:00Z'
+                    )
+                    """
+                )
+            )
+            idempotency_inserted = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT
+                            created_at IS NOT NULL,
+                            response_headers::text,
+                            response_body::text
+                        FROM pmrp_core.idempotency_records
+                        WHERE subject_id = 'operator_01j00000000000000000000001'
+                          AND operation = 'submit-order-intent'
+                          AND idempotency_key = 'idem_01j00000000000000000000001'
+                        """
+                    )
+                )
+            ).one()
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO pmrp_ops.dead_letter_records (
+                        dead_letter_id,
+                        source_event_id,
+                        consumer_name,
+                        failure_category,
+                        exception_type,
+                        exception_message,
+                        first_failed_at,
+                        last_failed_at,
+                        retry_count,
+                        payload_reference,
+                        replayable
+                    )
+                    VALUES (
+                        'dlq_01j00000000000000000000001',
+                        'evt_01j00000000000000000000003',
+                        'research-indexer',
+                        'validation',
+                        'ValueError',
+                        'invalid payload',
+                        '2026-07-29T12:01:00Z',
+                        '2026-07-29T12:02:00Z',
+                        2,
+                        'pmrp_event.canonical_events/evt_01j00000000000000000000003',
+                        true
+                    )
+                    """
+                )
+            )
+            dead_letter_inserted = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT
+                            created_at IS NOT NULL,
+                            replayable
+                        FROM pmrp_ops.dead_letter_records
+                        WHERE dead_letter_id = 'dlq_01j00000000000000000000001'
+                        """
+                    )
+                )
+            ).one()
+            return (
+                idempotency_table_exists,
+                idempotency_primary_key_columns,
+                idempotency_index_names,
+                bool(idempotency_inserted[0]),
+                str(idempotency_inserted[1]) == '{"content-type": "application/json"}',
+                str(idempotency_inserted[2]) == '{"ok": true}',
+                dead_letter_primary_key_columns,
+                (str(dead_letter_unresolved_index[0]),),
+                str(dead_letter_unresolved_index[1]),
+                dead_letter_table_exists,
+                bool(dead_letter_inserted[0]) and bool(dead_letter_inserted[1]),
+            )
+    finally:
+        await engine.dispose()
+
+
+async def _assert_idempotency_primary_key_constraint() -> None:
+    engine = create_database_engine(
+        database_config_from_environment(os.environ, fallback_url=None),
+    )
+    try:
+        async with engine.connect() as connection:
+            transaction = await connection.begin()
+            try:
+                with pytest.raises(IntegrityError):
+                    await connection.execute(
+                        text(
+                            """
+                            INSERT INTO pmrp_core.idempotency_records (
+                                subject_id,
+                                operation,
+                                idempotency_key,
+                                request_hash,
+                                status,
+                                expires_at
+                            )
+                            VALUES (
+                                'operator_01j00000000000000000000001',
+                                'submit-order-intent',
+                                'idem_01j00000000000000000000001',
+                                'sha256:duplicate',
+                                'completed',
+                                '2026-07-30T12:00:00Z'
                             )
                             """
                         )
