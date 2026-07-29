@@ -1,6 +1,6 @@
 """Create exchange and account registry tables.
 
-Revision ID: 0003_create_exchange_and_account_registries
+Revision ID: 0003_exchange_account_registries
 Revises: 0002_create_schema_registry
 Create Date: 2026-07-29
 
@@ -18,7 +18,7 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision: str = "0003_create_exchange_and_account_registries"
+revision: str = "0003_exchange_account_registries"
 down_revision: str | None = "0002_create_schema_registry"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None

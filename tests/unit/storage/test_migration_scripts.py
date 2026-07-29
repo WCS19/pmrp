@@ -17,8 +17,9 @@ SCHEMA_REGISTRY_MIGRATION_PATH = (
     REPOSITORY_ROOT / "migrations/versions/0002_create_schema_registry.py"
 )
 EXCHANGE_REGISTRY_MIGRATION_PATH = (
-    REPOSITORY_ROOT / "migrations/versions/0003_create_exchange_and_account_registries.py"
+    REPOSITORY_ROOT / "migrations/versions/0003_exchange_account_registries.py"
 )
+MAX_ALEMBIC_REVISION_ID_LENGTH = 32
 EXPECTED_LOGICAL_SCHEMAS = (
     "pmrp_core",
     "pmrp_raw",
@@ -57,10 +58,25 @@ def test_schema_registry_migration_revision_metadata_is_stable() -> None:
 def test_exchange_registry_migration_revision_metadata_is_stable() -> None:
     migration = _load_migration(EXCHANGE_REGISTRY_MIGRATION_PATH)
 
-    assert migration.revision == "0003_create_exchange_and_account_registries"
+    assert migration.revision == "0003_exchange_account_registries"
     assert migration.down_revision == "0002_create_schema_registry"
     assert migration.branch_labels is None
     assert migration.depends_on is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "migration_path",
+    [
+        INITIAL_MIGRATION_PATH,
+        SCHEMA_REGISTRY_MIGRATION_PATH,
+        EXCHANGE_REGISTRY_MIGRATION_PATH,
+    ],
+)
+def test_migration_revision_ids_fit_alembic_version_column(migration_path: Path) -> None:
+    migration = _load_migration(migration_path)
+
+    assert len(migration.revision) <= MAX_ALEMBIC_REVISION_ID_LENGTH
 
 
 @pytest.mark.unit

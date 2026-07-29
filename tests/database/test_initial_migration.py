@@ -39,7 +39,7 @@ def test_migrations_upgrade_downgrade_and_reupgrade_empty_database() -> None:
     command.downgrade(alembic_config, "base")
     command.upgrade(alembic_config, "head")
     assert asyncio.run(_migration_state()) == (
-        "0003_create_exchange_and_account_registries",
+        "0003_exchange_account_registries",
         LOGICAL_SCHEMAS,
         True,
     )
@@ -71,7 +71,7 @@ def test_migrations_upgrade_downgrade_and_reupgrade_empty_database() -> None:
 
     command.upgrade(alembic_config, "head")
     assert asyncio.run(_migration_state()) == (
-        "0003_create_exchange_and_account_registries",
+        "0003_exchange_account_registries",
         LOGICAL_SCHEMAS,
         True,
     )
