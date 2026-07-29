@@ -8,6 +8,7 @@ from types import ModuleType
 from typing import cast
 
 import pytest
+from sqlalchemy import CheckConstraint
 from sqlalchemy.schema import CreateSchema, DropSchema
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
@@ -101,6 +102,36 @@ def test_schema_registry_migration_uses_expected_names() -> None:
     assert migration.SCHEMA_NAME == "pmrp_core"
     assert migration.TABLE_NAME == "schema_registry"
     assert migration.CATEGORY_INDEX_NAME == "ix_schema_registry__category"
+
+
+@pytest.mark.unit
+def test_schema_registry_migration_marks_check_constraint_name_as_final(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    migration = _load_migration(SCHEMA_REGISTRY_MIGRATION_PATH)
+    formatted_names: list[str] = []
+    created_table_arguments: list[object] = []
+
+    def fake_format_name(name: str) -> str:
+        formatted_names.append(name)
+        return f"final:{name}"
+
+    def fake_create_table(*arguments: object, **_kwargs: object) -> None:
+        created_table_arguments.extend(arguments)
+
+    monkeypatch.setattr(migration.op, "f", fake_format_name)
+    monkeypatch.setattr(migration.op, "create_table", fake_create_table)
+    monkeypatch.setattr(migration.op, "create_index", lambda *_args, **_kwargs: None)
+
+    migration.upgrade()
+
+    check_constraints = [
+        argument for argument in created_table_arguments if isinstance(argument, CheckConstraint)
+    ]
+    assert formatted_names == ["ck_schema_registry__schema_version"]
+    assert [constraint.name for constraint in check_constraints] == [
+        "final:ck_schema_registry__schema_version"
+    ]
 
 
 def _load_initial_migration() -> ModuleType:

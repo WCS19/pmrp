@@ -59,7 +59,10 @@ def upgrade() -> None:
             server_default=sa.text("now()"),
         ),
         sa.PrimaryKeyConstraint("schema_name", "schema_version", name="pk_schema_registry"),
-        sa.CheckConstraint("schema_version >= 1", name="ck_schema_registry__schema_version"),
+        sa.CheckConstraint(
+            "schema_version >= 1",
+            name=op.f("ck_schema_registry__schema_version"),
+        ),
         schema=SCHEMA_NAME,
     )
     op.create_index(

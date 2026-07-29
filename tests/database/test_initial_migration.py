@@ -47,6 +47,7 @@ def test_migrations_upgrade_downgrade_and_reupgrade_empty_database() -> None:
         True,
         ("schema_name", "schema_version"),
         ("ix_schema_registry__category",),
+        ("ck_schema_registry__schema_version",),
         (),
         (),
     )
@@ -114,6 +115,7 @@ async def _schema_registry_state() -> tuple[
     bool,
     tuple[str, ...],
     tuple[str, ...],
+    tuple[str, ...],
     tuple[int, ...],
     tuple[str, ...],
 ]:
@@ -170,6 +172,20 @@ async def _schema_registry_state() -> tuple[
                     )
                 )
             )
+            check_constraint_names = tuple(
+                str(row[0])
+                for row in await connection.execute(
+                    text(
+                        """
+                        SELECT conname
+                        FROM pg_constraint
+                        WHERE conrelid = 'pmrp_core.schema_registry'::regclass
+                          AND contype = 'c'
+                        ORDER BY conname
+                        """
+                    )
+                )
+            )
 
             await connection.execute(
                 text(
@@ -207,6 +223,7 @@ async def _schema_registry_state() -> tuple[
                 table_exists,
                 primary_key_columns,
                 index_names,
+                check_constraint_names,
                 tuple(inserted[0]),
                 tuple(inserted[1]),
             )
