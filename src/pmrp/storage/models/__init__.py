@@ -19,6 +19,7 @@ from pmrp.storage.models.portfolio import (
     SettlementRow,
 )
 from pmrp.storage.models.raw_exchange import RawExchangeRecordRow
+from pmrp.storage.models.reconciliation import ReconciliationMismatchRow, ReconciliationRunRow
 from pmrp.storage.models.research_metadata import (
     ModelArtifactRow,
     StrategyConfigurationRow,
@@ -64,6 +65,8 @@ __all__ = [
     "PositionRow",
     "ProcessedEventRow",
     "RawExchangeRecordRow",
+    "ReconciliationMismatchRow",
+    "ReconciliationRunRow",
     "RiskBreachRow",
     "RiskDecisionRow",
     "RiskLimitRow",

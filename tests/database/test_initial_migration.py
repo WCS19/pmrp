@@ -40,7 +40,7 @@ def test_migrations_upgrade_downgrade_and_reupgrade_empty_database() -> None:
     command.downgrade(alembic_config, "base")
     command.upgrade(alembic_config, "head")
     assert asyncio.run(_migration_state()) == (
-        "0017_kill_switch_reservations",
+        "0018_reconciliation_tables",
         LOGICAL_SCHEMAS,
         True,
     )
@@ -397,13 +397,33 @@ def test_migrations_upgrade_downgrade_and_reupgrade_empty_database() -> None:
         "4.200000000000000000",
     )
     asyncio.run(_assert_kill_switch_reservations_constraints())
+    assert asyncio.run(_reconciliation_state()) == (
+        True,
+        ("reconciliation_id",),
+        ("ix_reconciliation_runs__account_time",),
+        True,
+        True,
+        0,
+        0,
+        0,
+        0,
+        False,
+        True,
+        ("mismatch_id",),
+        ("fk_reconciliation_mismatches__reconciliation_runs",),
+        ("ix_reconciliation_mismatches__run",),
+        True,
+        "position",
+        "high",
+    )
+    asyncio.run(_assert_reconciliation_constraints())
 
     command.downgrade(alembic_config, "base")
     assert asyncio.run(_schemas()) == ()
 
     command.upgrade(alembic_config, "head")
     assert asyncio.run(_migration_state()) == (
-        "0017_kill_switch_reservations",
+        "0018_reconciliation_tables",
         LOGICAL_SCHEMAS,
         True,
     )
@@ -4847,6 +4867,203 @@ async def _assert_kill_switch_reservations_constraints() -> None:
             'active',
             '2026-07-29T12:21:00Z',
             '2026-07-29T12:26:00Z'
+        )
+        """
+    )
+
+
+async def _reconciliation_state() -> tuple[
+    bool,
+    tuple[str, ...],
+    tuple[str, ...],
+    bool,
+    bool,
+    int,
+    int,
+    int,
+    int,
+    bool,
+    bool,
+    tuple[str, ...],
+    tuple[str, ...],
+    tuple[str, ...],
+    bool,
+    str,
+    str,
+]:
+    engine = create_database_engine(
+        database_config_from_environment(os.environ, fallback_url=None),
+    )
+    try:
+        async with engine.begin() as connection:
+            run_table_exists = await _table_exists(
+                connection,
+                schema_name="pmrp_ops",
+                table_name="reconciliation_runs",
+            )
+            run_primary_key_columns = await _primary_key_columns(
+                connection,
+                "pmrp_ops.reconciliation_runs",
+            )
+            run_index_names = await _index_names(
+                connection,
+                schema_name="pmrp_ops",
+                table_name="reconciliation_runs",
+                expected_names=("ix_reconciliation_runs__account_time",),
+            )
+            run_account_index_descending = bool(
+                (
+                    await connection.execute(
+                        text(
+                            """
+                            SELECT indexdef LIKE '%started_at DESC%'
+                            FROM pg_indexes
+                            WHERE schemaname = 'pmrp_ops'
+                              AND tablename = 'reconciliation_runs'
+                              AND indexname = 'ix_reconciliation_runs__account_time'
+                            """
+                        )
+                    )
+                ).scalar_one()
+            )
+            mismatch_table_exists = await _table_exists(
+                connection,
+                schema_name="pmrp_ops",
+                table_name="reconciliation_mismatches",
+            )
+            mismatch_primary_key_columns = await _primary_key_columns(
+                connection,
+                "pmrp_ops.reconciliation_mismatches",
+            )
+            mismatch_foreign_key_names = await _constraint_names(
+                connection,
+                "pmrp_ops.reconciliation_mismatches",
+                constraint_type="f",
+            )
+            mismatch_index_names = await _index_names(
+                connection,
+                schema_name="pmrp_ops",
+                table_name="reconciliation_mismatches",
+                expected_names=("ix_reconciliation_mismatches__run",),
+            )
+
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO pmrp_ops.reconciliation_runs (
+                        reconciliation_id,
+                        exchange,
+                        account_id,
+                        started_at,
+                        status,
+                        initiated_by,
+                        reason
+                    )
+                    VALUES (
+                        'recon_01j00000000000000000000001',
+                        'kalshi',
+                        'acct_01j00000000000000000000001',
+                        '2026-07-29T12:30:00Z',
+                        'mismatch',
+                        'system',
+                        'scheduled check'
+                    )
+                    """
+                )
+            )
+            inserted_run = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT
+                            created_at IS NOT NULL,
+                            open_orders_checked,
+                            positions_checked,
+                            balances_checked,
+                            fills_checked,
+                            trading_gate_released
+                        FROM pmrp_ops.reconciliation_runs
+                        WHERE reconciliation_id = 'recon_01j00000000000000000000001'
+                        """
+                    )
+                )
+            ).one()
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO pmrp_ops.reconciliation_mismatches (
+                        mismatch_id,
+                        reconciliation_id,
+                        category,
+                        local_value,
+                        external_value,
+                        severity,
+                        explanation,
+                        requires_manual_review
+                    )
+                    VALUES (
+                        'mismatch_01j00000000000000000000001',
+                        'recon_01j00000000000000000000001',
+                        'position',
+                        '10',
+                        '9',
+                        'high',
+                        'local position differs from exchange state',
+                        true
+                    )
+                    """
+                )
+            )
+            inserted_mismatch = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT requires_manual_review, category, severity
+                        FROM pmrp_ops.reconciliation_mismatches
+                        WHERE mismatch_id = 'mismatch_01j00000000000000000000001'
+                        """
+                    )
+                )
+            ).one()
+            return (
+                run_table_exists,
+                run_primary_key_columns,
+                run_index_names,
+                run_account_index_descending,
+                bool(inserted_run[0]),
+                int(inserted_run[1]),
+                int(inserted_run[2]),
+                int(inserted_run[3]),
+                int(inserted_run[4]),
+                bool(inserted_run[5]),
+                mismatch_table_exists,
+                mismatch_primary_key_columns,
+                mismatch_foreign_key_names,
+                mismatch_index_names,
+                bool(inserted_mismatch[0]),
+                str(inserted_mismatch[1]),
+                str(inserted_mismatch[2]),
+            )
+    finally:
+        await engine.dispose()
+
+
+async def _assert_reconciliation_constraints() -> None:
+    await _assert_integrity_error(
+        """
+        INSERT INTO pmrp_ops.reconciliation_mismatches (
+            mismatch_id,
+            reconciliation_id,
+            category,
+            severity,
+            requires_manual_review
+        )
+        VALUES (
+            'mismatch_01j00000000000000000000002',
+            'recon_01j00000000000000000099999',
+            'balance',
+            'high',
+            true
         )
         """
     )

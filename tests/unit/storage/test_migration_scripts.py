@@ -47,6 +47,9 @@ RISK_STORAGE_MIGRATION_PATH = REPOSITORY_ROOT / "migrations/versions/0016_risk_s
 KILL_SWITCH_RESERVATIONS_MIGRATION_PATH = (
     REPOSITORY_ROOT / "migrations/versions/0017_kill_switch_reservations.py"
 )
+RECONCILIATION_TABLES_MIGRATION_PATH = (
+    REPOSITORY_ROOT / "migrations/versions/0018_reconciliation_tables.py"
+)
 MAX_ALEMBIC_REVISION_ID_LENGTH = 32
 EXPECTED_LOGICAL_SCHEMAS = (
     "pmrp_core",
@@ -233,6 +236,16 @@ def test_kill_switch_reservations_migration_revision_metadata_is_stable() -> Non
 
 
 @pytest.mark.unit
+def test_reconciliation_tables_migration_revision_metadata_is_stable() -> None:
+    migration = _load_migration(RECONCILIATION_TABLES_MIGRATION_PATH)
+
+    assert migration.revision == "0018_reconciliation_tables"
+    assert migration.down_revision == "0017_kill_switch_reservations"
+    assert migration.branch_labels is None
+    assert migration.depends_on is None
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "migration_path",
     [
@@ -253,6 +266,7 @@ def test_kill_switch_reservations_migration_revision_metadata_is_stable() -> Non
         PNL_SETTLEMENTS_MIGRATION_PATH,
         RISK_STORAGE_MIGRATION_PATH,
         KILL_SWITCH_RESERVATIONS_MIGRATION_PATH,
+        RECONCILIATION_TABLES_MIGRATION_PATH,
     ],
 )
 def test_migration_revision_ids_fit_alembic_version_column(migration_path: Path) -> None:
@@ -1049,6 +1063,58 @@ def test_kill_switch_reservations_migration_marks_constraint_names_as_final(
         "uq_capital_reservations__intent_id",
     ]
     assert final_constraint_names == [f"final:{name}" for name in formatted_names]
+
+
+@pytest.mark.unit
+def test_reconciliation_tables_migration_uses_expected_names() -> None:
+    migration = _load_migration(RECONCILIATION_TABLES_MIGRATION_PATH)
+
+    assert migration.SCHEMA_NAME == "pmrp_ops"
+    assert migration.RECONCILIATION_RUNS_TABLE_NAME == "reconciliation_runs"
+    assert migration.RECONCILIATION_MISMATCHES_TABLE_NAME == ("reconciliation_mismatches")
+    assert migration.RECONCILIATION_RUNS_ACCOUNT_TIME_INDEX_NAME == (
+        "ix_reconciliation_runs__account_time"
+    )
+    assert migration.RECONCILIATION_MISMATCHES_RUN_INDEX_NAME == (
+        "ix_reconciliation_mismatches__run"
+    )
+    assert migration.RECONCILIATION_MISMATCHES_RUN_FOREIGN_KEY_NAME == (
+        "fk_reconciliation_mismatches__reconciliation_runs"
+    )
+
+
+@pytest.mark.unit
+def test_reconciliation_tables_migration_marks_foreign_key_name_as_final(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    migration = _load_migration(RECONCILIATION_TABLES_MIGRATION_PATH)
+    formatted_names: list[str] = []
+    created_table_arguments: list[object] = []
+
+    def fake_format_name(name: str) -> str:
+        formatted_names.append(name)
+        return f"final:{name}"
+
+    def fake_create_table(*arguments: object, **_kwargs: object) -> None:
+        created_table_arguments.extend(arguments)
+
+    monkeypatch.setattr(migration.op, "f", fake_format_name)
+    monkeypatch.setattr(migration.op, "create_table", fake_create_table)
+    monkeypatch.setattr(migration.op, "create_index", lambda *_args, **_kwargs: None)
+
+    migration.upgrade()
+
+    foreign_key_constraints = [
+        constraint
+        for constraint in created_table_arguments
+        if isinstance(constraint, ForeignKeyConstraint)
+    ]
+    assert formatted_names == [
+        "fk_reconciliation_mismatches__reconciliation_runs",
+    ]
+    assert [constraint.name for constraint in foreign_key_constraints] == [
+        f"final:{name}" for name in formatted_names
+    ]
 
 
 def _load_initial_migration() -> ModuleType:
