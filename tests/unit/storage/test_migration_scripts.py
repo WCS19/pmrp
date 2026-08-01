@@ -56,6 +56,9 @@ REPLAY_SIMULATION_TABLES_MIGRATION_PATH = (
 MARKET_RELATIONSHIPS_MIGRATION_PATH = (
     REPOSITORY_ROOT / "migrations/versions/0020_market_relationships.py"
 )
+HEALTH_AUDIT_TABLES_MIGRATION_PATH = (
+    REPOSITORY_ROOT / "migrations/versions/0021_health_audit_tables.py"
+)
 MAX_ALEMBIC_REVISION_ID_LENGTH = 32
 EXPECTED_LOGICAL_SCHEMAS = (
     "pmrp_core",
@@ -272,6 +275,16 @@ def test_market_relationships_migration_revision_metadata_is_stable() -> None:
 
 
 @pytest.mark.unit
+def test_health_audit_tables_migration_revision_metadata_is_stable() -> None:
+    migration = _load_migration(HEALTH_AUDIT_TABLES_MIGRATION_PATH)
+
+    assert migration.revision == "0021_health_audit_tables"
+    assert migration.down_revision == "0020_market_relationships"
+    assert migration.branch_labels is None
+    assert migration.depends_on is None
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "migration_path",
     [
@@ -295,6 +308,7 @@ def test_market_relationships_migration_revision_metadata_is_stable() -> None:
         RECONCILIATION_TABLES_MIGRATION_PATH,
         REPLAY_SIMULATION_TABLES_MIGRATION_PATH,
         MARKET_RELATIONSHIPS_MIGRATION_PATH,
+        HEALTH_AUDIT_TABLES_MIGRATION_PATH,
     ],
 )
 def test_migration_revision_ids_fit_alembic_version_column(migration_path: Path) -> None:
@@ -1250,6 +1264,19 @@ def test_market_relationships_migration_marks_constraint_names_as_final(
         "ck_market_relationships__confidence",
     ]
     assert final_constraint_names == [f"final:{name}" for name in formatted_names]
+
+
+@pytest.mark.unit
+def test_health_audit_tables_migration_uses_expected_names() -> None:
+    migration = _load_migration(HEALTH_AUDIT_TABLES_MIGRATION_PATH)
+
+    assert migration.OPS_SCHEMA_NAME == "pmrp_ops"
+    assert migration.AUDIT_SCHEMA_NAME == "pmrp_audit"
+    assert migration.ADAPTER_HEALTH_SNAPSHOTS_TABLE_NAME == "adapter_health_snapshots"
+    assert migration.OPERATOR_AUDIT_RECORDS_TABLE_NAME == "operator_audit_records"
+    assert migration.ADAPTER_HEALTH_EXCHANGE_TIME_INDEX_NAME == ("ix_adapter_health__exchange_time")
+    assert migration.OPERATOR_AUDIT_ACTOR_TIME_INDEX_NAME == "ix_operator_audit__actor_time"
+    assert migration.OPERATOR_AUDIT_SCOPE_TIME_INDEX_NAME == "ix_operator_audit__scope_time"
 
 
 def _load_initial_migration() -> ModuleType:

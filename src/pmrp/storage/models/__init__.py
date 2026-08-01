@@ -6,6 +6,7 @@ from pmrp.storage.models.dead_letters import DeadLetterRecordRow
 from pmrp.storage.models.event_processing import OutboxMessageRow, ProcessedEventRow
 from pmrp.storage.models.exchange_registry import ExchangeAccountRow, ExchangeRow
 from pmrp.storage.models.fills import FillIdRow, FillRow
+from pmrp.storage.models.health_audit import AdapterHealthSnapshotRow, OperatorAuditRecordRow
 from pmrp.storage.models.idempotency import IdempotencyRecordRow
 from pmrp.storage.models.market_catalog import ContractRow, MarketRow, OutcomeRow
 from pmrp.storage.models.market_data import OrderBookSnapshotRow, TradeRow
@@ -44,6 +45,7 @@ from pmrp.storage.models.schema_registry import SchemaRegistryRow
 
 __all__ = [
     "NAMING_CONVENTION",
+    "AdapterHealthSnapshotRow",
     "CanonicalEventRow",
     "CapitalReservationRow",
     "CashBalanceRow",
@@ -62,6 +64,7 @@ __all__ = [
     "MarketRelationshipRow",
     "MarketRow",
     "ModelArtifactRow",
+    "OperatorAuditRecordRow",
     "OrderBookSnapshotRow",
     "OrderIntentRow",
     "OrderRow",
