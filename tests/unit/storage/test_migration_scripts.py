@@ -50,6 +50,9 @@ KILL_SWITCH_RESERVATIONS_MIGRATION_PATH = (
 RECONCILIATION_TABLES_MIGRATION_PATH = (
     REPOSITORY_ROOT / "migrations/versions/0018_reconciliation_tables.py"
 )
+REPLAY_SIMULATION_TABLES_MIGRATION_PATH = (
+    REPOSITORY_ROOT / "migrations/versions/0019_replay_simulation_tables.py"
+)
 MAX_ALEMBIC_REVISION_ID_LENGTH = 32
 EXPECTED_LOGICAL_SCHEMAS = (
     "pmrp_core",
@@ -246,6 +249,16 @@ def test_reconciliation_tables_migration_revision_metadata_is_stable() -> None:
 
 
 @pytest.mark.unit
+def test_replay_simulation_tables_migration_revision_metadata_is_stable() -> None:
+    migration = _load_migration(REPLAY_SIMULATION_TABLES_MIGRATION_PATH)
+
+    assert migration.revision == "0019_replay_simulation_tables"
+    assert migration.down_revision == "0018_reconciliation_tables"
+    assert migration.branch_labels is None
+    assert migration.depends_on is None
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "migration_path",
     [
@@ -267,6 +280,7 @@ def test_reconciliation_tables_migration_revision_metadata_is_stable() -> None:
         RISK_STORAGE_MIGRATION_PATH,
         KILL_SWITCH_RESERVATIONS_MIGRATION_PATH,
         RECONCILIATION_TABLES_MIGRATION_PATH,
+        REPLAY_SIMULATION_TABLES_MIGRATION_PATH,
     ],
 )
 def test_migration_revision_ids_fit_alembic_version_column(migration_path: Path) -> None:
@@ -1111,6 +1125,63 @@ def test_reconciliation_tables_migration_marks_foreign_key_name_as_final(
     ]
     assert formatted_names == [
         "fk_reconciliation_mismatches__reconciliation_runs",
+    ]
+    assert [constraint.name for constraint in foreign_key_constraints] == [
+        f"final:{name}" for name in formatted_names
+    ]
+
+
+@pytest.mark.unit
+def test_replay_simulation_tables_migration_uses_expected_names() -> None:
+    migration = _load_migration(REPLAY_SIMULATION_TABLES_MIGRATION_PATH)
+
+    assert migration.SCHEMA_NAME == "pmrp_research"
+    assert migration.REPLAY_SESSIONS_TABLE_NAME == "replay_sessions"
+    assert migration.REPLAY_RESULTS_TABLE_NAME == "replay_results"
+    assert migration.SIMULATION_SESSIONS_TABLE_NAME == "simulation_sessions"
+    assert migration.REPLAY_SESSIONS_STATE_CREATED_INDEX_NAME == (
+        "ix_replay_sessions__state_created"
+    )
+    assert migration.SIMULATION_SESSIONS_STATE_CREATED_INDEX_NAME == (
+        "ix_simulation_sessions__state_created"
+    )
+    assert migration.REPLAY_RESULTS_SESSION_FOREIGN_KEY_NAME == (
+        "fk_replay_results__replay_sessions"
+    )
+    assert migration.SIMULATION_SESSIONS_REPLAY_FOREIGN_KEY_NAME == (
+        "fk_simulation_sessions__replay_sessions"
+    )
+
+
+@pytest.mark.unit
+def test_replay_simulation_tables_migration_marks_foreign_key_names_as_final(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    migration = _load_migration(REPLAY_SIMULATION_TABLES_MIGRATION_PATH)
+    formatted_names: list[str] = []
+    created_table_arguments: list[object] = []
+
+    def fake_format_name(name: str) -> str:
+        formatted_names.append(name)
+        return f"final:{name}"
+
+    def fake_create_table(*arguments: object, **_kwargs: object) -> None:
+        created_table_arguments.extend(arguments)
+
+    monkeypatch.setattr(migration.op, "f", fake_format_name)
+    monkeypatch.setattr(migration.op, "create_table", fake_create_table)
+    monkeypatch.setattr(migration.op, "create_index", lambda *_args, **_kwargs: None)
+
+    migration.upgrade()
+
+    foreign_key_constraints = [
+        constraint
+        for constraint in created_table_arguments
+        if isinstance(constraint, ForeignKeyConstraint)
+    ]
+    assert formatted_names == [
+        "fk_replay_results__replay_sessions",
+        "fk_simulation_sessions__replay_sessions",
     ]
     assert [constraint.name for constraint in foreign_key_constraints] == [
         f"final:{name}" for name in formatted_names

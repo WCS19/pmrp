@@ -40,7 +40,7 @@ def test_migrations_upgrade_downgrade_and_reupgrade_empty_database() -> None:
     command.downgrade(alembic_config, "base")
     command.upgrade(alembic_config, "head")
     assert asyncio.run(_migration_state()) == (
-        "0018_reconciliation_tables",
+        "0019_replay_simulation_tables",
         LOGICAL_SCHEMAS,
         True,
     )
@@ -417,13 +417,42 @@ def test_migrations_upgrade_downgrade_and_reupgrade_empty_database() -> None:
         "high",
     )
     asyncio.run(_assert_reconciliation_constraints())
+    assert asyncio.run(_replay_simulation_state()) == (
+        True,
+        ("replay_session_id",),
+        ("ix_replay_sessions__state_created",),
+        True,
+        "10.000000000000000000",
+        True,
+        True,
+        0,
+        0,
+        True,
+        True,
+        ("replay_session_id",),
+        ("fk_replay_results__replay_sessions",),
+        True,
+        True,
+        True,
+        12,
+        "sha256:replay-result",
+        True,
+        ("simulation_session_id",),
+        ("fk_simulation_sessions__replay_sessions",),
+        ("ix_simulation_sessions__state_created",),
+        True,
+        True,
+        True,
+        "sha256:simulation-result",
+    )
+    asyncio.run(_assert_replay_simulation_constraints())
 
     command.downgrade(alembic_config, "base")
     assert asyncio.run(_schemas()) == ()
 
     command.upgrade(alembic_config, "head")
     assert asyncio.run(_migration_state()) == (
-        "0018_reconciliation_tables",
+        "0019_replay_simulation_tables",
         LOGICAL_SCHEMAS,
         True,
     )
@@ -5064,6 +5093,345 @@ async def _assert_reconciliation_constraints() -> None:
             'balance',
             'high',
             true
+        )
+        """
+    )
+
+
+async def _replay_simulation_state() -> tuple[
+    bool,
+    tuple[str, ...],
+    tuple[str, ...],
+    bool,
+    str,
+    bool,
+    bool,
+    int,
+    int,
+    bool,
+    bool,
+    tuple[str, ...],
+    tuple[str, ...],
+    bool,
+    bool,
+    bool,
+    int,
+    str,
+    bool,
+    tuple[str, ...],
+    tuple[str, ...],
+    tuple[str, ...],
+    bool,
+    bool,
+    bool,
+    str,
+]:
+    engine = create_database_engine(
+        database_config_from_environment(os.environ, fallback_url=None),
+    )
+    try:
+        async with engine.begin() as connection:
+            replay_table_exists = await _table_exists(
+                connection,
+                schema_name="pmrp_research",
+                table_name="replay_sessions",
+            )
+            replay_primary_key_columns = await _primary_key_columns(
+                connection,
+                "pmrp_research.replay_sessions",
+            )
+            replay_index_names = await _index_names(
+                connection,
+                schema_name="pmrp_research",
+                table_name="replay_sessions",
+                expected_names=("ix_replay_sessions__state_created",),
+            )
+            replay_state_index_descending = bool(
+                (
+                    await connection.execute(
+                        text(
+                            """
+                            SELECT indexdef LIKE '%created_at DESC%'
+                            FROM pg_indexes
+                            WHERE schemaname = 'pmrp_research'
+                              AND tablename = 'replay_sessions'
+                              AND indexname = 'ix_replay_sessions__state_created'
+                            """
+                        )
+                    )
+                ).scalar_one()
+            )
+            replay_result_table_exists = await _table_exists(
+                connection,
+                schema_name="pmrp_research",
+                table_name="replay_results",
+            )
+            replay_result_primary_key_columns = await _primary_key_columns(
+                connection,
+                "pmrp_research.replay_results",
+            )
+            replay_result_foreign_key_names = await _constraint_names(
+                connection,
+                "pmrp_research.replay_results",
+                constraint_type="f",
+            )
+            simulation_table_exists = await _table_exists(
+                connection,
+                schema_name="pmrp_research",
+                table_name="simulation_sessions",
+            )
+            simulation_primary_key_columns = await _primary_key_columns(
+                connection,
+                "pmrp_research.simulation_sessions",
+            )
+            simulation_foreign_key_names = await _constraint_names(
+                connection,
+                "pmrp_research.simulation_sessions",
+                constraint_type="f",
+            )
+            simulation_index_names = await _index_names(
+                connection,
+                schema_name="pmrp_research",
+                table_name="simulation_sessions",
+                expected_names=("ix_simulation_sessions__state_created",),
+            )
+            simulation_state_index_descending = bool(
+                (
+                    await connection.execute(
+                        text(
+                            """
+                            SELECT indexdef LIKE '%created_at DESC%'
+                            FROM pg_indexes
+                            WHERE schemaname = 'pmrp_research'
+                              AND tablename = 'simulation_sessions'
+                              AND indexname = 'ix_simulation_sessions__state_created'
+                            """
+                        )
+                    )
+                ).scalar_one()
+            )
+
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO pmrp_research.replay_sessions (
+                        replay_session_id,
+                        dataset_id,
+                        dataset_checksum,
+                        starts_at,
+                        ends_at,
+                        speed,
+                        deterministic,
+                        random_seed,
+                        event_ordering_policy_version,
+                        strategy_versions,
+                        model_versions,
+                        configuration_hash,
+                        code_commit,
+                        dependency_lock_hash,
+                        state,
+                        created_at
+                    )
+                    VALUES (
+                        'rpl_01j00000000000000000000001',
+                        'dataset_basic_market',
+                        'sha256:dataset',
+                        '2026-07-29T12:00:00Z',
+                        '2026-07-29T13:00:00Z',
+                        10.000000000000000000,
+                        true,
+                        42,
+                        'canonical-event-order-v1',
+                        '{"strat_fed_value": "1.0.0"}'::jsonb,
+                        '{"model_fed": "1.0.0"}'::jsonb,
+                        'sha256:replay-config',
+                        'abc1234',
+                        'sha256:uv-lock',
+                        'created',
+                        '2026-07-29T12:00:00Z'
+                    )
+                    """
+                )
+            )
+            inserted_replay = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT
+                            speed,
+                            strategy_versions @> '{"strat_fed_value": "1.0.0"}'::jsonb,
+                            model_versions @> '{"model_fed": "1.0.0"}'::jsonb,
+                            processed_events,
+                            rejected_events,
+                            created_at IS NOT NULL
+                        FROM pmrp_research.replay_sessions
+                        WHERE replay_session_id = 'rpl_01j00000000000000000000001'
+                        """
+                    )
+                )
+            ).one()
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO pmrp_research.replay_results (
+                        replay_session_id,
+                        processed_events,
+                        generated_signals,
+                        generated_intents,
+                        simulated_orders,
+                        simulated_fills,
+                        final_portfolio,
+                        metrics,
+                        result_checksum,
+                        completed_at
+                    )
+                    VALUES (
+                        'rpl_01j00000000000000000000001',
+                        12,
+                        3,
+                        2,
+                        2,
+                        2,
+                        '{"cash": "100.00"}'::jsonb,
+                        '{"pnl": "1.23"}'::jsonb,
+                        'sha256:replay-result',
+                        '2026-07-29T13:00:00Z'
+                    )
+                    """
+                )
+            )
+            inserted_replay_result = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT
+                            final_portfolio @> '{"cash": "100.00"}'::jsonb,
+                            metrics @> '{"pnl": "1.23"}'::jsonb,
+                            completed_at IS NOT NULL,
+                            processed_events,
+                            result_checksum
+                        FROM pmrp_research.replay_results
+                        WHERE replay_session_id = 'rpl_01j00000000000000000000001'
+                        """
+                    )
+                )
+            ).one()
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO pmrp_research.simulation_sessions (
+                        simulation_session_id,
+                        replay_session_id,
+                        configuration,
+                        configuration_hash,
+                        state,
+                        created_at,
+                        result_checksum
+                    )
+                    VALUES (
+                        'sim_01j00000000000000000000001',
+                        'rpl_01j00000000000000000000001',
+                        '{"fill_model": "deterministic"}'::jsonb,
+                        'sha256:simulation-config',
+                        'completed',
+                        '2026-07-29T12:10:00Z',
+                        'sha256:simulation-result'
+                    )
+                    """
+                )
+            )
+            inserted_simulation = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT
+                            configuration @> '{"fill_model": "deterministic"}'::jsonb,
+                            replay_session_id = 'rpl_01j00000000000000000000001',
+                            result_checksum
+                        FROM pmrp_research.simulation_sessions
+                        WHERE simulation_session_id = 'sim_01j00000000000000000000001'
+                        """
+                    )
+                )
+            ).one()
+            return (
+                replay_table_exists,
+                replay_primary_key_columns,
+                replay_index_names,
+                replay_state_index_descending,
+                _numeric_18_text(inserted_replay[0]),
+                bool(inserted_replay[1]),
+                bool(inserted_replay[2]),
+                int(inserted_replay[3]),
+                int(inserted_replay[4]),
+                bool(inserted_replay[5]),
+                replay_result_table_exists,
+                replay_result_primary_key_columns,
+                replay_result_foreign_key_names,
+                bool(inserted_replay_result[0]),
+                bool(inserted_replay_result[1]),
+                bool(inserted_replay_result[2]),
+                int(inserted_replay_result[3]),
+                str(inserted_replay_result[4]),
+                simulation_table_exists,
+                simulation_primary_key_columns,
+                simulation_foreign_key_names,
+                simulation_index_names,
+                simulation_state_index_descending,
+                bool(inserted_simulation[0]),
+                bool(inserted_simulation[1]),
+                str(inserted_simulation[2]),
+            )
+    finally:
+        await engine.dispose()
+
+
+async def _assert_replay_simulation_constraints() -> None:
+    await _assert_integrity_error(
+        """
+        INSERT INTO pmrp_research.replay_results (
+            replay_session_id,
+            processed_events,
+            generated_signals,
+            generated_intents,
+            simulated_orders,
+            simulated_fills,
+            final_portfolio,
+            metrics,
+            result_checksum,
+            completed_at
+        )
+        VALUES (
+            'rpl_01j00000000000000000099999',
+            1,
+            0,
+            0,
+            0,
+            0,
+            '{}'::jsonb,
+            '{}'::jsonb,
+            'sha256:orphan-replay-result',
+            '2026-07-29T13:00:00Z'
+        )
+        """
+    )
+    await _assert_integrity_error(
+        """
+        INSERT INTO pmrp_research.simulation_sessions (
+            simulation_session_id,
+            replay_session_id,
+            configuration,
+            configuration_hash,
+            state,
+            created_at
+        )
+        VALUES (
+            'sim_01j00000000000000000099999',
+            'rpl_01j00000000000000000099999',
+            '{}'::jsonb,
+            'sha256:orphan-simulation',
+            'created',
+            '2026-07-29T12:10:00Z'
         )
         """
     )

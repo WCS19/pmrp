@@ -20,6 +20,11 @@ from pmrp.storage.models.portfolio import (
 )
 from pmrp.storage.models.raw_exchange import RawExchangeRecordRow
 from pmrp.storage.models.reconciliation import ReconciliationMismatchRow, ReconciliationRunRow
+from pmrp.storage.models.replay_simulation import (
+    ReplayResultRow,
+    ReplaySessionRow,
+    SimulationSessionRow,
+)
 from pmrp.storage.models.research_metadata import (
     ModelArtifactRow,
     StrategyConfigurationRow,
@@ -67,12 +72,15 @@ __all__ = [
     "RawExchangeRecordRow",
     "ReconciliationMismatchRow",
     "ReconciliationRunRow",
+    "ReplayResultRow",
+    "ReplaySessionRow",
     "RiskBreachRow",
     "RiskDecisionRow",
     "RiskLimitRow",
     "SchemaRegistryRow",
     "SettlementRow",
     "SignalRow",
+    "SimulationSessionRow",
     "StorageBase",
     "StrategyConfigurationRow",
     "StrategyDefinitionRow",
