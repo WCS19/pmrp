@@ -9,6 +9,7 @@ from pmrp.storage.models.fills import FillIdRow, FillRow
 from pmrp.storage.models.idempotency import IdempotencyRecordRow
 from pmrp.storage.models.market_catalog import ContractRow, MarketRow, OutcomeRow
 from pmrp.storage.models.market_data import OrderBookSnapshotRow, TradeRow
+from pmrp.storage.models.matching import MarketRelationshipRow
 from pmrp.storage.models.orders import OrderIntentRow, OrderRow, OrderStateTransitionRow
 from pmrp.storage.models.portfolio import (
     CashBalanceRow,
@@ -58,6 +59,7 @@ __all__ = [
     "JournalEntryRow",
     "JournalLineRow",
     "KillSwitchRow",
+    "MarketRelationshipRow",
     "MarketRow",
     "ModelArtifactRow",
     "OrderBookSnapshotRow",

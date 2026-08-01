@@ -53,6 +53,9 @@ RECONCILIATION_TABLES_MIGRATION_PATH = (
 REPLAY_SIMULATION_TABLES_MIGRATION_PATH = (
     REPOSITORY_ROOT / "migrations/versions/0019_replay_simulation_tables.py"
 )
+MARKET_RELATIONSHIPS_MIGRATION_PATH = (
+    REPOSITORY_ROOT / "migrations/versions/0020_market_relationships.py"
+)
 MAX_ALEMBIC_REVISION_ID_LENGTH = 32
 EXPECTED_LOGICAL_SCHEMAS = (
     "pmrp_core",
@@ -259,6 +262,16 @@ def test_replay_simulation_tables_migration_revision_metadata_is_stable() -> Non
 
 
 @pytest.mark.unit
+def test_market_relationships_migration_revision_metadata_is_stable() -> None:
+    migration = _load_migration(MARKET_RELATIONSHIPS_MIGRATION_PATH)
+
+    assert migration.revision == "0020_market_relationships"
+    assert migration.down_revision == "0019_replay_simulation_tables"
+    assert migration.branch_labels is None
+    assert migration.depends_on is None
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "migration_path",
     [
@@ -281,6 +294,7 @@ def test_replay_simulation_tables_migration_revision_metadata_is_stable() -> Non
         KILL_SWITCH_RESERVATIONS_MIGRATION_PATH,
         RECONCILIATION_TABLES_MIGRATION_PATH,
         REPLAY_SIMULATION_TABLES_MIGRATION_PATH,
+        MARKET_RELATIONSHIPS_MIGRATION_PATH,
     ],
 )
 def test_migration_revision_ids_fit_alembic_version_column(migration_path: Path) -> None:
@@ -1186,6 +1200,56 @@ def test_replay_simulation_tables_migration_marks_foreign_key_names_as_final(
     assert [constraint.name for constraint in foreign_key_constraints] == [
         f"final:{name}" for name in formatted_names
     ]
+
+
+@pytest.mark.unit
+def test_market_relationships_migration_uses_expected_names() -> None:
+    migration = _load_migration(MARKET_RELATIONSHIPS_MIGRATION_PATH)
+
+    assert migration.SCHEMA_NAME == "pmrp_research"
+    assert migration.MARKET_RELATIONSHIPS_TABLE_NAME == "market_relationships"
+    assert migration.MARKET_RELATIONSHIPS_SOURCE_TARGET_INDEX_NAME == (
+        "ix_market_relationships__source_target"
+    )
+    assert migration.MARKET_RELATIONSHIPS_SOURCE_TARGET_TYPE_UNIQUE_NAME == (
+        "uq_market_relationships__source_target_type"
+    )
+    assert migration.MARKET_RELATIONSHIPS_CONFIDENCE_CHECK_NAME == (
+        "ck_market_relationships__confidence"
+    )
+
+
+@pytest.mark.unit
+def test_market_relationships_migration_marks_constraint_names_as_final(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    migration = _load_migration(MARKET_RELATIONSHIPS_MIGRATION_PATH)
+    formatted_names: list[str] = []
+    created_table_arguments: list[object] = []
+
+    def fake_format_name(name: str) -> str:
+        formatted_names.append(name)
+        return f"final:{name}"
+
+    def fake_create_table(*arguments: object, **_kwargs: object) -> None:
+        created_table_arguments.extend(arguments)
+
+    monkeypatch.setattr(migration.op, "f", fake_format_name)
+    monkeypatch.setattr(migration.op, "create_table", fake_create_table)
+    monkeypatch.setattr(migration.op, "create_index", lambda *_args, **_kwargs: None)
+
+    migration.upgrade()
+
+    final_constraint_names = [
+        constraint.name
+        for constraint in created_table_arguments
+        if isinstance(constraint, CheckConstraint | UniqueConstraint)
+    ]
+    assert formatted_names == [
+        "uq_market_relationships__source_target_type",
+        "ck_market_relationships__confidence",
+    ]
+    assert final_constraint_names == [f"final:{name}" for name in formatted_names]
 
 
 def _load_initial_migration() -> ModuleType:

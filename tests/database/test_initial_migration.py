@@ -40,7 +40,7 @@ def test_migrations_upgrade_downgrade_and_reupgrade_empty_database() -> None:
     command.downgrade(alembic_config, "base")
     command.upgrade(alembic_config, "head")
     assert asyncio.run(_migration_state()) == (
-        "0019_replay_simulation_tables",
+        "0020_market_relationships",
         LOGICAL_SCHEMAS,
         True,
     )
@@ -446,13 +446,28 @@ def test_migrations_upgrade_downgrade_and_reupgrade_empty_database() -> None:
         "sha256:simulation-result",
     )
     asyncio.run(_assert_replay_simulation_constraints())
+    assert asyncio.run(_market_relationships_state()) == (
+        True,
+        ("relationship_id",),
+        ("uq_market_relationships__source_target_type",),
+        ("ck_market_relationships__confidence",),
+        ("ix_market_relationships__source_target",),
+        "0.870000000000000000",
+        True,
+        True,
+        "approved",
+        0,
+        True,
+        True,
+    )
+    asyncio.run(_assert_market_relationship_constraints())
 
     command.downgrade(alembic_config, "base")
     assert asyncio.run(_schemas()) == ()
 
     command.upgrade(alembic_config, "head")
     assert asyncio.run(_migration_state()) == (
-        "0019_replay_simulation_tables",
+        "0020_market_relationships",
         LOGICAL_SCHEMAS,
         True,
     )
@@ -5432,6 +5447,179 @@ async def _assert_replay_simulation_constraints() -> None:
             'sha256:orphan-simulation',
             'created',
             '2026-07-29T12:10:00Z'
+        )
+        """
+    )
+
+
+async def _market_relationships_state() -> tuple[
+    bool,
+    tuple[str, ...],
+    tuple[str, ...],
+    tuple[str, ...],
+    tuple[str, ...],
+    str,
+    bool,
+    bool,
+    str,
+    int,
+    bool,
+    bool,
+]:
+    engine = create_database_engine(
+        database_config_from_environment(os.environ, fallback_url=None),
+    )
+    try:
+        async with engine.begin() as connection:
+            table_exists = await _table_exists(
+                connection,
+                schema_name="pmrp_research",
+                table_name="market_relationships",
+            )
+            primary_key_columns = await _primary_key_columns(
+                connection,
+                "pmrp_research.market_relationships",
+            )
+            unique_constraint_names = await _constraint_names(
+                connection,
+                "pmrp_research.market_relationships",
+                constraint_type="u",
+            )
+            check_constraint_names = await _check_constraint_names(
+                connection,
+                "pmrp_research.market_relationships",
+            )
+            index_names = await _index_names(
+                connection,
+                schema_name="pmrp_research",
+                table_name="market_relationships",
+                expected_names=("ix_market_relationships__source_target",),
+            )
+
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO pmrp_research.market_relationships (
+                        relationship_id,
+                        source_market_id,
+                        target_market_id,
+                        relationship_type,
+                        confidence,
+                        valid_from,
+                        evidence,
+                        validator_version,
+                        settlement_rule_match,
+                        human_review_status,
+                        created_at,
+                        updated_at
+                    )
+                    VALUES (
+                        'rel_01j00000000000000000000001',
+                        'mkt_01j00000000000000000000001',
+                        'mkt_01j00000000000000000000002',
+                        'equivalent',
+                        0.870000000000000000,
+                        '2026-07-29T12:45:00Z',
+                        '["same-resolution-rule", "same-threshold"]'::jsonb,
+                        'relationship-validator-v1',
+                        true,
+                        'approved',
+                        '2026-07-29T12:45:00Z',
+                        '2026-07-29T12:45:00Z'
+                    )
+                    """
+                )
+            )
+            inserted = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT
+                            confidence,
+                            evidence @> '["same-resolution-rule"]'::jsonb,
+                            settlement_rule_match,
+                            human_review_status,
+                            aggregate_version,
+                            created_at IS NOT NULL,
+                            updated_at IS NOT NULL
+                        FROM pmrp_research.market_relationships
+                        WHERE relationship_id = 'rel_01j00000000000000000000001'
+                        """
+                    )
+                )
+            ).one()
+            return (
+                table_exists,
+                primary_key_columns,
+                unique_constraint_names,
+                check_constraint_names,
+                index_names,
+                _numeric_18_text(inserted[0]),
+                bool(inserted[1]),
+                bool(inserted[2]),
+                str(inserted[3]),
+                int(inserted[4]),
+                bool(inserted[5]),
+                bool(inserted[6]),
+            )
+    finally:
+        await engine.dispose()
+
+
+async def _assert_market_relationship_constraints() -> None:
+    await _assert_integrity_error(
+        """
+        INSERT INTO pmrp_research.market_relationships (
+            relationship_id,
+            source_market_id,
+            target_market_id,
+            relationship_type,
+            confidence,
+            valid_from,
+            evidence,
+            validator_version,
+            created_at,
+            updated_at
+        )
+        VALUES (
+            'rel_01j00000000000000000000002',
+            'mkt_01j00000000000000000000001',
+            'mkt_01j00000000000000000000002',
+            'equivalent',
+            0.900000000000000000,
+            '2026-07-29T12:46:00Z',
+            '["duplicate relationship"]'::jsonb,
+            'relationship-validator-v1',
+            '2026-07-29T12:46:00Z',
+            '2026-07-29T12:46:00Z'
+        )
+        """
+    )
+    await _assert_integrity_error(
+        """
+        INSERT INTO pmrp_research.market_relationships (
+            relationship_id,
+            source_market_id,
+            target_market_id,
+            relationship_type,
+            confidence,
+            valid_from,
+            evidence,
+            validator_version,
+            created_at,
+            updated_at
+        )
+        VALUES (
+            'rel_01j00000000000000000000003',
+            'mkt_01j00000000000000000000003',
+            'mkt_01j00000000000000000000004',
+            'correlated',
+            1.200000000000000000,
+            '2026-07-29T12:47:00Z',
+            '["invalid confidence"]'::jsonb,
+            'relationship-validator-v1',
+            '2026-07-29T12:47:00Z',
+            '2026-07-29T12:47:00Z'
         )
         """
     )
