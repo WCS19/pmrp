@@ -1,0 +1,30 @@
+[
+  {
+    "exchange": "fixture",
+    "environment": "test",
+    "exchange_position_id": "fixture-position-001",
+    "exchange_market_id": "FIX-MARKET-001",
+    "exchange_contract_id": "FIX-MARKET-001-YES",
+    "raw_event": {
+      "raw_record_id": "raw_fixture_position_001",
+      "exchange": "fixture",
+      "environment": "test",
+      "connection_id": "conn_fixture_001",
+      "endpoint": "/fixture/positions",
+      "channel": null,
+      "message_type": "position",
+      "received_at": "2026-08-02T18:45:04Z",
+      "exchange_occurred_at": "2026-08-02T18:45:03Z",
+      "sequence": null,
+      "content_type": "application/json",
+      "compression": null,
+      "payload_text": "{\"position\":\"fixture-position-001\",\"quantity\":\"10\"}",
+      "payload_bytes_b64": null,
+      "payload_hash": "fixture-position-hash-001",
+      "parser_version": "fixture-position-v1",
+      "transport_metadata": {
+        "fixture": "normal-position"
+      }
+    }
+  }
+]

@@ -1,0 +1,29 @@
+[
+  {
+    "exchange": "fixture",
+    "environment": "test",
+    "exchange_fill_id": "fixture-fill-001",
+    "exchange_order_id": "fixture-order-001",
+    "raw_event": {
+      "raw_record_id": "raw_fixture_fill_001",
+      "exchange": "fixture",
+      "environment": "test",
+      "connection_id": "conn_fixture_001",
+      "endpoint": "/fixture/fills",
+      "channel": null,
+      "message_type": "fill",
+      "received_at": "2026-08-02T18:45:06Z",
+      "exchange_occurred_at": "2026-08-02T18:45:05Z",
+      "sequence": null,
+      "content_type": "application/json",
+      "compression": null,
+      "payload_text": "{\"fill\":\"fixture-fill-001\",\"order\":\"fixture-order-001\"}",
+      "payload_bytes_b64": null,
+      "payload_hash": "fixture-fill-hash-001",
+      "parser_version": "fixture-fill-v1",
+      "transport_metadata": {
+        "fixture": "normal-fill"
+      }
+    }
+  }
+]

@@ -1,0 +1,44 @@
+[
+  {
+    "raw_record_id": "raw_fixture_stream_001",
+    "exchange": "fixture",
+    "environment": "test",
+    "connection_id": "conn_fixture_001",
+    "endpoint": null,
+    "channel": "order_book",
+    "message_type": "snapshot",
+    "received_at": "2026-08-02T18:45:01Z",
+    "exchange_occurred_at": "2026-08-02T18:45:00Z",
+    "sequence": 1,
+    "content_type": "application/json",
+    "compression": null,
+    "payload_text": "{\"type\":\"order_book_snapshot\",\"market\":\"FIX-MARKET-001\"}",
+    "payload_bytes_b64": null,
+    "payload_hash": "fixture-stream-hash-001",
+    "parser_version": "fixture-stream-v1",
+    "transport_metadata": {
+      "fixture": "normal-stream"
+    }
+  },
+  {
+    "raw_record_id": "raw_fixture_stream_002",
+    "exchange": "fixture",
+    "environment": "test",
+    "connection_id": "conn_fixture_001",
+    "endpoint": null,
+    "channel": "trades",
+    "message_type": "trade",
+    "received_at": "2026-08-02T18:45:02Z",
+    "exchange_occurred_at": "2026-08-02T18:45:01Z",
+    "sequence": 2,
+    "content_type": "application/json",
+    "compression": null,
+    "payload_text": "{\"type\":\"trade\",\"market\":\"FIX-MARKET-001\"}",
+    "payload_bytes_b64": null,
+    "payload_hash": "fixture-stream-hash-002",
+    "parser_version": "fixture-stream-v1",
+    "transport_metadata": {
+      "fixture": "normal-stream"
+    }
+  }
+]
