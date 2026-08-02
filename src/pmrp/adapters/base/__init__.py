@@ -13,6 +13,15 @@ from pmrp.adapters.base.errors import (
     AdapterTimeoutError,
     AdapterTransportError,
 )
+from pmrp.adapters.base.requests import MarketDataChannel, MarketListRequest, MarketSubscription
+from pmrp.adapters.base.responses import (
+    RawBalance,
+    RawExchangeEvent,
+    RawFill,
+    RawMarket,
+    RawOpenOrder,
+    RawPosition,
+)
 
 __all__ = [
     "AdapterAmbiguousOrderSubmissionError",
@@ -26,4 +35,13 @@ __all__ = [
     "AdapterSequenceGapError",
     "AdapterTimeoutError",
     "AdapterTransportError",
+    "MarketDataChannel",
+    "MarketListRequest",
+    "MarketSubscription",
+    "RawBalance",
+    "RawExchangeEvent",
+    "RawFill",
+    "RawMarket",
+    "RawOpenOrder",
+    "RawPosition",
 ]
