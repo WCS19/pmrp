@@ -176,16 +176,23 @@ def test_rate_limit_window_rejects_remaining_above_limit() -> None:
         RateLimitWindow.model_validate(_rate_limit_window_payload(limit=10, remaining=11))
 
 
-def test_rate_limit_status_rejects_duplicate_window_names() -> None:
-    with pytest.raises(ValidationError, match="unique names"):
-        RateLimitStatus.model_validate(
-            _rate_limit_status_payload(
-                windows=(
-                    _rate_limit_window_payload(name="orders"),
-                    _rate_limit_window_payload(name="orders", remaining=41),
-                )
+def test_rate_limit_status_allows_empty_windows() -> None:
+    status = RateLimitStatus.model_validate(_rate_limit_status_payload(windows=()))
+
+    assert status.windows == ()
+
+
+def test_rate_limit_status_allows_same_name_for_distinct_windows() -> None:
+    status = RateLimitStatus.model_validate(
+        _rate_limit_status_payload(
+            windows=(
+                _rate_limit_window_payload(name="orders", window_seconds=1),
+                _rate_limit_window_payload(name="orders", window_seconds=60, remaining=41),
             )
         )
+    )
+
+    assert [window.window_seconds for window in status.windows] == [1, 60]
 
 
 def test_service_health_rejects_unknown_environment() -> None:

@@ -107,20 +107,12 @@ class RateLimitWindow(CanonicalModel):
 class RateLimitStatus(CanonicalModel):
     exchange: str = Field(min_length=1, max_length=_SYSTEM_LABEL_MAX_LENGTH)
     measured_at: UTCDateTime
-    windows: tuple[RateLimitWindow, ...] = Field(min_length=1)
+    windows: tuple[RateLimitWindow, ...]
 
     @field_validator("exchange")
     @classmethod
     def validate_exchange(cls, value: str) -> str:
         return _validate_required_text(value, field_name="rate-limit exchange")
-
-    @model_validator(mode="after")
-    def validate_unique_windows(self) -> Self:
-        window_names = [window.name for window in self.windows]
-        if len(set(window_names)) != len(window_names):
-            msg = "rate-limit windows must have unique names"
-            raise ValueError(msg)
-        return self
 
 
 def _validate_nonblank_text(value: str | None, *, field_name: str) -> str | None:

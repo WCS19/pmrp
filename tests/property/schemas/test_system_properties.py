@@ -19,9 +19,8 @@ _DEPENDENCY_NAMES = st.lists(
 )
 _WINDOW_NAMES = st.lists(
     st.from_regex(r"window_[a-z0-9]{1,8}", fullmatch=True),
-    min_size=1,
+    min_size=0,
     max_size=5,
-    unique=True,
 )
 
 
