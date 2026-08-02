@@ -3,6 +3,7 @@
 from pmrp.adapters.base import (
     AdapterAmbiguousOrderSubmissionError,
     AdapterAuthenticationError,
+    AdapterCapabilities,
     AdapterCapabilityError,
     AdapterEndpointCategory,
     AdapterError,
@@ -16,6 +17,7 @@ from pmrp.adapters.base import (
 __all__ = [
     "AdapterAmbiguousOrderSubmissionError",
     "AdapterAuthenticationError",
+    "AdapterCapabilities",
     "AdapterCapabilityError",
     "AdapterEndpointCategory",
     "AdapterError",
