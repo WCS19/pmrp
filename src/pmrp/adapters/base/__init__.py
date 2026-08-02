@@ -14,6 +14,11 @@ from pmrp.adapters.base.errors import (
     AdapterTransportError,
 )
 from pmrp.adapters.base.protocol import ExchangeAdapter
+from pmrp.adapters.base.rate_limits import (
+    AdapterRateLimitDecision,
+    AdapterRateLimitRule,
+    evaluate_rate_limit,
+)
 from pmrp.adapters.base.requests import MarketDataChannel, MarketListRequest, MarketSubscription
 from pmrp.adapters.base.responses import (
     RawBalance,
@@ -32,7 +37,9 @@ __all__ = [
     "AdapterEndpointCategory",
     "AdapterError",
     "AdapterProtocolError",
+    "AdapterRateLimitDecision",
     "AdapterRateLimitError",
+    "AdapterRateLimitRule",
     "AdapterSequenceGapError",
     "AdapterTimeoutError",
     "AdapterTransportError",
@@ -46,4 +53,5 @@ __all__ = [
     "RawMarket",
     "RawOpenOrder",
     "RawPosition",
+    "evaluate_rate_limit",
 ]
