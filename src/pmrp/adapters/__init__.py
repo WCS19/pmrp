@@ -26,6 +26,7 @@ from pmrp.adapters.base import (
     RawPosition,
     evaluate_rate_limit,
 )
+from pmrp.adapters.fixture import FixtureAdapter, FixtureAdapterFailureMode
 
 __all__ = [
     "AdapterAmbiguousOrderSubmissionError",
@@ -42,6 +43,8 @@ __all__ = [
     "AdapterTimeoutError",
     "AdapterTransportError",
     "ExchangeAdapter",
+    "FixtureAdapter",
+    "FixtureAdapterFailureMode",
     "MarketDataChannel",
     "MarketListRequest",
     "MarketSubscription",

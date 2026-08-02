@@ -1,0 +1,30 @@
+[
+  {
+    "exchange": "fixture",
+    "environment": "test",
+    "exchange_order_id": "fixture-order-001",
+    "client_order_id": "fixture-client-001",
+    "exchange_market_id": "FIX-MARKET-001",
+    "raw_event": {
+      "raw_record_id": "raw_fixture_open_order_001",
+      "exchange": "fixture",
+      "environment": "test",
+      "connection_id": "conn_fixture_001",
+      "endpoint": "/fixture/orders/open",
+      "channel": null,
+      "message_type": "open_order",
+      "received_at": "2026-08-02T18:45:03Z",
+      "exchange_occurred_at": "2026-08-02T18:45:02Z",
+      "sequence": null,
+      "content_type": "application/json",
+      "compression": null,
+      "payload_text": "{\"order\":\"fixture-order-001\",\"status\":\"open\"}",
+      "payload_bytes_b64": null,
+      "payload_hash": "fixture-open-order-hash-001",
+      "parser_version": "fixture-order-v1",
+      "transport_metadata": {
+        "fixture": "normal-open-order"
+      }
+    }
+  }
+]
