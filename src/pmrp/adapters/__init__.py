@@ -8,7 +8,9 @@ from pmrp.adapters.base import (
     AdapterEndpointCategory,
     AdapterError,
     AdapterProtocolError,
+    AdapterRateLimitDecision,
     AdapterRateLimitError,
+    AdapterRateLimitRule,
     AdapterSequenceGapError,
     AdapterTimeoutError,
     AdapterTransportError,
@@ -22,6 +24,7 @@ from pmrp.adapters.base import (
     RawMarket,
     RawOpenOrder,
     RawPosition,
+    evaluate_rate_limit,
 )
 
 __all__ = [
@@ -32,7 +35,9 @@ __all__ = [
     "AdapterEndpointCategory",
     "AdapterError",
     "AdapterProtocolError",
+    "AdapterRateLimitDecision",
     "AdapterRateLimitError",
+    "AdapterRateLimitRule",
     "AdapterSequenceGapError",
     "AdapterTimeoutError",
     "AdapterTransportError",
@@ -46,4 +51,5 @@ __all__ = [
     "RawMarket",
     "RawOpenOrder",
     "RawPosition",
+    "evaluate_rate_limit",
 ]
