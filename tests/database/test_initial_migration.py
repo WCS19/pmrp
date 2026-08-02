@@ -40,7 +40,7 @@ def test_migrations_upgrade_downgrade_and_reupgrade_empty_database() -> None:
     command.downgrade(alembic_config, "base")
     command.upgrade(alembic_config, "head")
     assert asyncio.run(_migration_state()) == (
-        "0020_market_relationships",
+        "0021_health_audit_tables",
         LOGICAL_SCHEMAS,
         True,
     )
@@ -461,13 +461,38 @@ def test_migrations_upgrade_downgrade_and_reupgrade_empty_database() -> None:
         True,
     )
     asyncio.run(_assert_market_relationship_constraints())
+    assert asyncio.run(_health_audit_state()) == (
+        True,
+        ("captured_at", "exchange", "environment"),
+        True,
+        ("ix_adapter_health__exchange_time",),
+        True,
+        "healthy",
+        True,
+        True,
+        True,
+        True,
+        True,
+        0,
+        True,
+        True,
+        ("requested_at", "audit_id"),
+        True,
+        ("ix_operator_audit__actor_time", "ix_operator_audit__scope_time"),
+        True,
+        "operator",
+        "accepted",
+        True,
+        True,
+    )
+    asyncio.run(_assert_health_audit_constraints())
 
     command.downgrade(alembic_config, "base")
     assert asyncio.run(_schemas()) == ()
 
     command.upgrade(alembic_config, "head")
     assert asyncio.run(_migration_state()) == (
-        "0020_market_relationships",
+        "0021_health_audit_tables",
         LOGICAL_SCHEMAS,
         True,
     )
@@ -5625,6 +5650,304 @@ async def _assert_market_relationship_constraints() -> None:
     )
 
 
+async def _health_audit_state() -> tuple[
+    bool,
+    tuple[str, ...],
+    bool,
+    tuple[str, ...],
+    bool,
+    str,
+    bool,
+    bool,
+    bool,
+    bool,
+    bool,
+    int,
+    bool,
+    bool,
+    tuple[str, ...],
+    bool,
+    tuple[str, ...],
+    bool,
+    str,
+    str,
+    bool,
+    bool,
+]:
+    engine = create_database_engine(
+        database_config_from_environment(os.environ, fallback_url=None),
+    )
+    try:
+        async with engine.begin() as connection:
+            adapter_table_exists = await _table_exists(
+                connection,
+                schema_name="pmrp_ops",
+                table_name="adapter_health_snapshots",
+            )
+            adapter_primary_key_columns = await _primary_key_columns(
+                connection,
+                "pmrp_ops.adapter_health_snapshots",
+            )
+            adapter_partitioned = await _partitioned_table_exists(
+                connection,
+                "pmrp_ops.adapter_health_snapshots",
+            )
+            adapter_index_names = await _index_names(
+                connection,
+                schema_name="pmrp_ops",
+                table_name="adapter_health_snapshots",
+                expected_names=("ix_adapter_health__exchange_time",),
+            )
+            adapter_index_descending = bool(
+                (
+                    await connection.execute(
+                        text(
+                            """
+                            SELECT indexdef LIKE '%captured_at DESC%'
+                            FROM pg_indexes
+                            WHERE schemaname = 'pmrp_ops'
+                              AND tablename = 'adapter_health_snapshots'
+                              AND indexname = 'ix_adapter_health__exchange_time'
+                            """
+                        )
+                    )
+                ).scalar_one()
+            )
+            audit_table_exists = await _table_exists(
+                connection,
+                schema_name="pmrp_audit",
+                table_name="operator_audit_records",
+            )
+            audit_primary_key_columns = await _primary_key_columns(
+                connection,
+                "pmrp_audit.operator_audit_records",
+            )
+            audit_partitioned = await _partitioned_table_exists(
+                connection,
+                "pmrp_audit.operator_audit_records",
+            )
+            audit_index_names = await _index_names(
+                connection,
+                schema_name="pmrp_audit",
+                table_name="operator_audit_records",
+                expected_names=(
+                    "ix_operator_audit__actor_time",
+                    "ix_operator_audit__scope_time",
+                ),
+            )
+            audit_indexes_descending = bool(
+                (
+                    await connection.execute(
+                        text(
+                            """
+                            SELECT bool_and(indexdef LIKE '%requested_at DESC%')
+                            FROM pg_indexes
+                            WHERE schemaname = 'pmrp_audit'
+                              AND tablename = 'operator_audit_records'
+                              AND indexname IN (
+                                  'ix_operator_audit__actor_time',
+                                  'ix_operator_audit__scope_time'
+                              )
+                            """
+                        )
+                    )
+                ).scalar_one()
+            )
+
+            await _create_adapter_health_snapshot_test_partition(connection)
+            await _create_operator_audit_record_test_partition(connection)
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO pmrp_ops.adapter_health_snapshots (
+                        captured_at,
+                        exchange,
+                        environment,
+                        status,
+                        connected,
+                        authenticated,
+                        subscriptions_active,
+                        last_message_at,
+                        last_heartbeat_at,
+                        last_reconciliation_at,
+                        market_data_fresh,
+                        trading_gate_open,
+                        reconnect_attempts,
+                        message
+                    )
+                    VALUES (
+                        '2026-07-29T12:50:00Z',
+                        'kalshi',
+                        'paper',
+                        'healthy',
+                        true,
+                        true,
+                        true,
+                        '2026-07-29T12:49:55Z',
+                        '2026-07-29T12:49:58Z',
+                        '2026-07-29T12:45:00Z',
+                        true,
+                        true,
+                        0,
+                        'connected'
+                    )
+                    """
+                )
+            )
+            adapter_inserted = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT
+                            status,
+                            connected,
+                            authenticated,
+                            subscriptions_active,
+                            market_data_fresh,
+                            trading_gate_open,
+                            reconnect_attempts,
+                            last_heartbeat_at IS NOT NULL
+                        FROM pmrp_ops.adapter_health_snapshots
+                        WHERE captured_at = '2026-07-29T12:50:00Z'
+                          AND exchange = 'kalshi'
+                          AND environment = 'paper'
+                        """
+                    )
+                )
+            ).one()
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO pmrp_audit.operator_audit_records (
+                        requested_at,
+                        audit_id,
+                        actor,
+                        action,
+                        scope,
+                        scope_id,
+                        result,
+                        reason,
+                        correlation_id,
+                        request_id,
+                        idempotency_key,
+                        source_ip_hash,
+                        request_hash
+                    )
+                    VALUES (
+                        '2026-07-29T12:51:00Z',
+                        'audit_01j00000000000000000000001',
+                        'operator',
+                        'kill_switch.activate',
+                        'global',
+                        NULL,
+                        'accepted',
+                        'manual risk control',
+                        'corr_01j00000000000000000000001',
+                        'req_01j00000000000000000000001',
+                        'idem_01j00000000000000000000002',
+                        'sha256:source-ip-hash',
+                        'sha256:operator-request'
+                    )
+                    """
+                )
+            )
+            audit_inserted = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT
+                            actor,
+                            result,
+                            completed_at IS NULL,
+                            request_hash = 'sha256:operator-request'
+                        FROM pmrp_audit.operator_audit_records
+                        WHERE requested_at = '2026-07-29T12:51:00Z'
+                          AND audit_id = 'audit_01j00000000000000000000001'
+                        """
+                    )
+                )
+            ).one()
+            return (
+                adapter_table_exists,
+                adapter_primary_key_columns,
+                adapter_partitioned,
+                adapter_index_names,
+                adapter_index_descending,
+                str(adapter_inserted[0]),
+                bool(adapter_inserted[1]),
+                bool(adapter_inserted[2]),
+                bool(adapter_inserted[3]),
+                bool(adapter_inserted[4]),
+                bool(adapter_inserted[5]),
+                int(adapter_inserted[6]),
+                bool(adapter_inserted[7]),
+                audit_table_exists,
+                audit_primary_key_columns,
+                audit_partitioned,
+                audit_index_names,
+                audit_indexes_descending,
+                str(audit_inserted[0]),
+                str(audit_inserted[1]),
+                bool(audit_inserted[2]),
+                bool(audit_inserted[3]),
+            )
+    finally:
+        await engine.dispose()
+
+
+async def _assert_health_audit_constraints() -> None:
+    await _assert_integrity_error(
+        """
+        INSERT INTO pmrp_ops.adapter_health_snapshots (
+            captured_at,
+            exchange,
+            environment,
+            status,
+            connected,
+            authenticated,
+            subscriptions_active,
+            market_data_fresh,
+            trading_gate_open,
+            reconnect_attempts
+        )
+        VALUES (
+            '2026-07-29T12:50:00Z',
+            'kalshi',
+            'paper',
+            'healthy',
+            true,
+            true,
+            true,
+            true,
+            true,
+            0
+        )
+        """
+    )
+    await _assert_integrity_error(
+        """
+        INSERT INTO pmrp_audit.operator_audit_records (
+            requested_at,
+            audit_id,
+            actor,
+            action,
+            scope,
+            result,
+            correlation_id
+        )
+        VALUES (
+            '2026-07-29T12:51:00Z',
+            'audit_01j00000000000000000000001',
+            'operator',
+            'kill_switch.activate',
+            'global',
+            'accepted',
+            'corr_01j00000000000000000000001'
+        )
+        """
+    )
+
+
 async def _create_raw_exchange_record_test_partition(connection: AsyncConnection) -> None:
     await connection.execute(
         text(
@@ -5703,6 +6026,30 @@ async def _create_risk_decision_test_partition(connection: AsyncConnection) -> N
             """
             CREATE TABLE IF NOT EXISTS pmrp_risk.risk_decisions_2026_07
             PARTITION OF pmrp_risk.risk_decisions
+            FOR VALUES FROM ('2026-07-01T00:00:00Z') TO ('2026-08-01T00:00:00Z')
+            """
+        )
+    )
+
+
+async def _create_adapter_health_snapshot_test_partition(connection: AsyncConnection) -> None:
+    await connection.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS pmrp_ops.adapter_health_snapshots_2026_07
+            PARTITION OF pmrp_ops.adapter_health_snapshots
+            FOR VALUES FROM ('2026-07-01T00:00:00Z') TO ('2026-08-01T00:00:00Z')
+            """
+        )
+    )
+
+
+async def _create_operator_audit_record_test_partition(connection: AsyncConnection) -> None:
+    await connection.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS pmrp_audit.operator_audit_records_2026_07
+            PARTITION OF pmrp_audit.operator_audit_records
             FOR VALUES FROM ('2026-07-01T00:00:00Z') TO ('2026-08-01T00:00:00Z')
             """
         )
