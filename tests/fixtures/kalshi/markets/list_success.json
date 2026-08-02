@@ -1,0 +1,27 @@
+{
+  "markets": [
+    {
+      "ticker": "KX-PMRP-EXAMPLE-YES",
+      "event_ticker": "KX-PMRP-EXAMPLE",
+      "market_type": "binary",
+      "title": "Will the PMRP fixture resolve yes?",
+      "subtitle": "Redacted synthetic Kalshi market fixture",
+      "category": "Technology",
+      "status": "open",
+      "open_time": "2026-08-02T18:00:00Z",
+      "close_time": "2026-09-01T22:00:00Z",
+      "expiration_time": "2026-09-01T23:00:00Z",
+      "expected_expiration_time": "2026-09-01T23:00:00Z",
+      "yes_bid": 47,
+      "yes_ask": 48,
+      "no_bid": 52,
+      "no_ask": 53,
+      "last_price": 47,
+      "volume": 1250,
+      "open_interest": 640,
+      "tick_size": 1,
+      "minimum_order_size": 1
+    }
+  ],
+  "cursor": "cursor_fixture_markets_002"
+}
