@@ -13,6 +13,7 @@ from pmrp.adapters.base.errors import (
     AdapterTimeoutError,
     AdapterTransportError,
 )
+from pmrp.adapters.base.protocol import ExchangeAdapter
 from pmrp.adapters.base.requests import MarketDataChannel, MarketListRequest, MarketSubscription
 from pmrp.adapters.base.responses import (
     RawBalance,
@@ -35,6 +36,7 @@ __all__ = [
     "AdapterSequenceGapError",
     "AdapterTimeoutError",
     "AdapterTransportError",
+    "ExchangeAdapter",
     "MarketDataChannel",
     "MarketListRequest",
     "MarketSubscription",
