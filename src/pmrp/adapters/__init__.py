@@ -12,6 +12,15 @@ from pmrp.adapters.base import (
     AdapterSequenceGapError,
     AdapterTimeoutError,
     AdapterTransportError,
+    MarketDataChannel,
+    MarketListRequest,
+    MarketSubscription,
+    RawBalance,
+    RawExchangeEvent,
+    RawFill,
+    RawMarket,
+    RawOpenOrder,
+    RawPosition,
 )
 
 __all__ = [
@@ -26,4 +35,13 @@ __all__ = [
     "AdapterSequenceGapError",
     "AdapterTimeoutError",
     "AdapterTransportError",
+    "MarketDataChannel",
+    "MarketListRequest",
+    "MarketSubscription",
+    "RawBalance",
+    "RawExchangeEvent",
+    "RawFill",
+    "RawMarket",
+    "RawOpenOrder",
+    "RawPosition",
 ]
