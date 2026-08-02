@@ -59,6 +59,62 @@ class ServiceHealth(CanonicalModel):
         return self
 
 
+class AdapterHealth(CanonicalModel):
+    exchange: str = Field(min_length=1, max_length=_SYSTEM_LABEL_MAX_LENGTH)
+    environment: Environment
+
+    status: HealthStatus
+    connected: bool
+    authenticated: bool
+    subscriptions_active: bool
+
+    last_message_at: UTCDateTime | None = None
+    last_heartbeat_at: UTCDateTime | None = None
+    last_reconciliation_at: UTCDateTime | None = None
+
+    market_data_fresh: bool
+    trading_gate_open: bool
+
+    reconnect_attempts: int = Field(ge=0)
+    message: str | None = Field(default=None, min_length=1, max_length=_SYSTEM_MESSAGE_MAX_LENGTH)
+
+    @field_validator("exchange", "message")
+    @classmethod
+    def validate_text_fields(cls, value: str | None) -> str | None:
+        return _validate_nonblank_text(value, field_name="adapter health text field")
+
+
+class RateLimitWindow(CanonicalModel):
+    name: str = Field(min_length=1, max_length=_SYSTEM_LABEL_MAX_LENGTH)
+    limit: int = Field(gt=0)
+    remaining: int | None = Field(default=None, ge=0)
+    resets_at: UTCDateTime | None = None
+    window_seconds: int | None = Field(default=None, gt=0)
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        return _validate_required_text(value, field_name="rate-limit window name")
+
+    @model_validator(mode="after")
+    def validate_remaining_within_limit(self) -> Self:
+        if self.remaining is not None and self.remaining > self.limit:
+            msg = "remaining rate-limit capacity must not exceed limit"
+            raise ValueError(msg)
+        return self
+
+
+class RateLimitStatus(CanonicalModel):
+    exchange: str = Field(min_length=1, max_length=_SYSTEM_LABEL_MAX_LENGTH)
+    measured_at: UTCDateTime
+    windows: tuple[RateLimitWindow, ...]
+
+    @field_validator("exchange")
+    @classmethod
+    def validate_exchange(cls, value: str) -> str:
+        return _validate_required_text(value, field_name="rate-limit exchange")
+
+
 def _validate_nonblank_text(value: str | None, *, field_name: str) -> str | None:
     if value is None:
         return None
