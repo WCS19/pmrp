@@ -49,12 +49,19 @@ from pmrp.schemas.risk import (
 from pmrp.schemas.serialization import canonical_json, canonical_sha256
 from pmrp.schemas.simulation import SimulationConfiguration
 from pmrp.schemas.strategy import Signal, SignalDirection
-from pmrp.schemas.system import DependencyHealth, ServiceHealth
+from pmrp.schemas.system import (
+    AdapterHealth,
+    DependencyHealth,
+    RateLimitStatus,
+    RateLimitWindow,
+    ServiceHealth,
+)
 from pmrp.schemas.time import UTCDateTime
 from pmrp.schemas.versions import SchemaRegistration, SchemaVersion, get_schema_model
 
 __all__ = [
     "AccountingJournalEntry",
+    "AdapterHealth",
     "ApprovedOrder",
     "AuditMetadata",
     "CancelOrderAcknowledgement",
@@ -93,6 +100,8 @@ __all__ = [
     "Price",
     "Probability",
     "Quantity",
+    "RateLimitStatus",
+    "RateLimitWindow",
     "ReconciliationMismatch",
     "ReconciliationResult",
     "ReconciliationStatus",

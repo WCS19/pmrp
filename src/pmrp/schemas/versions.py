@@ -112,7 +112,13 @@ def _registered_schemas() -> tuple[RegisteredSchema, ...]:
     )
     from pmrp.schemas.simulation import SimulationConfiguration
     from pmrp.schemas.strategy import Signal
-    from pmrp.schemas.system import DependencyHealth, ServiceHealth
+    from pmrp.schemas.system import (
+        AdapterHealth,
+        DependencyHealth,
+        RateLimitStatus,
+        RateLimitWindow,
+        ServiceHealth,
+    )
 
     return (
         RegisteredSchema("price", 1, SchemaCategory.VALUE_OBJECT, Price),
@@ -205,6 +211,9 @@ def _registered_schemas() -> tuple[RegisteredSchema, ...]:
         ),
         RegisteredSchema("dependency_health", 1, SchemaCategory.DOMAIN, DependencyHealth),
         RegisteredSchema("service_health", 1, SchemaCategory.DOMAIN, ServiceHealth),
+        RegisteredSchema("adapter_health", 1, SchemaCategory.DOMAIN, AdapterHealth),
+        RegisteredSchema("rate_limit_window", 1, SchemaCategory.DOMAIN, RateLimitWindow),
+        RegisteredSchema("rate_limit_status", 1, SchemaCategory.DOMAIN, RateLimitStatus),
     )
 
 
