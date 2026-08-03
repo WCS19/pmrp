@@ -18,8 +18,21 @@ from pmrp.adapters.polymarket.raw_models import (
     parse_polymarket_trade_json,
     parse_polymarket_trade_list_json,
 )
+from pmrp.adapters.polymarket.rest import (
+    POLYMARKET_DEFAULT_REST_TIMEOUT_SECONDS,
+    POLYMARKET_MARKETS_KEYSET_PATH,
+    PolymarketMarketDataRestClient,
+    PolymarketMarketListParams,
+    PolymarketRestRequest,
+    PolymarketRestResponse,
+    PolymarketRestTransport,
+)
 
 __all__ = [
+    "POLYMARKET_DEFAULT_REST_TIMEOUT_SECONDS",
+    "POLYMARKET_MARKETS_KEYSET_PATH",
+    "PolymarketMarketDataRestClient",
+    "PolymarketMarketListParams",
     "PolymarketMarketListResponse",
     "PolymarketOrderSide",
     "PolymarketRawErrorResponse",
@@ -29,6 +42,9 @@ __all__ = [
     "PolymarketRawPriceChange",
     "PolymarketRawPriceChangeMessage",
     "PolymarketRawTrade",
+    "PolymarketRestRequest",
+    "PolymarketRestResponse",
+    "PolymarketRestTransport",
     "PolymarketTradeListResponse",
     "parse_polymarket_error_json",
     "parse_polymarket_market_list_json",

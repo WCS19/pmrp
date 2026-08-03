@@ -1,0 +1,31 @@
+{
+  "markets": [
+    {
+      "id": "pm_market_fixture_0001",
+      "question": "Will the PMRP fixture market resolve yes?",
+      "conditionId": "0x1111111111111111111111111111111111111111111111111111111111111111",
+      "questionID": "0x2222222222222222222222222222222222222222222222222222222222222222",
+      "slug": "pmrp-fixture-market",
+      "category": "Technology",
+      "active": true,
+      "closed": false,
+      "archived": false,
+      "enableOrderBook": true,
+      "negRisk": false,
+      "outcomes": "[\"Yes\",\"No\"]",
+      "outcomePrices": "[\"0.42\",\"0.58\"]",
+      "clobTokenIds": "[\"101010101010101010101010101010101010101010101010101010101010101010\",\"202020202020202020202020202020202020202020202020202020202020202020\"]",
+      "volume": "1234.50",
+      "liquidity": "987.65",
+      "orderPriceMinTickSize": "0.01",
+      "orderMinSize": "5",
+      "startDate": "2026-08-01T00:00:00Z",
+      "endDate": "2026-12-31T00:00:00Z",
+      "createdAt": "2026-07-15T12:00:00Z",
+      "updatedAt": "2026-08-02T18:00:00Z",
+      "fixture_note": "synthetic redacted Polymarket keyset market"
+    }
+  ],
+  "next_cursor": "cursor_fixture_markets_002",
+  "fixture_note": "synthetic redacted Polymarket keyset market list"
+}

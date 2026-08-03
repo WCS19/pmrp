@@ -185,6 +185,11 @@ class PolymarketMarketListResponse(CanonicalModel):
     """Raw Polymarket market-list response before canonical mapping."""
 
     markets: tuple[PolymarketRawMarket, ...]
+    next_cursor: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=_POLYMARKET_IDENTIFIER_MAX_LENGTH,
+    )
     raw_payload: PolymarketMarketListRawPayload
 
     @classmethod
@@ -192,8 +197,10 @@ class PolymarketMarketListResponse(CanonicalModel):
         """Build a market-list response from decoded Gamma list payload."""
 
         markets_payload: object
+        next_cursor: object | None = None
         if isinstance(payload, Mapping):
             markets_payload = payload.get("markets", payload.get("data"))
+            next_cursor = payload.get("next_cursor")
         else:
             markets_payload = payload
         if not isinstance(markets_payload, list | tuple):
@@ -202,9 +209,15 @@ class PolymarketMarketListResponse(CanonicalModel):
         return cls.model_validate(
             {
                 "markets": tuple(_market_from_payload(item) for item in markets_payload),
+                "next_cursor": next_cursor,
                 "raw_payload": payload,
             }
         )
+
+    @field_validator("next_cursor")
+    @classmethod
+    def validate_text_fields(cls, value: str | None) -> str | None:
+        return _validate_optional_text(value, field_name="Polymarket market-list text field")
 
     @field_validator("raw_payload", mode="before")
     @classmethod
@@ -687,10 +700,9 @@ class PolymarketRawErrorResponse(CanonicalModel):
                     "http_status",
                     fallback_key="status_code",
                 ),
-                "error_code": _first_present_payload_item(
+                "error_code": _first_present_any_payload_item(
                     payload,
-                    "code",
-                    fallback_key="error_code",
+                    ("code", "error_code", "type"),
                 ),
                 "message": _first_present_payload_item(
                     payload,
