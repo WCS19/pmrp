@@ -1,6 +1,13 @@
 """Kalshi adapter package."""
 
 from pmrp.adapters.kalshi.capabilities import KALSHI_CAPABILITIES, kalshi_capabilities
+from pmrp.adapters.kalshi.mapper import (
+    KALSHI_ORDER_BOOK_MAPPER_VERSION,
+    KalshiMappedOrderBookMessage,
+    map_kalshi_order_book_delta,
+    map_kalshi_order_book_message,
+    map_kalshi_order_book_snapshot,
+)
 from pmrp.adapters.kalshi.raw_models import (
     KalshiMarketListResponse,
     KalshiOrderBookSequenceCheck,
@@ -49,7 +56,9 @@ __all__ = [
     "KALSHI_DEFAULT_REST_TIMEOUT_SECONDS",
     "KALSHI_DEFAULT_WEBSOCKET_TIMEOUT_SECONDS",
     "KALSHI_MARKETS_PATH",
+    "KALSHI_ORDER_BOOK_MAPPER_VERSION",
     "KALSHI_WEBSOCKET_PATH",
+    "KalshiMappedOrderBookMessage",
     "KalshiMarketDataRestClient",
     "KalshiMarketListParams",
     "KalshiMarketListResponse",
@@ -79,6 +88,9 @@ __all__ = [
     "check_kalshi_websocket_sequence",
     "is_kalshi_heartbeat_stale",
     "kalshi_capabilities",
+    "map_kalshi_order_book_delta",
+    "map_kalshi_order_book_message",
+    "map_kalshi_order_book_snapshot",
     "parse_kalshi_error_json",
     "parse_kalshi_market_list_json",
     "parse_kalshi_order_book_message_json",
