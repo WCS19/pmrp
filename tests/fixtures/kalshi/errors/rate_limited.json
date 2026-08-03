@@ -1,0 +1,10 @@
+{
+  "http_status": 429,
+  "request_id": "req_fixture_rate_limited_0001",
+  "endpoint": "/trade-api/v2/markets",
+  "error": {
+    "code": "rate_limited",
+    "message": "synthetic rate limit Kalshi fixture",
+    "retry_after_seconds": 3
+  }
+}

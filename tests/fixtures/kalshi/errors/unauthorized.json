@@ -1,0 +1,10 @@
+{
+  "http_status": 401,
+  "request_id": "req_fixture_unauthorized_0001",
+  "endpoint": "/trade-api/v2/markets",
+  "error": {
+    "code": "unauthorized",
+    "message": "synthetic unauthorized Kalshi fixture"
+  },
+  "fixture_note": "redacted fixture with no credential material"
+}

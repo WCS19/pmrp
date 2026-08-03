@@ -1,0 +1,9 @@
+{
+  "http_status": 400,
+  "request_id": "req_fixture_malformed_0001",
+  "endpoint": "/trade-api/v2/markets",
+  "error": {
+    "code": "malformed_payload",
+    "message": "synthetic malformed payload Kalshi fixture"
+  }
+}
