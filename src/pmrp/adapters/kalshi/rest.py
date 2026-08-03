@@ -74,7 +74,7 @@ class KalshiRestResponse(CanonicalModel):
     """One Kalshi REST response returned by an injected transport."""
 
     status_code: int = Field(ge=100, le=599)
-    body_text: str = Field(min_length=1)
+    body_text: str
     headers: Mapping[str, str] = Field(default_factory=dict)
 
     @field_validator("headers")

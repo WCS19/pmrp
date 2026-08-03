@@ -218,6 +218,19 @@ async def test_kalshi_rest_market_listing_handles_unparseable_error_payload_safe
     assert "not json" not in str(exc_info.value)
 
 
+@pytest.mark.asyncio
+async def test_kalshi_rest_market_listing_handles_empty_error_payload_safely() -> None:
+    transport = FakeKalshiRestTransport([_response("", status_code=502)])
+    client = KalshiMarketDataRestClient(transport=transport)
+
+    with pytest.raises(AdapterTransportError) as exc_info:
+        await client.list_markets()
+
+    assert exc_info.value.context["http_status"] == "502"
+    assert exc_info.value.context["exchange_error_code"] == "unparseable_error_payload"
+    assert str(exc_info.value) == "Kalshi REST service error"
+
+
 def test_kalshi_rest_models_json_round_trip_and_stable_hash() -> None:
     request = KalshiRestRequest(
         method="GET",
