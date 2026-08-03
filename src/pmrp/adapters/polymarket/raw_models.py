@@ -256,6 +256,7 @@ class PolymarketRawOrderBookLevel(CanonicalModel):
 class PolymarketRawOrderBookSnapshot(CanonicalModel):
     """Raw Polymarket CLOB order-book snapshot before canonical mapping."""
 
+    topic: Literal["market"] | None = None
     event_type: Literal["book"] | None = None
     market: str = Field(min_length=1, max_length=_POLYMARKET_IDENTIFIER_MAX_LENGTH)
     asset_id: str = Field(min_length=1, max_length=_POLYMARKET_IDENTIFIER_MAX_LENGTH)
@@ -282,31 +283,45 @@ class PolymarketRawOrderBookSnapshot(CanonicalModel):
     def from_exchange_payload(cls, payload: Mapping[str, object]) -> Self:
         """Build an order-book snapshot from decoded CLOB payload."""
 
+        message_payload = _market_stream_payload(
+            payload,
+            expected_type="book",
+            field_name="Polymarket order-book payload",
+        )
         return cls.model_validate(
             {
-                "event_type": _first_present_payload_item(
-                    payload,
-                    "event_type",
-                    fallback_key="type",
-                ),
+                "topic": payload.get("topic"),
+                "event_type": _message_type(payload),
                 "market": _required_payload_item(
-                    payload,
+                    message_payload,
                     "market",
                     field_name="Polymarket order-book market",
                 ),
-                "asset_id": _required_payload_item(
-                    payload,
-                    "asset_id",
+                "asset_id": _required_any_payload_item(
+                    message_payload,
+                    ("asset_id", "token_id", "tokenId"),
                     field_name="Polymarket order-book asset_id",
                 ),
-                "timestamp": payload.get("timestamp"),
-                "hash": payload.get("hash"),
-                "bids": _order_book_levels(payload.get("bids", ())),
-                "asks": _order_book_levels(payload.get("asks", ())),
-                "min_order_size": payload.get("min_order_size"),
-                "tick_size": payload.get("tick_size"),
-                "neg_risk": payload.get("neg_risk"),
-                "last_trade_price": payload.get("last_trade_price"),
+                "timestamp": message_payload.get("timestamp"),
+                "hash": message_payload.get("hash"),
+                "bids": _order_book_levels(message_payload.get("bids", ())),
+                "asks": _order_book_levels(message_payload.get("asks", ())),
+                "min_order_size": _first_present_any_payload_item(
+                    message_payload,
+                    ("min_order_size", "minOrderSize"),
+                ),
+                "tick_size": _first_present_any_payload_item(
+                    message_payload,
+                    ("tick_size", "tickSize"),
+                ),
+                "neg_risk": _first_present_any_payload_item(
+                    message_payload,
+                    ("neg_risk", "negRisk"),
+                ),
+                "last_trade_price": _first_present_any_payload_item(
+                    message_payload,
+                    ("last_trade_price", "lastTradePrice"),
+                ),
                 "raw_payload": payload,
             }
         )
@@ -350,9 +365,9 @@ class PolymarketRawPriceChange(CanonicalModel):
 
         return cls.model_validate(
             {
-                "asset_id": _required_payload_item(
+                "asset_id": _required_any_payload_item(
                     payload,
-                    "asset_id",
+                    ("asset_id", "token_id", "tokenId"),
                     field_name="Polymarket price-change asset_id",
                 ),
                 "price": _required_payload_item(
@@ -371,8 +386,8 @@ class PolymarketRawPriceChange(CanonicalModel):
                     field_name="Polymarket price-change side",
                 ),
                 "hash": payload.get("hash"),
-                "best_bid": payload.get("best_bid"),
-                "best_ask": payload.get("best_ask"),
+                "best_bid": _first_present_any_payload_item(payload, ("best_bid", "bestBid")),
+                "best_ask": _first_present_any_payload_item(payload, ("best_ask", "bestAsk")),
             }
         )
 
@@ -390,6 +405,7 @@ class PolymarketRawPriceChange(CanonicalModel):
 class PolymarketRawPriceChangeMessage(CanonicalModel):
     """Raw Polymarket market-channel price-change message before canonical mapping."""
 
+    topic: Literal["market"] | None = None
     event_type: Literal["price_change"]
     market: str = Field(min_length=1, max_length=_POLYMARKET_IDENTIFIER_MAX_LENGTH)
     timestamp: str | None = Field(
@@ -404,23 +420,28 @@ class PolymarketRawPriceChangeMessage(CanonicalModel):
     def from_exchange_payload(cls, payload: Mapping[str, object]) -> Self:
         """Build a price-change message from decoded market-channel payload."""
 
-        price_changes_payload = payload.get("price_changes")
+        message_payload = _market_stream_payload(
+            payload,
+            expected_type="price_change",
+            field_name="Polymarket price-change payload",
+        )
+        price_changes_payload = _first_present_any_payload_item(
+            message_payload,
+            ("price_changes", "priceChanges"),
+        )
         if not isinstance(price_changes_payload, list | tuple):
             msg = "Polymarket price-change payload must contain price_changes array"
             raise ValueError(msg)
         return cls.model_validate(
             {
-                "event_type": _required_payload_item(
-                    payload,
-                    "event_type",
-                    field_name="Polymarket price-change event_type",
-                ),
+                "topic": payload.get("topic"),
+                "event_type": _required_message_type(payload, field_name="Polymarket price-change"),
                 "market": _required_payload_item(
-                    payload,
+                    message_payload,
                     "market",
                     field_name="Polymarket price-change market",
                 ),
-                "timestamp": payload.get("timestamp"),
+                "timestamp": message_payload.get("timestamp"),
                 "price_changes": tuple(
                     _price_change_from_payload(item) for item in price_changes_payload
                 ),
@@ -453,6 +474,7 @@ class PolymarketRawPriceChangeMessage(CanonicalModel):
 class PolymarketRawTrade(CanonicalModel):
     """Raw Polymarket trade observation before canonical mapping."""
 
+    topic: Literal["market"] | None = None
     event_type: Literal["last_trade_price", "trade"] | None = None
     trade_id: str | None = Field(
         default=None, min_length=1, max_length=_POLYMARKET_IDENTIFIER_MAX_LENGTH
@@ -461,7 +483,7 @@ class PolymarketRawTrade(CanonicalModel):
     asset_id: str = Field(min_length=1, max_length=_POLYMARKET_IDENTIFIER_MAX_LENGTH)
     side: PolymarketOrderSide
     price: Decimal = Field(ge=Decimal("0"), le=Decimal("1"))
-    size: Decimal = Field(gt=Decimal("0"))
+    size: Decimal | None = Field(default=None, gt=Decimal("0"))
     fee_rate_bps: int | None = Field(default=None, ge=0)
     timestamp: str | None = Field(
         default=None,
@@ -492,64 +514,63 @@ class PolymarketRawTrade(CanonicalModel):
     def from_exchange_payload(cls, payload: Mapping[str, object]) -> Self:
         """Build a trade observation from decoded CLOB trade payload."""
 
+        message_payload = _market_stream_payload(
+            payload,
+            expected_type="last_trade_price",
+            field_name="Polymarket trade payload",
+        )
         return cls.model_validate(
             {
-                "event_type": _first_present_payload_item(
-                    payload,
-                    "event_type",
-                    fallback_key="type",
-                ),
-                "trade_id": payload.get("id"),
+                "topic": payload.get("topic"),
+                "event_type": _message_type(payload),
+                "trade_id": message_payload.get("id"),
                 "market": _required_first_present_payload_item(
-                    payload,
+                    message_payload,
                     "market",
                     fallback_key="conditionId",
                     field_name="Polymarket trade market",
                 ),
-                "asset_id": _required_first_present_payload_item(
-                    payload,
-                    "asset_id",
-                    fallback_key="asset",
+                "asset_id": _required_any_payload_item(
+                    message_payload,
+                    ("asset_id", "asset", "token_id", "tokenId"),
                     field_name="Polymarket trade asset_id",
                 ),
                 "side": _required_payload_item(
-                    payload,
+                    message_payload,
                     "side",
                     field_name="Polymarket trade side",
                 ),
                 "price": _required_payload_item(
-                    payload,
+                    message_payload,
                     "price",
                     field_name="Polymarket trade price",
                 ),
-                "size": _required_payload_item(
-                    payload,
-                    "size",
-                    field_name="Polymarket trade size",
+                "size": message_payload.get("size"),
+                "fee_rate_bps": _first_present_any_payload_item(
+                    message_payload,
+                    ("fee_rate_bps", "feeRateBps"),
                 ),
-                "fee_rate_bps": payload.get("fee_rate_bps"),
-                "timestamp": payload.get("timestamp"),
-                "status": payload.get("status"),
-                "match_time": payload.get("match_time"),
-                "last_update": payload.get("last_update"),
-                "outcome": payload.get("outcome"),
-                "bucket_index": payload.get("bucket_index"),
-                "owner": payload.get("owner"),
-                "maker_address": payload.get("maker_address"),
-                "transaction_hash": _first_present_payload_item(
-                    payload,
-                    "transaction_hash",
-                    fallback_key="transactionHash",
+                "timestamp": message_payload.get("timestamp"),
+                "status": message_payload.get("status"),
+                "match_time": message_payload.get("match_time"),
+                "last_update": message_payload.get("last_update"),
+                "outcome": message_payload.get("outcome"),
+                "bucket_index": message_payload.get("bucket_index"),
+                "owner": message_payload.get("owner"),
+                "maker_address": message_payload.get("maker_address"),
+                "transaction_hash": _first_present_any_payload_item(
+                    message_payload,
+                    ("transaction_hash", "transactionHash"),
                 ),
-                "trader_side": payload.get("trader_side"),
+                "trader_side": message_payload.get("trader_side"),
                 "raw_payload": payload,
             }
         )
 
     @field_validator("price", "size", mode="before")
     @classmethod
-    def parse_decimal_fields(cls, value: object) -> Decimal:
-        return parse_decimal(value, field_name="Polymarket trade decimal field")
+    def parse_decimal_fields(cls, value: object) -> Decimal | None:
+        return _parse_optional_decimal(value, field_name="Polymarket trade decimal field")
 
     @field_validator("fee_rate_bps", "bucket_index", mode="before")
     @classmethod
@@ -803,6 +824,25 @@ def _trade_from_payload(value: object) -> PolymarketRawTrade:
     return PolymarketRawTrade.from_exchange_payload(value)
 
 
+def _market_stream_payload(
+    payload: Mapping[str, object],
+    *,
+    expected_type: str,
+    field_name: str,
+) -> Mapping[str, object]:
+    message_payload = payload.get("payload")
+    if message_payload is None:
+        return payload
+    if not isinstance(message_payload, Mapping):
+        msg = f"{field_name} payload must be a JSON object"
+        raise ValueError(msg)
+    message_type = _message_type(payload)
+    if message_type != expected_type:
+        msg = f"{field_name} type must be {expected_type}"
+        raise ValueError(msg)
+    return message_payload
+
+
 def _mapping_items(
     value: list[object] | tuple[object, ...], *, field_name: str
 ) -> tuple[Mapping[str, object], ...]:
@@ -852,6 +892,42 @@ def _first_present_payload_item(
     if value is not None:
         return value
     return payload.get(fallback_key)
+
+
+def _required_any_payload_item(
+    payload: Mapping[str, object],
+    keys: tuple[str, ...],
+    *,
+    field_name: str,
+) -> object:
+    value = _first_present_any_payload_item(payload, keys)
+    if value is None:
+        msg = f"{field_name} is required"
+        raise ValueError(msg)
+    return value
+
+
+def _first_present_any_payload_item(
+    payload: Mapping[str, object],
+    keys: tuple[str, ...],
+) -> object:
+    for key in keys:
+        value = payload.get(key)
+        if value is not None:
+            return value
+    return None
+
+
+def _required_message_type(payload: Mapping[str, object], *, field_name: str) -> object:
+    message_type = _message_type(payload)
+    if message_type is None:
+        msg = f"{field_name} type is required"
+        raise ValueError(msg)
+    return message_type
+
+
+def _message_type(payload: Mapping[str, object]) -> object:
+    return _first_present_payload_item(payload, "event_type", fallback_key="type")
 
 
 def _text_tuple_from_jsonish_array(value: object, *, field_name: str) -> tuple[str, ...]:

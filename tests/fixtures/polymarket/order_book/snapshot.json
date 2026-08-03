@@ -1,32 +1,35 @@
 {
-  "event_type": "book",
-  "market": "0x1111111111111111111111111111111111111111111111111111111111111111",
-  "asset_id": "101010101010101010101010101010101010101010101010101010101010101010",
-  "timestamp": "1757908892351",
-  "hash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-  "bids": [
-    {
-      "price": "0.48",
-      "size": "1000"
-    },
-    {
-      "price": "0.47",
-      "size": "2500"
-    }
-  ],
-  "asks": [
-    {
-      "price": "0.52",
-      "size": "800"
-    },
-    {
-      "price": "0.53",
-      "size": "1500"
-    }
-  ],
-  "min_order_size": "5",
-  "tick_size": "0.01",
-  "neg_risk": false,
-  "last_trade_price": "0.49",
+  "topic": "market",
+  "type": "book",
+  "payload": {
+    "market": "0x1111111111111111111111111111111111111111111111111111111111111111",
+    "token_id": "101010101010101010101010101010101010101010101010101010101010101010",
+    "timestamp": "2026-06-29T17:15:57.257000Z",
+    "hash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "bids": [
+      {
+        "price": "0.48",
+        "size": "1000"
+      },
+      {
+        "price": "0.47",
+        "size": "2500"
+      }
+    ],
+    "asks": [
+      {
+        "price": "0.52",
+        "size": "800"
+      },
+      {
+        "price": "0.53",
+        "size": "1500"
+      }
+    ],
+    "min_order_size": "5",
+    "tick_size": "0.01",
+    "neg_risk": false,
+    "last_trade_price": "0.49"
+  },
   "fixture_note": "synthetic redacted Polymarket order book"
 }

@@ -171,7 +171,10 @@ def test_polymarket_order_book_fixture_parses_decimal_levels() -> None:
         (FIXTURE_ROOT / "order_book" / "snapshot.json").read_text()
     )
 
+    assert snapshot.topic == "market"
     assert snapshot.event_type == "book"
+    assert snapshot.asset_id.startswith("101010")
+    assert snapshot.timestamp == "2026-06-29T17:15:57.257000Z"
     assert snapshot.bids[0].price == Decimal("0.48")
     assert snapshot.bids[0].size == Decimal("1000")
     assert snapshot.asks[1].price == Decimal("0.53")
@@ -205,7 +208,9 @@ def test_polymarket_price_change_fixture_parses_with_zero_size_removal() -> None
         (FIXTURE_ROOT / "order_book" / "price_change.json").read_text()
     )
 
+    assert message.topic == "market"
     assert message.event_type == "price_change"
+    assert message.timestamp == "1782753357257"
     assert len(message.price_changes) == 2
     assert message.price_changes[0].side == "BUY"
     assert message.price_changes[1].side == "SELL"
@@ -232,13 +237,35 @@ def test_polymarket_price_change_rejects_empty_changes_and_unknown_side() -> Non
 def test_polymarket_trade_fixture_parses_market_channel_trade() -> None:
     trade = parse_polymarket_trade_json((FIXTURE_ROOT / "trades" / "trade.json").read_text())
 
+    assert trade.topic == "market"
     assert trade.event_type == "last_trade_price"
     assert trade.asset_id.startswith("101010")
     assert trade.price == Decimal("0.456")
     assert trade.size == Decimal("219.217767")
     assert trade.fee_rate_bps == 0
+    assert trade.transaction_hash is not None
     assert trade.side == "BUY"
-    assert trade.timestamp == "1757908892353"
+    assert trade.timestamp == "1782753357257"
+
+
+def test_polymarket_trade_accepts_market_channel_trade_without_size() -> None:
+    trade = PolymarketRawTrade.from_exchange_payload(
+        {
+            "topic": "market",
+            "type": "last_trade_price",
+            "payload": {
+                "tokenId": ("101010101010101010101010101010101010101010101010101010101010101010"),
+                "market": ("0x1111111111111111111111111111111111111111111111111111111111111111"),
+                "price": "0.456",
+                "side": "SELL",
+                "timestamp": "1782753357257",
+            },
+        }
+    )
+
+    assert trade.size is None
+    assert trade.side == "SELL"
+    assert trade.asset_id.startswith("101010")
 
 
 def test_polymarket_trade_list_fixture_parses_authenticated_trade_shape() -> None:
