@@ -1,0 +1,14 @@
+{
+  "markets": [
+    {
+      "ticker": "KX-PMRP-OPTIONAL-YES",
+      "event_ticker": "KX-PMRP-OPTIONAL",
+      "title": "Will the optional-field fixture resolve yes?",
+      "status": "open",
+      "close_time": "2026-09-15T22:00:00Z",
+      "yes_bid": 51,
+      "yes_ask": 52
+    }
+  ],
+  "cursor": null
+}

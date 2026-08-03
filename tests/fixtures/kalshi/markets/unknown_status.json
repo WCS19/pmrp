@@ -1,0 +1,18 @@
+{
+  "markets": [
+    {
+      "ticker": "KX-PMRP-UNKNOWN-YES",
+      "event_ticker": "KX-PMRP-UNKNOWN",
+      "market_type": "binary",
+      "title": "Will the unknown-status fixture resolve yes?",
+      "category": "Technology",
+      "status": "exchange_specific_future_status",
+      "open_time": "2026-08-02T18:00:00Z",
+      "close_time": "2026-09-30T22:00:00Z",
+      "yes_bid": 45,
+      "yes_ask": 46,
+      "unexpected_status_reason": "synthetic redacted fixture value"
+    }
+  ],
+  "cursor": null
+}
