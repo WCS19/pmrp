@@ -1,0 +1,17 @@
+{
+  "type": "orderbook_snapshot",
+  "sid": 42,
+  "seq": 1001,
+  "msg": {
+    "market_ticker": "KX-PMRP-EXAMPLE-YES",
+    "yes": [
+      [47, 125],
+      [46, 240]
+    ],
+    "no": [
+      [52, 130],
+      [53, 90]
+    ]
+  },
+  "fixture_note": "synthetic redacted Kalshi order book snapshot"
+}

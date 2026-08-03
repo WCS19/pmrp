@@ -1,0 +1,12 @@
+{
+  "type": "orderbook_delta",
+  "sid": 42,
+  "seq": 1002,
+  "msg": {
+    "market_ticker": "KX-PMRP-EXAMPLE-YES",
+    "side": "yes",
+    "price": 48,
+    "quantity": 75,
+    "action": "insert"
+  }
+}
