@@ -31,13 +31,15 @@ _POLYMARKET_MARKETS_KEYSET_LIMIT_MAX = 100
 _POLYMARKET_REST_TEXT_MAX_LENGTH = 4096
 _POLYMARKET_REST_TIMEOUT_MAX_SECONDS = 120
 
+type PolymarketRestQuery = tuple[tuple[str, str], ...]
+
 
 class PolymarketRestRequest(CanonicalModel):
     """One Polymarket REST request after adapter-specific translation."""
 
     method: Literal["GET"]
     path: str = Field(min_length=1, max_length=512)
-    query: Mapping[str, str] = Field(default_factory=dict)
+    query: PolymarketRestQuery = ()
     headers: Mapping[str, str] = Field(default_factory=dict)
     timeout_seconds: int = Field(gt=0, le=_POLYMARKET_REST_TIMEOUT_MAX_SECONDS)
 
@@ -50,15 +52,20 @@ class PolymarketRestRequest(CanonicalModel):
             raise ValueError(msg)
         return value
 
-    @field_validator("query", "headers")
+    @field_validator("query", mode="before")
     @classmethod
-    def validate_string_mapping(cls, value: Mapping[str, str]) -> Mapping[str, str]:
+    def validate_query(cls, value: object) -> PolymarketRestQuery:
+        return _query_items(value, field_name="Polymarket REST query")
+
+    @field_validator("headers")
+    @classmethod
+    def validate_headers(cls, value: Mapping[str, str]) -> Mapping[str, str]:
         try:
             return freeze_string_mapping(value, field_name="Polymarket REST string mapping")
         except TypeError as exc:
             raise ValueError(str(exc)) from exc
 
-    @field_serializer("query", "headers")
+    @field_serializer("headers")
     def serialize_string_mapping(self, value: Mapping[str, str]) -> dict[str, str]:
         return thaw_string_mapping(value)
 
@@ -68,7 +75,7 @@ class PolymarketRestRequest(CanonicalModel):
 
         if not self.query:
             return self.path
-        return f"{self.path}?{urlencode(sorted(self.query.items()))}"
+        return f"{self.path}?{urlencode(self.query)}"
 
 
 class PolymarketRestResponse(CanonicalModel):
@@ -119,25 +126,25 @@ class PolymarketMarketListParams(CanonicalModel):
     def validate_text_tuple_fields(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         return _validate_text_tuple(value, field_name="Polymarket market-list query parameter")
 
-    def to_query(self) -> Mapping[str, str]:
-        query: dict[str, str] = {}
+    def to_query(self) -> PolymarketRestQuery:
+        query: list[tuple[str, str]] = []
         if self.limit is not None:
-            query["limit"] = str(self.limit)
+            query.append(("limit", str(self.limit)))
         if self.after_cursor is not None:
-            query["after_cursor"] = self.after_cursor
+            query.append(("after_cursor", self.after_cursor))
         if self.order is not None:
-            query["order"] = self.order
+            query.append(("order", self.order))
         if self.ascending is not None:
-            query["ascending"] = _bool_query_value(self.ascending)
+            query.append(("ascending", _bool_query_value(self.ascending)))
         if self.closed is not None:
-            query["closed"] = _bool_query_value(self.closed)
+            query.append(("closed", _bool_query_value(self.closed)))
         if self.include_tag is not None:
-            query["include_tag"] = _bool_query_value(self.include_tag)
+            query.append(("include_tag", _bool_query_value(self.include_tag)))
         _add_text_tuple_query(query, "condition_ids", self.condition_ids)
         _add_text_tuple_query(query, "clob_token_ids", self.clob_token_ids)
         _add_text_tuple_query(query, "question_ids", self.question_ids)
         _add_text_tuple_query(query, "slug", self.slugs)
-        return query
+        return tuple(sorted(query, key=lambda item: item[0]))
 
 
 class PolymarketRestTransport(Protocol):
@@ -286,12 +293,42 @@ def _retry_after_seconds(headers: Mapping[str, str]) -> str | None:
 
 
 def _add_text_tuple_query(
-    query: dict[str, str],
+    query: list[tuple[str, str]],
     key: str,
     values: tuple[str, ...],
 ) -> None:
-    if values:
-        query[key] = ",".join(values)
+    query.extend((key, value) for value in values)
+
+
+def _query_items(value: object, *, field_name: str) -> PolymarketRestQuery:
+    if isinstance(value, Mapping):
+        return tuple(
+            sorted(
+                (
+                    _validate_required_text(key, field_name=field_name),
+                    _validate_required_text(item, field_name=field_name),
+                )
+                for key, item in value.items()
+            )
+        )
+    if isinstance(value, list | tuple):
+        return tuple(_query_item(item, field_name=field_name) for item in value)
+    msg = f"{field_name} must be a mapping or key/value array"
+    raise TypeError(msg)
+
+
+def _query_item(value: object, *, field_name: str) -> tuple[str, str]:
+    if not isinstance(value, list | tuple):
+        msg = f"{field_name} entries must be key/value arrays"
+        raise TypeError(msg)
+    if len(value) != 2:
+        msg = f"{field_name} entries must contain exactly two values"
+        raise ValueError(msg)
+    key, item = value
+    return (
+        _validate_required_text(key, field_name=field_name),
+        _validate_required_text(item, field_name=field_name),
+    )
 
 
 def _bool_query_value(value: bool) -> str:
@@ -327,7 +364,10 @@ def _validate_optional_text(value: str | None, *, field_name: str) -> str | None
     return _validate_required_text(value, field_name=field_name)
 
 
-def _validate_required_text(value: str, *, field_name: str) -> str:
+def _validate_required_text(value: object, *, field_name: str) -> str:
+    if type(value) is not str:
+        msg = f"{field_name} must be a string"
+        raise TypeError(msg)
     if value == "" or value.strip() != value:
         msg = f"{field_name} must be nonempty without surrounding whitespace"
         raise ValueError(msg)

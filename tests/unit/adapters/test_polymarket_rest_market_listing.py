@@ -80,9 +80,11 @@ async def test_polymarket_rest_market_listing_builds_keyset_request_and_parses_r
     assert request.path == POLYMARKET_MARKETS_KEYSET_PATH
     assert request.target == (
         "/markets/keyset?after_cursor=cursor_fixture_markets_001"
-        "&ascending=true&closed=false&condition_ids=0x111%2C0x222"
+        "&ascending=true&closed=false&condition_ids=0x111&condition_ids=0x222"
         "&include_tag=true&limit=20&order=volume_num%2Cliquidity_num"
     )
+    assert request.query.count(("condition_ids", "0x111")) == 1
+    assert request.query.count(("condition_ids", "0x222")) == 1
     assert request.timeout_seconds == 7
     assert request.headers == {}
 
@@ -125,12 +127,14 @@ def test_polymarket_rest_request_response_and_params_are_strict_and_immutable() 
     with pytest.raises(TypeError):
         response.headers["content-type"] = "text/plain"
 
-    assert params.to_query() == {
-        "limit": "20",
-        "closed": "false",
-        "clob_token_ids": "101010,202020",
-        "slug": "pmrp-fixture-market",
-    }
+    assert params.to_query() == (
+        ("clob_token_ids", "101010"),
+        ("clob_token_ids", "202020"),
+        ("closed", "false"),
+        ("limit", "20"),
+        ("slug", "pmrp-fixture-market"),
+    )
+    assert request.query == (("limit", "20"),)
     assert canonical_sha256(request) == original_hash
 
 
