@@ -1,0 +1,27 @@
+{
+  "limit": 100,
+  "next_cursor": "MTAw",
+  "count": 1,
+  "data": [
+    {
+      "id": "trade_fixture_0001",
+      "taker_order_id": "0xdddddddddddddddddddddddddddddddddddddddd",
+      "market": "0x1111111111111111111111111111111111111111111111111111111111111111",
+      "asset_id": "101010101010101010101010101010101010101010101010101010101010101010",
+      "side": "BUY",
+      "size": "100000000",
+      "fee_rate_bps": "30",
+      "price": "0.5",
+      "status": "TRADE_STATUS_CONFIRMED",
+      "match_time": "1700000000",
+      "last_update": "1700000001",
+      "outcome": "YES",
+      "bucket_index": 0,
+      "owner": "owner_fixture_0001",
+      "maker_address": "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "transaction_hash": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "trader_side": "TAKER"
+    }
+  ],
+  "fixture_note": "synthetic redacted Polymarket trade list"
+}
