@@ -339,12 +339,12 @@ class PolymarketWebSocketConnection:
             if frame_type == "last_trade_price":
                 return PolymarketRawTrade.from_exchange_payload(payload)
             return PolymarketWebSocketUnsupportedFrame.from_exchange_payload(payload)
-        except (TypeError, ValueError, ValidationError) as exc:
+        except (TypeError, ValueError, ValidationError):
             raise AdapterProtocolError(
                 "Polymarket WebSocket frame is malformed",
                 exchange="polymarket",
                 endpoint_category=AdapterEndpointCategory.STREAM,
-            ) from exc
+            ) from None
 
     async def close(self) -> None:
         if self._closed:
@@ -401,12 +401,12 @@ def _decode_frame(frame_text: str) -> Mapping[str, object]:
         )
     try:
         payload = json.loads(frame_text)
-    except JSONDecodeError as exc:
+    except JSONDecodeError:
         raise AdapterProtocolError(
             "Polymarket WebSocket frame must be valid JSON",
             exchange="polymarket",
             endpoint_category=AdapterEndpointCategory.STREAM,
-        ) from exc
+        ) from None
     if not isinstance(payload, Mapping):
         raise AdapterProtocolError(
             "Polymarket WebSocket frame must be a JSON object",

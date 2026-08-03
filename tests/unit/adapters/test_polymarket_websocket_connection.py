@@ -300,10 +300,15 @@ async def test_polymarket_websocket_preserves_unsupported_market_frames() -> Non
 @pytest.mark.asyncio
 async def test_polymarket_websocket_rejects_malformed_and_error_frames_safely() -> None:
     invalid_json = PolymarketWebSocketConnection(
-        transport=FakePolymarketWebSocketTransport(["{"]),
+        transport=FakePolymarketWebSocketTransport(["{secret_frame"]),
     )
     non_object = PolymarketWebSocketConnection(
         transport=FakePolymarketWebSocketTransport(["[]"]),
+    )
+    malformed_book = PolymarketWebSocketConnection(
+        transport=FakePolymarketWebSocketTransport(
+            [_frame(_book_frame(payload={"market": "secret_market"}))]
+        ),
     )
     error_frame = PolymarketWebSocketConnection(
         transport=FakePolymarketWebSocketTransport(
@@ -311,13 +316,17 @@ async def test_polymarket_websocket_rejects_malformed_and_error_frames_safely() 
         ),
     )
 
-    with pytest.raises(AdapterProtocolError, match="valid JSON"):
+    with pytest.raises(AdapterProtocolError, match="valid JSON") as invalid_json_exc:
         await invalid_json.receive_next_frame()
     with pytest.raises(AdapterProtocolError, match="JSON object"):
         await non_object.receive_next_frame()
+    with pytest.raises(AdapterProtocolError, match="frame is malformed") as malformed_book_exc:
+        await malformed_book.receive_next_frame()
     with pytest.raises(AdapterProtocolError) as exc_info:
         await error_frame.receive_next_frame()
 
+    assert invalid_json_exc.value.__cause__ is None
+    assert malformed_book_exc.value.__cause__ is None
     assert exc_info.value.context["exchange_error_code"] == "invalid_subscription"
     assert "secret text" not in str(exc_info.value)
 
