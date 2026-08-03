@@ -1,0 +1,15 @@
+{
+  "type": "trade",
+  "sid": 52,
+  "seq": 2102,
+  "msg": {
+    "trade_id": "trade_fixture_0001",
+    "market_ticker": "KX-PMRP-EXAMPLE-YES",
+    "yes_price": 47,
+    "no_price": 53,
+    "count": 18,
+    "taker_side": "yes",
+    "created_time": "2026-08-02T18:05:00Z"
+  },
+  "fixture_note": "synthetic duplicate trade payload"
+}

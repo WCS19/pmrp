@@ -334,6 +334,104 @@ class KalshiOrderBookSequenceCheck(CanonicalModel):
         return self
 
 
+class KalshiRawTrade(CanonicalModel):
+    """Raw Kalshi trade message before canonical mapping."""
+
+    trade_id: str = Field(min_length=1, max_length=_KALSHI_TICKER_MAX_LENGTH)
+    market_ticker: str = Field(min_length=1, max_length=_KALSHI_TICKER_MAX_LENGTH)
+
+    yes_price: int | None = Field(default=None, ge=0, le=100)
+    no_price: int | None = Field(default=None, ge=0, le=100)
+    count: int = Field(gt=0)
+
+    taker_side: str | None = Field(default=None, min_length=1, max_length=128)
+    created_time: UTCDateTime
+
+    subscription_id: int | None = Field(default=None, ge=0)
+    sequence: int | None = Field(default=None, ge=0)
+
+    raw_payload: Mapping[str, object]
+
+    @classmethod
+    def from_exchange_payload(cls, payload: Mapping[str, object]) -> Self:
+        """Build a raw trade message from one decoded Kalshi payload."""
+
+        message_payload = _message_payload(payload, field_name="Kalshi trade payload")
+        sequence = _first_present_payload_item(payload, "seq", fallback_key="sequence")
+        if sequence is None:
+            sequence = message_payload.get("sequence")
+
+        return cls.model_validate(
+            {
+                "trade_id": _required_first_present_payload_item(
+                    message_payload,
+                    "trade_id",
+                    fallback_key="id",
+                    field_name="Kalshi trade_id",
+                ),
+                "market_ticker": _required_payload_item(
+                    message_payload,
+                    "market_ticker",
+                    field_name="Kalshi trade market_ticker",
+                ),
+                "yes_price": _first_present_payload_item(
+                    message_payload,
+                    "yes_price",
+                    fallback_key="price",
+                ),
+                "no_price": message_payload.get("no_price"),
+                "count": _required_first_present_payload_item(
+                    message_payload,
+                    "count",
+                    fallback_key="quantity",
+                    field_name="Kalshi trade count",
+                ),
+                "taker_side": _first_present_payload_item(
+                    message_payload,
+                    "taker_side",
+                    fallback_key="side",
+                ),
+                "created_time": _required_first_present_payload_item(
+                    message_payload,
+                    "created_time",
+                    fallback_key="created_at",
+                    field_name="Kalshi trade created_time",
+                ),
+                "subscription_id": _first_present_payload_item(
+                    payload,
+                    "sid",
+                    fallback_key="subscription_id",
+                ),
+                "sequence": sequence,
+                "raw_payload": payload,
+            }
+        )
+
+    @field_validator("trade_id", "market_ticker", "taker_side")
+    @classmethod
+    def validate_text_fields(cls, value: str | None) -> str | None:
+        return _validate_optional_text(value, field_name="Kalshi raw trade text field")
+
+    @field_validator("raw_payload")
+    @classmethod
+    def validate_raw_payload(cls, value: Mapping[str, object]) -> Mapping[str, object]:
+        try:
+            return freeze_canonical_mapping(value, field_name="kalshi trade payload")
+        except TypeError as exc:
+            raise ValueError(str(exc)) from exc
+
+    @field_serializer("raw_payload")
+    def serialize_raw_payload(self, value: Mapping[str, object]) -> dict[str, object]:
+        return thaw_canonical_mapping(value)
+
+    @model_validator(mode="after")
+    def validate_trade_shape(self) -> Self:
+        if self.yes_price is None and self.no_price is None:
+            msg = "Kalshi trades must include at least one raw price"
+            raise ValueError(msg)
+        return self
+
+
 def parse_kalshi_market_list_json(payload_text: str) -> KalshiMarketListResponse:
     """Parse a Kalshi market-list JSON payload into immutable raw models."""
 
@@ -360,6 +458,20 @@ def parse_kalshi_order_book_message_json(payload_text: str) -> KalshiRawOrderBoo
         msg = "Kalshi order-book payload must be a JSON object"
         raise ValueError(msg)
     return KalshiRawOrderBookMessage.from_exchange_payload(payload)
+
+
+def parse_kalshi_trade_json(payload_text: str) -> KalshiRawTrade:
+    """Parse a Kalshi trade JSON payload into an immutable raw model."""
+
+    try:
+        payload = json.loads(payload_text)
+    except JSONDecodeError as exc:
+        msg = "Kalshi trade payload must be valid JSON"
+        raise ValueError(msg) from exc
+    if not isinstance(payload, Mapping):
+        msg = "Kalshi trade payload must be a JSON object"
+        raise ValueError(msg)
+    return KalshiRawTrade.from_exchange_payload(payload)
 
 
 def check_kalshi_order_book_sequence(
@@ -413,13 +525,7 @@ def _market_from_payload(value: object) -> KalshiRawMarket:
 
 
 def _order_book_message_payload(payload: Mapping[str, object]) -> Mapping[str, object]:
-    message_payload = payload.get("msg")
-    if message_payload is None:
-        return payload
-    if not isinstance(message_payload, Mapping):
-        msg = "Kalshi order-book payload msg must be a JSON object"
-        raise ValueError(msg)
-    return message_payload
+    return _message_payload(payload, field_name="Kalshi order-book payload")
 
 
 def _order_book_message_type(payload: Mapping[str, object]) -> KalshiOrderBookMessageType:
@@ -462,6 +568,20 @@ def _required_payload_item(
     return value
 
 
+def _required_first_present_payload_item(
+    payload: Mapping[str, object],
+    key: str,
+    *,
+    fallback_key: str,
+    field_name: str,
+) -> object:
+    value = _first_present_payload_item(payload, key, fallback_key=fallback_key)
+    if value is None:
+        msg = f"{field_name} is required"
+        raise ValueError(msg)
+    return value
+
+
 def _first_present_payload_item(
     payload: Mapping[str, object],
     key: str,
@@ -472,6 +592,16 @@ def _first_present_payload_item(
     if value is not None:
         return value
     return payload.get(fallback_key)
+
+
+def _message_payload(payload: Mapping[str, object], *, field_name: str) -> Mapping[str, object]:
+    message_payload = payload.get("msg")
+    if message_payload is None:
+        return payload
+    if not isinstance(message_payload, Mapping):
+        msg = f"{field_name} msg must be a JSON object"
+        raise ValueError(msg)
+    return message_payload
 
 
 def _validate_unique_prices(
