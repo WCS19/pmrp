@@ -432,6 +432,84 @@ class KalshiRawTrade(CanonicalModel):
         return self
 
 
+class KalshiRawErrorResponse(CanonicalModel):
+    """Raw Kalshi error payload before adapter error classification."""
+
+    http_status: int | None = Field(default=None, ge=100, le=599)
+    error_code: str | None = Field(default=None, min_length=1, max_length=128)
+    message: str | None = Field(default=None, min_length=1, max_length=1024)
+    request_id: str | None = Field(default=None, min_length=1, max_length=256)
+    retry_after_seconds: int | None = Field(default=None, ge=0)
+    endpoint: str | None = Field(default=None, min_length=1, max_length=512)
+
+    raw_payload: Mapping[str, object]
+
+    @classmethod
+    def from_exchange_payload(cls, payload: Mapping[str, object]) -> Self:
+        """Build a raw error response from one decoded Kalshi payload."""
+
+        error_payload = _error_payload(payload)
+        http_status = _first_present_payload_item(
+            payload,
+            "http_status",
+            fallback_key="status_code",
+        )
+        if http_status is None:
+            http_status = error_payload.get("status")
+
+        return cls.model_validate(
+            {
+                "http_status": http_status,
+                "error_code": _first_present_payload_item(
+                    error_payload,
+                    "code",
+                    fallback_key="error_code",
+                ),
+                "message": _first_present_payload_item(
+                    error_payload,
+                    "message",
+                    fallback_key="detail",
+                ),
+                "request_id": _first_present_payload_item(
+                    payload,
+                    "request_id",
+                    fallback_key="x_request_id",
+                ),
+                "retry_after_seconds": _first_present_payload_item(
+                    error_payload,
+                    "retry_after_seconds",
+                    fallback_key="retry_after",
+                ),
+                "endpoint": payload.get("endpoint"),
+                "raw_payload": payload,
+            }
+        )
+
+    @field_validator("error_code", "message", "request_id", "endpoint")
+    @classmethod
+    def validate_text_fields(cls, value: str | None) -> str | None:
+        return _validate_optional_text(value, field_name="Kalshi raw error text field")
+
+    @field_validator("raw_payload")
+    @classmethod
+    def validate_raw_payload(cls, value: Mapping[str, object]) -> Mapping[str, object]:
+        try:
+            return freeze_canonical_mapping(value, field_name="kalshi error payload")
+        except TypeError as exc:
+            raise ValueError(str(exc)) from exc
+
+    @field_serializer("raw_payload")
+    def serialize_raw_payload(self, value: Mapping[str, object]) -> dict[str, object]:
+        return thaw_canonical_mapping(value)
+
+    @model_validator(mode="after")
+    def validate_error_shape(self) -> Self:
+        if self.error_code is None and self.message is None:
+            msg = "Kalshi errors must include an error code or message"
+            raise ValueError(msg)
+        return self
+
+
 def parse_kalshi_market_list_json(payload_text: str) -> KalshiMarketListResponse:
     """Parse a Kalshi market-list JSON payload into immutable raw models."""
 
@@ -472,6 +550,20 @@ def parse_kalshi_trade_json(payload_text: str) -> KalshiRawTrade:
         msg = "Kalshi trade payload must be a JSON object"
         raise ValueError(msg)
     return KalshiRawTrade.from_exchange_payload(payload)
+
+
+def parse_kalshi_error_json(payload_text: str) -> KalshiRawErrorResponse:
+    """Parse a Kalshi error JSON payload into an immutable raw model."""
+
+    try:
+        payload = json.loads(payload_text)
+    except JSONDecodeError as exc:
+        msg = "Kalshi error payload must be valid JSON"
+        raise ValueError(msg) from exc
+    if not isinstance(payload, Mapping):
+        msg = "Kalshi error payload must be a JSON object"
+        raise ValueError(msg)
+    return KalshiRawErrorResponse.from_exchange_payload(payload)
 
 
 def check_kalshi_order_book_sequence(
@@ -526,6 +618,16 @@ def _market_from_payload(value: object) -> KalshiRawMarket:
 
 def _order_book_message_payload(payload: Mapping[str, object]) -> Mapping[str, object]:
     return _message_payload(payload, field_name="Kalshi order-book payload")
+
+
+def _error_payload(payload: Mapping[str, object]) -> Mapping[str, object]:
+    error_payload = payload.get("error")
+    if error_payload is None:
+        return payload
+    if not isinstance(error_payload, Mapping):
+        msg = "Kalshi error payload error must be a JSON object"
+        raise ValueError(msg)
+    return error_payload
 
 
 def _order_book_message_type(payload: Mapping[str, object]) -> KalshiOrderBookMessageType:

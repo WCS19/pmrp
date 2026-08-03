@@ -1,0 +1,9 @@
+{
+  "http_status": 503,
+  "request_id": "req_fixture_service_error_0001",
+  "endpoint": "/trade-api/v2/markets",
+  "error": {
+    "code": "service_unavailable",
+    "message": "synthetic service error Kalshi fixture"
+  }
+}
