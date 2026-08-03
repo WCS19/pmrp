@@ -1,0 +1,5 @@
+{
+  "type": "rate limit",
+  "error": "too many requests",
+  "fixture_note": "synthetic redacted Polymarket rate limit error"
+}

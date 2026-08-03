@@ -1,0 +1,5 @@
+{
+  "type": "service unavailable",
+  "error": "keyset pagination is not configured",
+  "fixture_note": "synthetic redacted Polymarket service error"
+}

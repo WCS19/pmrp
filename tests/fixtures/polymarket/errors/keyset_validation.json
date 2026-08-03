@@ -1,0 +1,5 @@
+{
+  "type": "validation error",
+  "error": "offset is not allowed on keyset endpoints",
+  "fixture_note": "synthetic redacted Polymarket validation error"
+}

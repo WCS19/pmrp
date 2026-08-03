@@ -139,6 +139,7 @@ def test_polymarket_market_list_accepts_object_wrapped_payload() -> None:
     )
 
     assert response.markets[0].question == "Will the PMRP fixture market resolve yes?"
+    assert response.next_cursor == "cursor_fixture_001"
     assert response.raw_payload["next_cursor"] == "cursor_fixture_001"
 
 
