@@ -1,0 +1,6 @@
+{
+  "status_code": 400,
+  "code": "invalid_request",
+  "error": "invalid token id",
+  "fixture_note": "synthetic redacted Polymarket error"
+}

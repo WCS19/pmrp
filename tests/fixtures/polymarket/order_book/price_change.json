@@ -1,0 +1,29 @@
+{
+  "topic": "market",
+  "type": "price_change",
+  "payload": {
+    "market": "0x1111111111111111111111111111111111111111111111111111111111111111",
+    "timestamp": "1782753357257",
+    "priceChanges": [
+      {
+        "tokenId": "101010101010101010101010101010101010101010101010101010101010101010",
+        "price": "0.50",
+        "size": "200",
+        "side": "BUY",
+        "hash": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "bestBid": "0.50",
+        "bestAsk": "0.52"
+      },
+      {
+        "tokenId": "202020202020202020202020202020202020202020202020202020202020202020",
+        "price": "0.50",
+        "size": "0",
+        "side": "SELL",
+        "hash": "0xcccccccccccccccccccccccccccccccccccccccc",
+        "bestBid": "0.48",
+        "bestAsk": "0.50"
+      }
+    ]
+  },
+  "fixture_note": "synthetic redacted Polymarket price change"
+}

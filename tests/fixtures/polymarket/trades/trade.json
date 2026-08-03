@@ -1,0 +1,15 @@
+{
+  "topic": "market",
+  "type": "last_trade_price",
+  "payload": {
+    "tokenId": "101010101010101010101010101010101010101010101010101010101010101010",
+    "feeRateBps": "0",
+    "market": "0x1111111111111111111111111111111111111111111111111111111111111111",
+    "price": "0.456",
+    "side": "BUY",
+    "size": "219.217767",
+    "timestamp": "1782753357257",
+    "transactionHash": "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+  },
+  "fixture_note": "synthetic redacted Polymarket market-channel trade"
+}
