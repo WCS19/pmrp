@@ -1,0 +1,13 @@
+{
+  "type": "orderbook_delta",
+  "sid": 42,
+  "seq": 1007,
+  "msg": {
+    "market_ticker": "KX-PMRP-EXAMPLE-YES",
+    "side": "yes",
+    "price": 49,
+    "quantity": 30,
+    "action": "insert"
+  },
+  "fixture_note": "synthetic sequence gap after seq 1004"
+}
