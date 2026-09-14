@@ -13,22 +13,38 @@ from pmrp.strategies.errors import (
     StrategyContextError,
     StrategyEmissionError,
     StrategyError,
+    StrategyLifecycleError,
     StrategyProtocolError,
+    StrategyRuntimeError,
+)
+from pmrp.strategies.health import StrategyRuntimeHealth
+from pmrp.strategies.lifecycle import (
+    ALLOWED_STRATEGY_STATE_TRANSITIONS,
+    TERMINAL_STRATEGY_STATES,
+    transition_strategy_state,
+    validate_strategy_state_transition,
 )
 from pmrp.strategies.protocol import Strategy, StrategyFactory
 
 __all__ = [
+    "ALLOWED_STRATEGY_STATE_TRANSITIONS",
     "APPROVED_STRATEGY_CONTEXT_SERVICES",
     "FORBIDDEN_STRATEGY_CONTEXT_SERVICES",
+    "TERMINAL_STRATEGY_STATES",
     "Strategy",
     "StrategyContext",
     "StrategyContextError",
     "StrategyEmissionError",
     "StrategyError",
     "StrategyFactory",
+    "StrategyLifecycleError",
     "StrategyLogger",
     "StrategyMetrics",
     "StrategyOrderIntentPublisher",
     "StrategyProtocolError",
+    "StrategyRuntimeError",
+    "StrategyRuntimeHealth",
     "StrategySignalPublisher",
+    "transition_strategy_state",
+    "validate_strategy_state_transition",
 ]
