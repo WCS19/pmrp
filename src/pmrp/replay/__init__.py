@@ -1,8 +1,10 @@
 """Deterministic replay helpers."""
 
 from pmrp.replay.checksum import calculate_replay_dataset_checksum
+from pmrp.replay.clock import advance_replay_clock_to_event, build_replay_clock
 from pmrp.replay.errors import (
     ReplayChecksumError,
+    ReplayClockError,
     ReplayDatasetLoadError,
     ReplayError,
     ReplayManifestLoadError,
@@ -24,12 +26,15 @@ from pmrp.replay.sorter import (
 __all__ = [
     "REPLAY_ORDERING_POLICY_VERSION",
     "ReplayChecksumError",
+    "ReplayClockError",
     "ReplayDataset",
     "ReplayDatasetLoadError",
     "ReplayError",
     "ReplayEventOrderingKey",
     "ReplayManifestLoadError",
     "ReplayOrderingError",
+    "advance_replay_clock_to_event",
+    "build_replay_clock",
     "calculate_replay_dataset_checksum",
     "load_replay_dataset",
     "load_replay_events_jsonl",
