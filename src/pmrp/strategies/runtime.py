@@ -7,12 +7,23 @@ import re
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Protocol
 
 from pmrp.bus.protocol import EventSubscription
 from pmrp.clock import Clock
+from pmrp.events import EventFactory
 from pmrp.schemas.enums import HealthStatus, StrategyState
-from pmrp.schemas.events import EventEnvelope
+from pmrp.schemas.events import (
+    STRATEGY_HEALTH_CHANGED_EVENT_TYPE,
+    STRATEGY_STARTED_EVENT_TYPE,
+    STRATEGY_STOPPED_EVENT_TYPE,
+    EventEnvelope,
+    StrategyHealthChangedEvent,
+    StrategyStartedEvent,
+    StrategyStoppedEvent,
+)
 from pmrp.schemas.identifiers import StrategyId
+from pmrp.schemas.strategy import StrategyInstance
 from pmrp.strategies.context import StrategyContext
 from pmrp.strategies.errors import StrategyRuntimeError
 from pmrp.strategies.health import StrategyRuntimeHealth
@@ -20,6 +31,23 @@ from pmrp.strategies.lifecycle import TERMINAL_STRATEGY_STATES, transition_strat
 from pmrp.strategies.protocol import Strategy
 
 _DOTTED_EVENT_TYPE_PATTERN = re.compile(r"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$")
+
+type StrategyLifecycleEvent = (
+    StrategyStartedEvent | StrategyStoppedEvent | StrategyHealthChangedEvent
+)
+
+
+class StrategyLifecycleEventPublisher(Protocol):
+    """Approved sink for canonical strategy lifecycle events."""
+
+    async def publish(
+        self,
+        event: StrategyLifecycleEvent,
+        *,
+        partition_key: str | None = None,
+    ) -> None:
+        """Publish one strategy lifecycle event."""
+        ...
 
 
 class StrategyRuntime:
@@ -30,6 +58,8 @@ class StrategyRuntime:
         *,
         clock: Clock,
         queue_size: int = 1024,
+        lifecycle_event_factory: EventFactory | None = None,
+        lifecycle_event_publisher: StrategyLifecycleEventPublisher | None = None,
     ) -> None:
         if not isinstance(clock, Clock):
             msg = "clock must implement the Clock protocol"
@@ -40,8 +70,15 @@ class StrategyRuntime:
         if queue_size < 1:
             msg = "queue_size must be positive"
             raise ValueError(msg)
+        if (lifecycle_event_factory is None) != (lifecycle_event_publisher is None):
+            raise StrategyRuntimeError(
+                "Strategy lifecycle events require both an event factory and publisher",
+                reason_code="strategy_runtime_lifecycle_events_incomplete",
+            )
         self._clock = clock
         self._queue_size = queue_size
+        self._lifecycle_event_factory = lifecycle_event_factory
+        self._lifecycle_event_publisher = lifecycle_event_publisher
         self._handles: dict[StrategyId, _StrategyHandle] = {}
         self._started = False
 
@@ -51,6 +88,7 @@ class StrategyRuntime:
         context: StrategyContext,
         *,
         queue_size: int | None = None,
+        strategy_instance: StrategyInstance | None = None,
     ) -> StrategyRuntimeHealth:
         """Register a strategy instance before runtime startup."""
 
@@ -82,10 +120,16 @@ class StrategyRuntime:
         if effective_queue_size < 1:
             msg = "strategy queue_size must be positive"
             raise ValueError(msg)
+        _validate_strategy_instance(
+            strategy,
+            strategy_instance,
+            required=self._lifecycle_event_publisher is not None,
+        )
 
         handle = _StrategyHandle(
             strategy=strategy,
             context=context,
+            strategy_instance=strategy_instance,
             subscribed_event_types=tuple(strategy.subscribed_event_types),
             queue_size=effective_queue_size,
         )
@@ -130,15 +174,28 @@ class StrategyRuntime:
     async def _start_strategy(self, handle: _StrategyHandle) -> None:
         if handle.state in TERMINAL_STRATEGY_STATES or handle.state is StrategyState.RUNNING:
             return
+        previous_status = handle.health_status
         handle.transition_to(StrategyState.INITIALIZING)
         initialized = await _try_initialize_strategy(handle.strategy, handle.context)
         if not initialized:
-            handle.mark_start_failure(self._clock.now(), message="strategy initialization failed")
+            message = "strategy initialization failed"
+            handle.mark_start_failure(self._clock.now(), message=message)
+            await self._publish_strategy_health_changed(
+                handle,
+                previous_status=previous_status,
+                message=message,
+            )
             return
 
         subscription = _try_subscribe_strategy(handle)
         if subscription is None:
-            handle.mark_start_failure(self._clock.now(), message="strategy subscription failed")
+            message = "strategy subscription failed"
+            handle.mark_start_failure(self._clock.now(), message=message)
+            await self._publish_strategy_health_changed(
+                handle,
+                previous_status=previous_status,
+                message=message,
+            )
             return
 
         handle.subscription = subscription
@@ -150,6 +207,7 @@ class StrategyRuntime:
             self._consume_strategy_events(handle),
             name=f"pmrp-strategy-{handle.strategy.strategy_id}",
         )
+        await self._publish_strategy_started(handle)
 
     async def _consume_strategy_events(self, handle: _StrategyHandle) -> None:
         subscription = handle.subscription
@@ -169,6 +227,7 @@ class StrategyRuntime:
             handle.processed_events += 1
 
     async def _degrade_strategy(self, handle: _StrategyHandle, *, message: str) -> None:
+        previous_status = handle.health_status
         handle.context.disable_order_intents()
         handle.failed_events += 1
         handle.last_failure_at = self._clock.now()
@@ -176,10 +235,16 @@ class StrategyRuntime:
         handle.health_status = HealthStatus.DEGRADED
         handle.health_message = message
         await _close_subscription(handle.subscription)
+        await self._publish_strategy_health_changed(
+            handle,
+            previous_status=previous_status,
+            message=message,
+        )
 
     async def _stop_strategy(self, handle: _StrategyHandle, *, reason: str) -> None:
         if handle.state in TERMINAL_STRATEGY_STATES:
             return
+        previous_status = handle.health_status
         if handle.state in {StrategyState.RUNNING, StrategyState.DEGRADED}:
             handle.transition_to(StrategyState.DRAINING)
         await _close_subscription(handle.subscription)
@@ -192,10 +257,88 @@ class StrategyRuntime:
             handle.transition_to(StrategyState.STOPPED)
             handle.health_status = HealthStatus.UNKNOWN
             handle.health_message = None
+            await self._publish_strategy_stopped(handle, reason=reason)
             return
         handle.transition_to(StrategyState.FAILED)
         handle.health_status = HealthStatus.UNHEALTHY
         handle.health_message = "strategy shutdown failed"
+        await self._publish_strategy_health_changed(
+            handle,
+            previous_status=previous_status,
+            message="strategy shutdown failed",
+        )
+
+    async def _publish_strategy_started(self, handle: _StrategyHandle) -> None:
+        if self._lifecycle_event_factory is None:
+            return
+        event = StrategyStartedEvent(
+            envelope=self._lifecycle_event_factory.create_envelope(
+                event_type=STRATEGY_STARTED_EVENT_TYPE,
+                producer="strategy_runtime",
+                strategy_id=handle.strategy.strategy_id,
+                replay_session_id=handle.context.replay_session_id,
+                simulation_session_id=handle.context.simulation_session_id,
+            ),
+            strategy=handle.instance_snapshot(),
+        )
+        await self._publish_lifecycle_event(event, strategy_id=handle.strategy.strategy_id)
+
+    async def _publish_strategy_stopped(self, handle: _StrategyHandle, *, reason: str) -> None:
+        if self._lifecycle_event_factory is None:
+            return
+        event = StrategyStoppedEvent(
+            envelope=self._lifecycle_event_factory.create_envelope(
+                event_type=STRATEGY_STOPPED_EVENT_TYPE,
+                producer="strategy_runtime",
+                strategy_id=handle.strategy.strategy_id,
+                replay_session_id=handle.context.replay_session_id,
+                simulation_session_id=handle.context.simulation_session_id,
+            ),
+            strategy_id=handle.strategy.strategy_id,
+            reason=reason,
+        )
+        await self._publish_lifecycle_event(event, strategy_id=handle.strategy.strategy_id)
+
+    async def _publish_strategy_health_changed(
+        self,
+        handle: _StrategyHandle,
+        *,
+        previous_status: HealthStatus,
+        message: str,
+    ) -> None:
+        if (
+            self._lifecycle_event_factory is None
+            or previous_status is handle.health_status
+            or handle.health_status is HealthStatus.UNKNOWN
+        ):
+            return
+        event = StrategyHealthChangedEvent(
+            envelope=self._lifecycle_event_factory.create_envelope(
+                event_type=STRATEGY_HEALTH_CHANGED_EVENT_TYPE,
+                producer="strategy_runtime",
+                strategy_id=handle.strategy.strategy_id,
+                replay_session_id=handle.context.replay_session_id,
+                simulation_session_id=handle.context.simulation_session_id,
+            ),
+            strategy_id=handle.strategy.strategy_id,
+            previous_status=previous_status,
+            current_status=handle.health_status,
+            message=message,
+        )
+        await self._publish_lifecycle_event(event, strategy_id=handle.strategy.strategy_id)
+
+    async def _publish_lifecycle_event(
+        self,
+        event: StrategyLifecycleEvent,
+        *,
+        strategy_id: StrategyId,
+    ) -> None:
+        if self._lifecycle_event_publisher is None:
+            return
+        await self._lifecycle_event_publisher.publish(
+            event,
+            partition_key=str(strategy_id),
+        )
 
     def _ordered_handles(self) -> tuple[_StrategyHandle, ...]:
         return tuple(self._handles[strategy_id] for strategy_id in sorted(self._handles, key=str))
@@ -205,6 +348,7 @@ class StrategyRuntime:
 class _StrategyHandle:
     strategy: Strategy
     context: StrategyContext
+    strategy_instance: StrategyInstance | None
     subscribed_event_types: tuple[str, ...]
     queue_size: int
     state: StrategyState = StrategyState.CREATED
@@ -230,6 +374,25 @@ class _StrategyHandle:
         self.transition_to(StrategyState.FAILED)
         self.health_status = HealthStatus.UNHEALTHY
         self.health_message = message
+
+    def instance_snapshot(self) -> StrategyInstance:
+        if self.strategy_instance is None:
+            raise StrategyRuntimeError(
+                "Strategy instance metadata is required for lifecycle event publication",
+                reason_code="strategy_runtime_strategy_instance_required",
+                context={"strategy_id": str(self.strategy.strategy_id)},
+            )
+        payload = self.strategy_instance.model_dump(mode="python")
+        payload.update(
+            {
+                "state": self.state,
+                "started_at": self.started_at,
+                "stopped_at": self.stopped_at,
+                "health_status": self.health_status,
+                "health_message": self.health_message,
+            }
+        )
+        return StrategyInstance.model_validate(payload)
 
     def health(self) -> StrategyRuntimeHealth:
         return StrategyRuntimeHealth(
@@ -319,6 +482,49 @@ def _validate_strategy(strategy: Strategy) -> None:
         )
     for event_type in strategy.subscribed_event_types:
         _validate_event_type(event_type)
+
+
+def _validate_strategy_instance(
+    strategy: Strategy,
+    strategy_instance: StrategyInstance | None,
+    *,
+    required: bool,
+) -> None:
+    if strategy_instance is None:
+        if required:
+            raise StrategyRuntimeError(
+                "Strategy instance metadata is required for lifecycle event publication",
+                reason_code="strategy_runtime_strategy_instance_required",
+                context={"strategy_id": str(strategy.strategy_id)},
+            )
+        return
+    if not isinstance(strategy_instance, StrategyInstance):
+        raise StrategyRuntimeError(
+            "Strategy instance metadata must be a StrategyInstance",
+            reason_code="strategy_runtime_strategy_instance_invalid",
+            context={"strategy_id": str(strategy.strategy_id)},
+        )
+
+    mismatches: dict[str, str] = {}
+    if strategy_instance.strategy_id != strategy.strategy_id:
+        mismatches["strategy_instance_id"] = str(strategy_instance.strategy_id)
+    if strategy_instance.strategy_type != strategy.strategy_type:
+        mismatches["strategy_instance_type"] = strategy_instance.strategy_type
+    if strategy_instance.strategy_version != strategy.strategy_version:
+        mismatches["strategy_instance_version"] = strategy_instance.strategy_version
+    if strategy_instance.state is not StrategyState.CREATED:
+        mismatches["strategy_instance_state"] = strategy_instance.state.value
+    if strategy_instance.started_at is not None:
+        mismatches["strategy_instance_started_at"] = strategy_instance.started_at.isoformat()
+    if strategy_instance.stopped_at is not None:
+        mismatches["strategy_instance_stopped_at"] = strategy_instance.stopped_at.isoformat()
+    if mismatches:
+        mismatches["strategy_id"] = str(strategy.strategy_id)
+        raise StrategyRuntimeError(
+            "Strategy instance metadata must match the registered strategy",
+            reason_code="strategy_runtime_strategy_instance_mismatch",
+            context=mismatches,
+        )
 
 
 def _validate_required_text(value: str, *, field_name: str) -> None:
