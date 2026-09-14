@@ -40,6 +40,10 @@ class ReplayDatasetLoadError(ReplayError):
     """Replay dataset events could not be safely loaded."""
 
 
+class ReplayEngineError(ReplayError):
+    """Replay engine execution failed safely."""
+
+
 class ReplayChecksumError(ReplayError):
     """A replay dataset checksum did not match its manifest."""
 
