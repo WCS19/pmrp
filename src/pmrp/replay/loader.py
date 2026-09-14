@@ -139,7 +139,7 @@ def _try_read_event_lines(event_path: Path) -> tuple[str, ...] | None:
 def _try_parse_event_line(line: str) -> EventEnvelope | None:
     try:
         return EventEnvelope.model_validate_json(line)
-    except (ValueError, ValidationError):
+    except (TypeError, ValueError, ValidationError):
         return None
 
 

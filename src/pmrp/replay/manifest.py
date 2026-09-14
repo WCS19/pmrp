@@ -54,5 +54,5 @@ def _try_read_manifest_text(manifest_path: Path) -> str | None:
 def _try_parse_manifest(manifest_text: str) -> ReplayManifest | None:
     try:
         return ReplayManifest.model_validate_json(manifest_text)
-    except (ValueError, ValidationError):
+    except (TypeError, ValueError, ValidationError):
         return None

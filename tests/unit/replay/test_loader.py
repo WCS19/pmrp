@@ -64,6 +64,21 @@ def test_load_replay_manifest_rejects_invalid_json_without_raw_payload(tmp_path:
     assert exc_info.value.__context__ is None
 
 
+def test_load_replay_manifest_wraps_float_type_errors_safely(tmp_path: Path) -> None:
+    manifest_payload = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+    manifest_payload["speed"] = 1.0
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest_payload), encoding="utf-8")
+
+    with pytest.raises(ReplayManifestLoadError) as exc_info:
+        load_replay_manifest(manifest_path)
+
+    assert str(exc_info.value) == "Replay manifest is invalid"
+    assert exc_info.value.reason_code == "replay_manifest_invalid"
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__context__ is None
+
+
 def test_load_replay_events_jsonl_returns_canonical_events_in_file_order() -> None:
     events = load_replay_events_jsonl(EVENTS_PATH)
 
@@ -104,6 +119,24 @@ def test_load_replay_events_jsonl_rejects_invalid_line_without_raw_payload(
     assert exc_info.value.context["line_number"] == "1"
     assert "raw_payload_sentinel" not in str(exc_info.value)
     assert "raw_payload_sentinel" not in exc_info.value.context.values()
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__context__ is None
+
+
+def test_load_replay_events_jsonl_wraps_float_attribute_type_errors_safely(
+    tmp_path: Path,
+) -> None:
+    event_payload = json.loads(EVENTS_PATH.read_text(encoding="utf-8").splitlines()[0])
+    event_payload["attributes"] = {"float_value": 1.0}
+    event_path = tmp_path / "events.jsonl"
+    event_path.write_text(json.dumps(event_payload), encoding="utf-8")
+
+    with pytest.raises(ReplayDatasetLoadError) as exc_info:
+        load_replay_events_jsonl(event_path)
+
+    assert str(exc_info.value) == "Replay event line is invalid"
+    assert exc_info.value.reason_code == "replay_event_line_invalid"
+    assert exc_info.value.context["line_number"] == "1"
     assert exc_info.value.__cause__ is None
     assert exc_info.value.__context__ is None
 
