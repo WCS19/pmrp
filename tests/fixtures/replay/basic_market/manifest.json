@@ -1,0 +1,22 @@
+{
+  "replay_session_id": "rpl_01j00000000000000000000000",
+  "dataset_id": "dataset_basic_market",
+  "dataset_checksum": "sha256:26f3d85f6295d27caed2c35571eb29c7229cfdf49748f234e461e5ca18ba7b49",
+  "starts_at": "2026-07-28T15:00:00Z",
+  "ends_at": "2026-07-28T16:00:00Z",
+  "speed": "1.00",
+  "deterministic": true,
+  "random_seed": 42,
+  "event_ordering_policy_version": "occurred-sequence-received-v1",
+  "strategy_versions": {
+    "strat_threshold_v1": "1.0.0"
+  },
+  "model_versions": {
+    "mdl_fair_value": "2026.07.28"
+  },
+  "configuration_hash": "sha256:configuration",
+  "code_commit": "abcdef1234567890",
+  "dependency_lock_hash": "sha256:uvlock",
+  "created_at": "2026-07-28T14:55:00Z",
+  "created_by": "research_operator"
+}
