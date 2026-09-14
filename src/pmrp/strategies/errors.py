@@ -36,12 +36,20 @@ class StrategyContextError(StrategyError):
     """A strategy context dependency or operation is invalid."""
 
 
+class StrategyLifecycleError(StrategyError):
+    """A strategy lifecycle transition is invalid."""
+
+
 class StrategyEmissionError(StrategyContextError):
     """A strategy attempted an invalid or failed signal/intent emission."""
 
 
 class StrategyProtocolError(StrategyError):
     """A strategy object does not satisfy the required protocol."""
+
+
+class StrategyRuntimeError(StrategyError):
+    """A strategy runtime operation failed safely."""
 
 
 def _validate_required_text(value: str, *, field_name: str) -> str:
