@@ -67,7 +67,13 @@ class RegisteredSchema:
 @cache
 def _registered_schemas() -> tuple[RegisteredSchema, ...]:
     from pmrp.schemas.commands import CommandEnvelope
-    from pmrp.schemas.events import EventEnvelope
+    from pmrp.schemas.events import (
+        EventEnvelope,
+        SignalGeneratedEvent,
+        StrategyHealthChangedEvent,
+        StrategyStartedEvent,
+        StrategyStoppedEvent,
+    )
     from pmrp.schemas.market_data import OrderBookDelta, OrderBookSnapshot, Trade
     from pmrp.schemas.markets import Contract, Market, Outcome
     from pmrp.schemas.metadata import (
@@ -111,7 +117,12 @@ def _registered_schemas() -> tuple[RegisteredSchema, ...]:
         RiskRuleResult,
     )
     from pmrp.schemas.simulation import SimulationConfiguration
-    from pmrp.schemas.strategy import Signal
+    from pmrp.schemas.strategy import (
+        Signal,
+        StrategyConfigurationRecord,
+        StrategyDefinition,
+        StrategyInstance,
+    )
     from pmrp.schemas.system import (
         AdapterHealth,
         DependencyHealth,
@@ -169,7 +180,24 @@ def _registered_schemas() -> tuple[RegisteredSchema, ...]:
             OrderStateTransition,
         ),
         RegisteredSchema("open_order_snapshot", 1, SchemaCategory.DOMAIN, OpenOrderSnapshot),
+        RegisteredSchema("strategy_definition", 1, SchemaCategory.DOMAIN, StrategyDefinition),
+        RegisteredSchema("strategy_instance", 1, SchemaCategory.DOMAIN, StrategyInstance),
+        RegisteredSchema(
+            "strategy_configuration_record",
+            1,
+            SchemaCategory.DOMAIN,
+            StrategyConfigurationRecord,
+        ),
         RegisteredSchema("signal", 1, SchemaCategory.DOMAIN, Signal),
+        RegisteredSchema("strategy_started_event", 1, SchemaCategory.EVENT, StrategyStartedEvent),
+        RegisteredSchema("strategy_stopped_event", 1, SchemaCategory.EVENT, StrategyStoppedEvent),
+        RegisteredSchema(
+            "strategy_health_changed_event",
+            1,
+            SchemaCategory.EVENT,
+            StrategyHealthChangedEvent,
+        ),
+        RegisteredSchema("signal_generated_event", 1, SchemaCategory.EVENT, SignalGeneratedEvent),
         RegisteredSchema("risk_limit", 1, SchemaCategory.DOMAIN, RiskLimit),
         RegisteredSchema("risk_rule_result", 1, SchemaCategory.DOMAIN, RiskRuleResult),
         RegisteredSchema("risk_decision", 1, SchemaCategory.DOMAIN, RiskDecision),

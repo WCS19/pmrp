@@ -3,7 +3,17 @@
 from pmrp.schemas.base import CanonicalModel
 from pmrp.schemas.commands import CommandEnvelope
 from pmrp.schemas.enums import Environment, HealthStatus, Side
-from pmrp.schemas.events import EventEnvelope
+from pmrp.schemas.events import (
+    STRATEGY_HEALTH_CHANGED_EVENT_TYPE,
+    STRATEGY_SIGNAL_GENERATED_EVENT_TYPE,
+    STRATEGY_STARTED_EVENT_TYPE,
+    STRATEGY_STOPPED_EVENT_TYPE,
+    EventEnvelope,
+    SignalGeneratedEvent,
+    StrategyHealthChangedEvent,
+    StrategyStartedEvent,
+    StrategyStoppedEvent,
+)
 from pmrp.schemas.identifiers import EventId, MarketId, OrderId
 from pmrp.schemas.market_data import OrderBookDelta, OrderBookSnapshot, Trade
 from pmrp.schemas.markets import Contract, Market, Outcome
@@ -48,7 +58,13 @@ from pmrp.schemas.risk import (
 )
 from pmrp.schemas.serialization import canonical_json, canonical_sha256
 from pmrp.schemas.simulation import SimulationConfiguration
-from pmrp.schemas.strategy import Signal, SignalDirection
+from pmrp.schemas.strategy import (
+    Signal,
+    SignalDirection,
+    StrategyConfigurationRecord,
+    StrategyDefinition,
+    StrategyInstance,
+)
 from pmrp.schemas.system import (
     AdapterHealth,
     DependencyHealth,
@@ -60,6 +76,10 @@ from pmrp.schemas.time import UTCDateTime
 from pmrp.schemas.versions import SchemaRegistration, SchemaVersion, get_schema_model
 
 __all__ = [
+    "STRATEGY_HEALTH_CHANGED_EVENT_TYPE",
+    "STRATEGY_SIGNAL_GENERATED_EVENT_TYPE",
+    "STRATEGY_STARTED_EVENT_TYPE",
+    "STRATEGY_STOPPED_EVENT_TYPE",
     "AccountingJournalEntry",
     "AdapterHealth",
     "ApprovedOrder",
@@ -123,8 +143,15 @@ __all__ = [
     "Side",
     "Signal",
     "SignalDirection",
+    "SignalGeneratedEvent",
     "SimulationConfiguration",
     "SourceMetadata",
+    "StrategyConfigurationRecord",
+    "StrategyDefinition",
+    "StrategyHealthChangedEvent",
+    "StrategyInstance",
+    "StrategyStartedEvent",
+    "StrategyStoppedEvent",
     "Trade",
     "UTCDateTime",
     "VersionMetadata",
