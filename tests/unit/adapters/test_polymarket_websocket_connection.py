@@ -318,7 +318,7 @@ async def test_polymarket_websocket_rejects_malformed_and_error_frames_safely() 
 
     with pytest.raises(AdapterProtocolError, match="valid JSON") as invalid_json_exc:
         await invalid_json.receive_next_frame()
-    with pytest.raises(AdapterProtocolError, match="JSON object"):
+    with pytest.raises(AdapterProtocolError, match="JSON object") as non_object_exc:
         await non_object.receive_next_frame()
     with pytest.raises(AdapterProtocolError, match="frame is malformed") as malformed_book_exc:
         await malformed_book.receive_next_frame()
@@ -326,7 +326,15 @@ async def test_polymarket_websocket_rejects_malformed_and_error_frames_safely() 
         await error_frame.receive_next_frame()
 
     assert invalid_json_exc.value.__cause__ is None
+    assert invalid_json_exc.value.__context__ is None
+    assert "secret_frame" not in str(invalid_json_exc.value)
+    assert non_object_exc.value.__cause__ is None
+    assert non_object_exc.value.__context__ is None
     assert malformed_book_exc.value.__cause__ is None
+    assert malformed_book_exc.value.__context__ is None
+    assert "secret_market" not in str(malformed_book_exc.value)
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__context__ is None
     assert exc_info.value.context["exchange_error_code"] == "invalid_subscription"
     assert "secret text" not in str(exc_info.value)
 

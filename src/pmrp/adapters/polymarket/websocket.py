@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from datetime import datetime
 from enum import StrEnum
 from json import JSONDecodeError
-from typing import Literal, Protocol, Self
+from typing import Literal, NoReturn, Protocol, Self
 
 from pydantic import Field, ValidationError, field_serializer, field_validator, model_validator
 
@@ -29,6 +29,7 @@ POLYMARKET_MARKET_HEARTBEAT_INTERVAL_SECONDS = 10
 _POLYMARKET_WEBSOCKET_ID_MAX_LENGTH = 256
 _POLYMARKET_WEBSOCKET_TEXT_MAX_LENGTH = 4096
 _POLYMARKET_WEBSOCKET_TIMEOUT_MAX_SECONDS = 120
+_INVALID_JSON_FRAME = object()
 
 
 class PolymarketWebSocketSequenceStatus(StrEnum):
@@ -328,23 +329,14 @@ class PolymarketWebSocketConnection:
             return heartbeat
 
         payload = _decode_frame(frame_text)
-        try:
-            frame_type = _frame_type(payload)
-            if frame_type == "error":
-                _raise_websocket_error(payload)
-            if frame_type == "book":
-                return PolymarketRawOrderBookSnapshot.from_exchange_payload(payload)
-            if frame_type == "price_change":
-                return PolymarketRawPriceChangeMessage.from_exchange_payload(payload)
-            if frame_type == "last_trade_price":
-                return PolymarketRawTrade.from_exchange_payload(payload)
-            return PolymarketWebSocketUnsupportedFrame.from_exchange_payload(payload)
-        except (TypeError, ValueError, ValidationError):
+        parsed_frame = _try_parse_market_frame(payload)
+        if parsed_frame is None:
             raise AdapterProtocolError(
                 "Polymarket WebSocket frame is malformed",
                 exchange="polymarket",
                 endpoint_category=AdapterEndpointCategory.STREAM,
-            ) from None
+            )
+        return parsed_frame
 
     async def close(self) -> None:
         if self._closed:
@@ -399,14 +391,13 @@ def _decode_frame(frame_text: str) -> Mapping[str, object]:
             exchange="polymarket",
             endpoint_category=AdapterEndpointCategory.STREAM,
         )
-    try:
-        payload = json.loads(frame_text)
-    except JSONDecodeError:
+    payload = _load_json_frame(frame_text)
+    if payload is _INVALID_JSON_FRAME:
         raise AdapterProtocolError(
             "Polymarket WebSocket frame must be valid JSON",
             exchange="polymarket",
             endpoint_category=AdapterEndpointCategory.STREAM,
-        ) from None
+        )
     if not isinstance(payload, Mapping):
         raise AdapterProtocolError(
             "Polymarket WebSocket frame must be a JSON object",
@@ -416,7 +407,36 @@ def _decode_frame(frame_text: str) -> Mapping[str, object]:
     return payload
 
 
-def _raise_websocket_error(payload: Mapping[str, object]) -> None:
+def _load_json_frame(frame_text: str) -> object:
+    try:
+        return json.loads(frame_text)
+    except JSONDecodeError:
+        return _INVALID_JSON_FRAME
+
+
+def _try_parse_market_frame(
+    payload: Mapping[str, object],
+) -> PolymarketWebSocketParsedFrame | None:
+    try:
+        return _parse_market_frame(payload)
+    except (TypeError, ValueError, ValidationError):
+        return None
+
+
+def _parse_market_frame(payload: Mapping[str, object]) -> PolymarketWebSocketParsedFrame:
+    frame_type = _frame_type(payload)
+    if frame_type == "error":
+        _raise_websocket_error(payload)
+    if frame_type == "book":
+        return PolymarketRawOrderBookSnapshot.from_exchange_payload(payload)
+    if frame_type == "price_change":
+        return PolymarketRawPriceChangeMessage.from_exchange_payload(payload)
+    if frame_type == "last_trade_price":
+        return PolymarketRawTrade.from_exchange_payload(payload)
+    return PolymarketWebSocketUnsupportedFrame.from_exchange_payload(payload)
+
+
+def _raise_websocket_error(payload: Mapping[str, object]) -> NoReturn:
     error_code: str | None = None
     raw_code = payload.get("code")
     if isinstance(raw_code, str):
