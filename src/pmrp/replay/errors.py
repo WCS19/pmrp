@@ -44,6 +44,10 @@ class ReplayChecksumError(ReplayError):
     """A replay dataset checksum did not match its manifest."""
 
 
+class ReplayClockError(ReplayError):
+    """Replay clock initialization or advancement failed."""
+
+
 class ReplayOrderingError(ReplayError):
     """Replay event ordering metadata is invalid."""
 
