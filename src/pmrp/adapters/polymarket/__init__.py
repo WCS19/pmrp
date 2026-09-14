@@ -1,5 +1,12 @@
 """Polymarket adapter package."""
 
+from pmrp.adapters.polymarket.mapper import (
+    POLYMARKET_ORDER_BOOK_MAPPER_VERSION,
+    PolymarketMappedOrderBookMessage,
+    map_polymarket_order_book_delta,
+    map_polymarket_order_book_message,
+    map_polymarket_order_book_snapshot,
+)
 from pmrp.adapters.polymarket.raw_models import (
     PolymarketMarketListResponse,
     PolymarketOrderSide,
@@ -53,6 +60,8 @@ __all__ = [
     "POLYMARKET_MARKET_HEARTBEAT_INTERVAL_SECONDS",
     "POLYMARKET_MARKET_WEBSOCKET_PATH",
     "POLYMARKET_MARKET_WEBSOCKET_URL",
+    "POLYMARKET_ORDER_BOOK_MAPPER_VERSION",
+    "PolymarketMappedOrderBookMessage",
     "PolymarketMarketDataRestClient",
     "PolymarketMarketListParams",
     "PolymarketMarketListResponse",
@@ -80,6 +89,9 @@ __all__ = [
     "PolymarketWebSocketUnsupportedFrame",
     "check_polymarket_websocket_sequence",
     "is_polymarket_heartbeat_stale",
+    "map_polymarket_order_book_delta",
+    "map_polymarket_order_book_message",
+    "map_polymarket_order_book_snapshot",
     "parse_polymarket_error_json",
     "parse_polymarket_market_list_json",
     "parse_polymarket_order_book_json",
