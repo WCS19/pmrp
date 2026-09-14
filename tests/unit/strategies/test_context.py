@@ -11,7 +11,7 @@ import pytest
 from pmrp.bus import InProcessEventBus
 from pmrp.clock import FrozenClock
 from pmrp.schemas.enums import Side
-from pmrp.schemas.identifiers import StrategyId
+from pmrp.schemas.identifiers import SignalId, StrategyId
 from pmrp.schemas.orders import OrderIntent
 from pmrp.schemas.strategy import Signal, SignalDirection
 from pmrp.strategies import StrategyContext, StrategyContextError, StrategyEmissionError
@@ -27,6 +27,15 @@ def test_strategy_context_delegates_time_to_injected_clock() -> None:
     context = _context(clock=FrozenClock(NOW))
 
     assert context.now() == NOW
+
+
+def test_strategy_context_does_not_expose_raw_runtime_dependencies() -> None:
+    context = _context()
+
+    assert not hasattr(context, "clock")
+    assert not hasattr(context, "event_bus")
+    assert not hasattr(context, "signal_publisher")
+    assert not hasattr(context, "order_intent_publisher")
 
 
 async def test_strategy_context_subscribes_through_injected_event_bus() -> None:
@@ -56,7 +65,7 @@ async def test_strategy_context_wraps_subscription_failures_safely() -> None:
     assert "raw_sensitive_payload" not in str(exc_info.value)
     assert "raw_sensitive_payload" not in exc_info.value.context.values()
     assert exc_info.value.__cause__ is None
-    assert exc_info.value.__suppress_context__ is True
+    assert exc_info.value.__context__ is None
 
 
 async def test_strategy_context_publishes_matching_strategy_signal() -> None:
@@ -93,7 +102,7 @@ async def test_strategy_context_wraps_signal_publisher_failures_safely() -> None
     assert "raw_sensitive_payload" not in str(exc_info.value)
     assert "raw_sensitive_payload" not in exc_info.value.context.values()
     assert exc_info.value.__cause__ is None
-    assert exc_info.value.__suppress_context__ is True
+    assert exc_info.value.__context__ is None
 
 
 async def test_strategy_context_publishes_matching_order_intent() -> None:
@@ -104,6 +113,39 @@ async def test_strategy_context_publishes_matching_order_intent() -> None:
     await context.publish_order_intent(intent)
 
     assert intent_publisher.intents == [intent]
+
+
+async def test_strategy_context_requires_order_intent_signal_lineage() -> None:
+    context = _context()
+    intent = _order_intent(signal_ids=())
+
+    with pytest.raises(StrategyEmissionError) as exc_info:
+        await context.publish_order_intent(intent)
+
+    assert (
+        str(exc_info.value)
+        == "OrderIntent must include at least one signal_id before strategy emission"
+    )
+    assert exc_info.value.reason_code == "strategy_order_intent_signal_lineage_missing"
+
+
+async def test_strategy_context_rejects_duplicate_order_intent_signal_lineage() -> None:
+    context = _context()
+    intent = _order_intent(
+        signal_ids=(
+            SignalId("sig_strategy_context_test"),
+            SignalId("sig_strategy_context_test"),
+        )
+    )
+
+    with pytest.raises(StrategyEmissionError) as exc_info:
+        await context.publish_order_intent(intent)
+
+    assert (
+        str(exc_info.value)
+        == "OrderIntent signal lineage must not contain duplicate signal_id values"
+    )
+    assert exc_info.value.reason_code == "strategy_order_intent_signal_lineage_duplicate"
 
 
 async def test_strategy_context_blocks_disabled_order_intent_emission() -> None:
@@ -142,7 +184,7 @@ async def test_strategy_context_wraps_order_intent_publisher_failures_safely() -
     assert "raw_sensitive_payload" not in str(exc_info.value)
     assert "raw_sensitive_payload" not in exc_info.value.context.values()
     assert exc_info.value.__cause__ is None
-    assert exc_info.value.__suppress_context__ is True
+    assert exc_info.value.__context__ is None
 
 
 def test_strategy_context_exposes_only_approved_optional_services() -> None:
@@ -291,7 +333,11 @@ def _signal(*, strategy_id: StrategyId = STRATEGY_ID) -> Signal:
     )
 
 
-def _order_intent(*, strategy_id: StrategyId = STRATEGY_ID) -> OrderIntent:
+def _order_intent(
+    *,
+    strategy_id: StrategyId = STRATEGY_ID,
+    signal_ids: tuple[SignalId, ...] = (SignalId("sig_strategy_context_test"),),
+) -> OrderIntent:
     return OrderIntent.model_validate(
         {
             "intent_id": "intent_strategy_context_test",
@@ -303,6 +349,7 @@ def _order_intent(*, strategy_id: StrategyId = STRATEGY_ID) -> OrderIntent:
             "quantity": Decimal("2"),
             "limit_price": Decimal("0.42"),
             "created_at": "2026-07-27T15:00:00Z",
+            "signal_ids": signal_ids,
             "correlation_id": "corr_strategy_context_test",
             "idempotency_key": "strategy-context-test-intent",
         }
