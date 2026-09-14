@@ -160,6 +160,18 @@ async def test_strategy_context_blocks_disabled_order_intent_emission() -> None:
     assert exc_info.value.reason_code == "strategy_order_intent_emission_disabled"
 
 
+async def test_strategy_context_can_disable_order_intents_after_creation() -> None:
+    context = _context()
+
+    context.disable_order_intents()
+
+    assert context.order_intents_enabled is False
+    with pytest.raises(StrategyEmissionError) as exc_info:
+        await context.publish_order_intent(_order_intent())
+
+    assert exc_info.value.reason_code == "strategy_order_intent_emission_disabled"
+
+
 async def test_strategy_context_rejects_order_intent_from_different_strategy() -> None:
     context = _context()
     intent = _order_intent(strategy_id=OTHER_STRATEGY_ID)

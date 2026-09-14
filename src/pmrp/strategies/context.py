@@ -43,6 +43,29 @@ FORBIDDEN_STRATEGY_CONTEXT_SERVICES = frozenset(
 _SENSITIVE_METADATA_KEY_PARTS = ("api_key", "password", "private_key", "secret", "token")
 
 
+class StrategyOrderIntentGate:
+    """Mutable one-way gate for strategy order-intent emission."""
+
+    __slots__ = ("_enabled",)
+
+    def __init__(self, *, enabled: bool = True) -> None:
+        if type(enabled) is not bool:
+            msg = "order intent gate enabled value must be a bool"
+            raise TypeError(msg)
+        self._enabled = enabled
+
+    @property
+    def enabled(self) -> bool:
+        """Return whether order-intent emission is currently allowed."""
+
+        return self._enabled
+
+    def disable(self) -> None:
+        """Permanently disable order-intent emission through this gate."""
+
+        self._enabled = False
+
+
 class StrategySignalPublisher(Protocol):
     """Approved sink for canonical strategy signals."""
 
@@ -104,8 +127,8 @@ class StrategyContext:
         repr=False,
         compare=False,
     )
+    _order_intent_gate: StrategyOrderIntentGate = field(repr=False, compare=False)
     strategy_id: StrategyId
-    order_intents_enabled: bool = True
     replay_session_id: ReplaySessionId | None = None
     simulation_session_id: SimulationSessionId | None = None
     services: Mapping[str, object] = field(default_factory=dict)
@@ -159,8 +182,12 @@ class StrategyContext:
         object.__setattr__(self, "_event_bus", event_bus)
         object.__setattr__(self, "_signal_publisher", signal_publisher)
         object.__setattr__(self, "_order_intent_publisher", order_intent_publisher)
+        object.__setattr__(
+            self,
+            "_order_intent_gate",
+            StrategyOrderIntentGate(enabled=order_intents_enabled),
+        )
         object.__setattr__(self, "strategy_id", strategy_id)
-        object.__setattr__(self, "order_intents_enabled", order_intents_enabled)
         object.__setattr__(self, "replay_session_id", replay_session_id)
         object.__setattr__(self, "simulation_session_id", simulation_session_id)
         object.__setattr__(self, "services", _freeze_services(services or {}))
@@ -169,6 +196,17 @@ class StrategyContext:
             "metadata",
             freeze_canonical_mapping(context_metadata, field_name="strategy context metadata"),
         )
+
+    @property
+    def order_intents_enabled(self) -> bool:
+        """Return whether this strategy may currently emit order intents."""
+
+        return self._order_intent_gate.enabled
+
+    def disable_order_intents(self) -> None:
+        """Disable future order-intent emission for this strategy context."""
+
+        self._order_intent_gate.disable()
 
     def now(self) -> datetime:
         """Return the current injected clock time as timezone-aware UTC."""

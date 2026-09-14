@@ -25,6 +25,7 @@ from pmrp.strategies.lifecycle import (
     validate_strategy_state_transition,
 )
 from pmrp.strategies.protocol import Strategy, StrategyFactory
+from pmrp.strategies.runtime import StrategyRuntime
 
 __all__ = [
     "ALLOWED_STRATEGY_STATE_TRANSITIONS",
@@ -42,6 +43,7 @@ __all__ = [
     "StrategyMetrics",
     "StrategyOrderIntentPublisher",
     "StrategyProtocolError",
+    "StrategyRuntime",
     "StrategyRuntimeError",
     "StrategyRuntimeHealth",
     "StrategySignalPublisher",
