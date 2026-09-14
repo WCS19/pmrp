@@ -44,6 +44,10 @@ class ReplayChecksumError(ReplayError):
     """A replay dataset checksum did not match its manifest."""
 
 
+class ReplayOrderingError(ReplayError):
+    """Replay event ordering metadata is invalid."""
+
+
 def _validate_required_text(value: str, *, field_name: str) -> str:
     if type(value) is not str:
         msg = f"{field_name} must be a string"
