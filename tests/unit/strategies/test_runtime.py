@@ -11,13 +11,29 @@ import pytest
 
 from pmrp.bus import InProcessEventBus
 from pmrp.clock import FrozenClock
-from pmrp.schemas.enums import HealthStatus, Side, StrategyState
-from pmrp.schemas.events import EventEnvelope
-from pmrp.schemas.identifiers import SignalId, StrategyId
+from pmrp.events import (
+    DeterministicEventIdentifierGenerator,
+    EventFactory,
+    EventTypeRegistration,
+    EventTypeRegistry,
+)
+from pmrp.schemas.enums import Environment, HealthStatus, Side, StrategyState
+from pmrp.schemas.events import (
+    STRATEGY_HEALTH_CHANGED_EVENT_TYPE,
+    STRATEGY_STARTED_EVENT_TYPE,
+    STRATEGY_STOPPED_EVENT_TYPE,
+    EventEnvelope,
+    StrategyHealthChangedEvent,
+    StrategyStartedEvent,
+    StrategyStoppedEvent,
+)
+from pmrp.schemas.identifiers import ReplaySessionId, SignalId, SimulationSessionId, StrategyId
 from pmrp.schemas.orders import OrderIntent
+from pmrp.schemas.strategy import StrategyInstance
 from pmrp.strategies import (
     StrategyContext,
     StrategyEmissionError,
+    StrategyLifecycleEvent,
     StrategyRuntime,
     StrategyRuntimeError,
 )
@@ -153,6 +169,139 @@ async def test_strategy_runtime_isolates_initialization_failure() -> None:
     await runtime.stop("test_complete")
 
 
+async def test_strategy_runtime_emits_started_and_stopped_lifecycle_events() -> None:
+    event_bus = InProcessEventBus(deterministic=True)
+    lifecycle_publisher = RecordingLifecycleEventPublisher()
+    strategy = RecordingStrategy(strategy_id=StrategyId("strat_runtime_lifecycle_v1"))
+    context = _context(
+        strategy.strategy_id,
+        event_bus=event_bus,
+        replay_session_id=ReplaySessionId("rpl_strategy_runtime_lifecycle"),
+        simulation_session_id=SimulationSessionId("sim_strategy_runtime_lifecycle"),
+    )
+    runtime = StrategyRuntime(
+        clock=FrozenClock(NOW),
+        lifecycle_event_factory=_lifecycle_event_factory(),
+        lifecycle_event_publisher=lifecycle_publisher,
+    )
+    runtime.register(
+        strategy,
+        context,
+        strategy_instance=_strategy_instance(strategy),
+    )
+
+    await runtime.start()
+    await runtime.stop("operator_stop")
+
+    assert len(lifecycle_publisher.events) == 2
+    assert lifecycle_publisher.partition_keys == [
+        "strat_runtime_lifecycle_v1",
+        "strat_runtime_lifecycle_v1",
+    ]
+    started_event = lifecycle_publisher.events[0]
+    stopped_event = lifecycle_publisher.events[1]
+    assert isinstance(started_event, StrategyStartedEvent)
+    assert isinstance(stopped_event, StrategyStoppedEvent)
+    assert started_event.envelope.event_type == STRATEGY_STARTED_EVENT_TYPE
+    assert started_event.envelope.strategy_id == strategy.strategy_id
+    assert started_event.envelope.replay_session_id == "rpl_strategy_runtime_lifecycle"
+    assert started_event.envelope.simulation_session_id == "sim_strategy_runtime_lifecycle"
+    assert started_event.strategy.strategy_id == strategy.strategy_id
+    assert started_event.strategy.state is StrategyState.RUNNING
+    assert started_event.strategy.health_status is HealthStatus.HEALTHY
+    assert started_event.strategy.started_at == NOW
+    assert started_event.strategy.stopped_at is None
+    assert stopped_event.envelope.event_type == STRATEGY_STOPPED_EVENT_TYPE
+    assert stopped_event.envelope.strategy_id == strategy.strategy_id
+    assert stopped_event.reason == "operator_stop"
+
+
+async def test_strategy_runtime_emits_health_change_when_strategy_degrades() -> None:
+    event_bus = InProcessEventBus(deterministic=True)
+    lifecycle_publisher = RecordingLifecycleEventPublisher()
+    strategy = RecordingStrategy(
+        strategy_id=StrategyId("strat_runtime_lifecycle_failure_v1"),
+        fail_on_event_type="market.snapshot",
+    )
+    runtime = StrategyRuntime(
+        clock=FrozenClock(NOW),
+        lifecycle_event_factory=_lifecycle_event_factory(),
+        lifecycle_event_publisher=lifecycle_publisher,
+    )
+    runtime.register(
+        strategy,
+        _context(strategy.strategy_id, event_bus=event_bus),
+        strategy_instance=_strategy_instance(strategy),
+    )
+
+    await runtime.start()
+    await event_bus.publish(_event("evt_strategy_runtime_lifecycle_failure", "market.snapshot"))
+    await _wait_until(
+        lambda: runtime.strategy_health(strategy.strategy_id).state is StrategyState.DEGRADED
+    )
+
+    assert len(lifecycle_publisher.events) == 2
+    started_event = lifecycle_publisher.events[0]
+    health_event = lifecycle_publisher.events[1]
+    assert isinstance(started_event, StrategyStartedEvent)
+    assert isinstance(health_event, StrategyHealthChangedEvent)
+    assert health_event.envelope.event_type == STRATEGY_HEALTH_CHANGED_EVENT_TYPE
+    assert health_event.envelope.strategy_id == strategy.strategy_id
+    assert health_event.strategy_id == strategy.strategy_id
+    assert health_event.previous_status is HealthStatus.HEALTHY
+    assert health_event.current_status is HealthStatus.DEGRADED
+    assert health_event.message == "strategy event processing failed"
+
+    await runtime.stop("test_complete")
+    stopped_event = lifecycle_publisher.events[-1]
+    assert isinstance(stopped_event, StrategyStoppedEvent)
+    assert stopped_event.reason == "test_complete"
+
+
+def test_strategy_runtime_requires_complete_lifecycle_event_dependencies() -> None:
+    with pytest.raises(StrategyRuntimeError) as missing_publisher_error:
+        StrategyRuntime(
+            clock=FrozenClock(NOW),
+            lifecycle_event_factory=_lifecycle_event_factory(),
+        )
+
+    assert (
+        missing_publisher_error.value.reason_code == "strategy_runtime_lifecycle_events_incomplete"
+    )
+
+    with pytest.raises(StrategyRuntimeError) as missing_factory_error:
+        StrategyRuntime(
+            clock=FrozenClock(NOW),
+            lifecycle_event_publisher=RecordingLifecycleEventPublisher(),
+        )
+
+    assert missing_factory_error.value.reason_code == "strategy_runtime_lifecycle_events_incomplete"
+
+
+def test_strategy_runtime_requires_matching_instance_metadata_for_lifecycle_events() -> None:
+    event_bus = InProcessEventBus()
+    runtime = StrategyRuntime(
+        clock=FrozenClock(NOW),
+        lifecycle_event_factory=_lifecycle_event_factory(),
+        lifecycle_event_publisher=RecordingLifecycleEventPublisher(),
+    )
+    strategy = RecordingStrategy(strategy_id=StrategyId("strat_runtime_metadata_v1"))
+
+    with pytest.raises(StrategyRuntimeError) as required_error:
+        runtime.register(strategy, _context(strategy.strategy_id, event_bus=event_bus))
+
+    assert required_error.value.reason_code == "strategy_runtime_strategy_instance_required"
+
+    with pytest.raises(StrategyRuntimeError) as mismatch_error:
+        runtime.register(
+            strategy,
+            _context(strategy.strategy_id, event_bus=event_bus),
+            strategy_instance=_strategy_instance(strategy, strategy_type="other_strategy"),
+        )
+
+    assert mismatch_error.value.reason_code == "strategy_runtime_strategy_instance_mismatch"
+
+
 async def test_strategy_runtime_rejects_duplicate_and_late_registration() -> None:
     event_bus = InProcessEventBus()
     runtime = StrategyRuntime(clock=FrozenClock(NOW))
@@ -265,11 +414,28 @@ class RecordingOrderIntentPublisher:
         self.intents.append(intent)
 
 
+class RecordingLifecycleEventPublisher:
+    def __init__(self) -> None:
+        self.events: list[StrategyLifecycleEvent] = []
+        self.partition_keys: list[str | None] = []
+
+    async def publish(
+        self,
+        event: StrategyLifecycleEvent,
+        *,
+        partition_key: str | None = None,
+    ) -> None:
+        self.events.append(event)
+        self.partition_keys.append(partition_key)
+
+
 def _context(
     strategy_id: StrategyId,
     *,
     event_bus: InProcessEventBus,
     order_intent_publisher: RecordingOrderIntentPublisher | None = None,
+    replay_session_id: ReplaySessionId | None = None,
+    simulation_session_id: SimulationSessionId | None = None,
 ) -> StrategyContext:
     return StrategyContext(
         strategy_id=strategy_id,
@@ -277,7 +443,59 @@ def _context(
         event_bus=event_bus,
         signal_publisher=RecordingSignalPublisher(),
         order_intent_publisher=order_intent_publisher or RecordingOrderIntentPublisher(),
+        replay_session_id=replay_session_id,
+        simulation_session_id=simulation_session_id,
     )
+
+
+def _lifecycle_event_factory() -> EventFactory:
+    return EventFactory(
+        clock=FrozenClock(NOW),
+        registry=EventTypeRegistry(
+            (
+                EventTypeRegistration(
+                    event_type=STRATEGY_STARTED_EVENT_TYPE,
+                    schema_name="strategy_started_event",
+                    schema_version=1,
+                ),
+                EventTypeRegistration(
+                    event_type=STRATEGY_STOPPED_EVENT_TYPE,
+                    schema_name="strategy_stopped_event",
+                    schema_version=1,
+                ),
+                EventTypeRegistration(
+                    event_type=STRATEGY_HEALTH_CHANGED_EVENT_TYPE,
+                    schema_name="strategy_health_changed_event",
+                    schema_version=1,
+                ),
+            )
+        ),
+        identifier_generator=DeterministicEventIdentifierGenerator(),
+    )
+
+
+def _strategy_instance(
+    strategy: RecordingStrategy,
+    **overrides: object,
+) -> StrategyInstance:
+    payload: dict[str, object] = {
+        "strategy_id": strategy.strategy_id,
+        "strategy_type": strategy.strategy_type,
+        "strategy_version": strategy.strategy_version,
+        "name": "Runtime strategy test instance",
+        "environment": Environment.TEST,
+        "state": StrategyState.CREATED,
+        "configuration_version": 1,
+        "configuration_hash": "sha256:strategy-runtime-test",
+        "capital_allocation": None,
+        "created_at": "2026-07-27T14:59:00Z",
+        "started_at": None,
+        "stopped_at": None,
+        "health_status": HealthStatus.UNKNOWN,
+        "health_message": None,
+    }
+    payload.update(overrides)
+    return StrategyInstance.model_validate(payload)
 
 
 def _event(event_id: str, event_type: str) -> EventEnvelope:
