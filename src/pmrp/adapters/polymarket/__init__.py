@@ -2,10 +2,12 @@
 
 from pmrp.adapters.polymarket.mapper import (
     POLYMARKET_ORDER_BOOK_MAPPER_VERSION,
+    POLYMARKET_TRADE_MAPPER_VERSION,
     PolymarketMappedOrderBookMessage,
     map_polymarket_order_book_delta,
     map_polymarket_order_book_message,
     map_polymarket_order_book_snapshot,
+    map_polymarket_trade,
 )
 from pmrp.adapters.polymarket.raw_models import (
     PolymarketMarketListResponse,
@@ -61,6 +63,7 @@ __all__ = [
     "POLYMARKET_MARKET_WEBSOCKET_PATH",
     "POLYMARKET_MARKET_WEBSOCKET_URL",
     "POLYMARKET_ORDER_BOOK_MAPPER_VERSION",
+    "POLYMARKET_TRADE_MAPPER_VERSION",
     "PolymarketMappedOrderBookMessage",
     "PolymarketMarketDataRestClient",
     "PolymarketMarketListParams",
@@ -92,6 +95,7 @@ __all__ = [
     "map_polymarket_order_book_delta",
     "map_polymarket_order_book_message",
     "map_polymarket_order_book_snapshot",
+    "map_polymarket_trade",
     "parse_polymarket_error_json",
     "parse_polymarket_market_list_json",
     "parse_polymarket_order_book_json",
