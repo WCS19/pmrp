@@ -48,6 +48,10 @@ class StrategyProtocolError(StrategyError):
     """A strategy object does not satisfy the required protocol."""
 
 
+class StrategyRegistryError(StrategyError):
+    """A strategy type registration or instantiation operation failed safely."""
+
+
 class StrategyRuntimeError(StrategyError):
     """A strategy runtime operation failed safely."""
 
