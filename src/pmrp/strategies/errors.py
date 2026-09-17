@@ -56,6 +56,10 @@ class StrategyRuntimeError(StrategyError):
     """A strategy runtime operation failed safely."""
 
 
+class StrategyStateStoreError(StrategyError):
+    """A strategy state checkpoint operation failed safely."""
+
+
 def _validate_required_text(value: str, *, field_name: str) -> str:
     if type(value) is not str:
         msg = f"{field_name} must be a string"
