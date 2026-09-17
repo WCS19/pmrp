@@ -4,15 +4,21 @@ from pmrp.schemas.base import CanonicalModel
 from pmrp.schemas.commands import CommandEnvelope
 from pmrp.schemas.enums import Environment, HealthStatus, Side
 from pmrp.schemas.events import (
+    MARKET_ORDER_BOOK_DELTA_EVENT_TYPE,
+    MARKET_ORDER_BOOK_SNAPSHOT_EVENT_TYPE,
+    MARKET_TRADE_OBSERVED_EVENT_TYPE,
     STRATEGY_HEALTH_CHANGED_EVENT_TYPE,
     STRATEGY_SIGNAL_GENERATED_EVENT_TYPE,
     STRATEGY_STARTED_EVENT_TYPE,
     STRATEGY_STOPPED_EVENT_TYPE,
     EventEnvelope,
+    OrderBookDeltaEvent,
+    OrderBookSnapshotEvent,
     SignalGeneratedEvent,
     StrategyHealthChangedEvent,
     StrategyStartedEvent,
     StrategyStoppedEvent,
+    TradeObservedEvent,
 )
 from pmrp.schemas.identifiers import EventId, MarketId, OrderId
 from pmrp.schemas.market_data import OrderBookDelta, OrderBookSnapshot, Trade
@@ -76,6 +82,9 @@ from pmrp.schemas.time import UTCDateTime
 from pmrp.schemas.versions import SchemaRegistration, SchemaVersion, get_schema_model
 
 __all__ = [
+    "MARKET_ORDER_BOOK_DELTA_EVENT_TYPE",
+    "MARKET_ORDER_BOOK_SNAPSHOT_EVENT_TYPE",
+    "MARKET_TRADE_OBSERVED_EVENT_TYPE",
     "STRATEGY_HEALTH_CHANGED_EVENT_TYPE",
     "STRATEGY_SIGNAL_GENERATED_EVENT_TYPE",
     "STRATEGY_STARTED_EVENT_TYPE",
@@ -108,7 +117,9 @@ __all__ = [
     "OpenOrderSnapshot",
     "Order",
     "OrderBookDelta",
+    "OrderBookDeltaEvent",
     "OrderBookSnapshot",
+    "OrderBookSnapshotEvent",
     "OrderId",
     "OrderIntent",
     "OrderStateTransition",
@@ -153,6 +164,7 @@ __all__ = [
     "StrategyStartedEvent",
     "StrategyStoppedEvent",
     "Trade",
+    "TradeObservedEvent",
     "UTCDateTime",
     "VersionMetadata",
     "canonical_json",
