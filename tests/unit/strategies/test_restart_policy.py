@@ -100,6 +100,24 @@ def test_bounded_restart_policy_denies_failures_after_deadline() -> None:
     assert decision.should_restart is False
 
 
+def test_bounded_restart_policy_denies_scheduled_restart_after_deadline() -> None:
+    policy = _bounded_policy(
+        backoff=timedelta(seconds=25),
+        jitter=timedelta(seconds=10),
+        deadline=timedelta(seconds=30),
+    )
+
+    decision = policy.decide(
+        _failure(
+            first_failure_at=NOW,
+            latest_failure_at=NOW + timedelta(seconds=10),
+        )
+    )
+
+    assert decision.reason_code == "strategy_restart_deadline_exceeded"
+    assert decision.should_restart is False
+
+
 def test_restart_failure_rejects_invalid_counts_and_time_order() -> None:
     with pytest.raises(StrategyRestartPolicyError) as count_error:
         _failure(previous_restart_attempts=cast(Any, True))
@@ -110,6 +128,21 @@ def test_restart_failure_rejects_invalid_counts_and_time_order() -> None:
         _failure(first_failure_at=NOW, latest_failure_at=NOW - timedelta(seconds=1))
 
     assert time_error.value.reason_code == "strategy_restart_failure_time_order_invalid"
+
+
+def test_restart_failure_wraps_invalid_datetimes_with_stable_reason_code() -> None:
+    with pytest.raises(StrategyRestartPolicyError) as first_failure_error:
+        _failure(first_failure_at=datetime.fromisoformat("2026-07-28T15:00:00"))
+
+    assert first_failure_error.value.reason_code == "strategy_restart_datetime_invalid"
+    assert first_failure_error.value.context["field_name"] == "first_failure_at"
+    assert first_failure_error.value.context["strategy_id"] == "strat_restart_policy_test"
+
+    with pytest.raises(StrategyRestartPolicyError) as latest_failure_error:
+        _failure(latest_failure_at=cast(Any, "not-a-datetime"))
+
+    assert latest_failure_error.value.reason_code == "strategy_restart_datetime_invalid"
+    assert latest_failure_error.value.context["field_name"] == "latest_failure_at"
 
 
 def test_restart_policy_rejects_invalid_configuration() -> None:
@@ -157,6 +190,19 @@ def test_restart_decision_rejects_incoherent_restart_metadata() -> None:
         )
 
     assert extra_restart_after_error.value.reason_code == "strategy_restart_decision_invalid"
+
+
+def test_restart_decision_wraps_invalid_restart_after_with_stable_reason_code() -> None:
+    with pytest.raises(StrategyRestartPolicyError) as restart_after_error:
+        StrategyRestartDecision(
+            should_restart=True,
+            reason_code="strategy_restart_allowed",
+            next_attempt=1,
+            restart_after=datetime.fromisoformat("2026-07-28T15:00:00"),
+        )
+
+    assert restart_after_error.value.reason_code == "strategy_restart_datetime_invalid"
+    assert restart_after_error.value.context["field_name"] == "restart_after"
 
 
 def _bounded_policy(

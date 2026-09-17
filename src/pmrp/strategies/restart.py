@@ -45,8 +45,22 @@ class StrategyRestartFailure:
             self.previous_restart_attempts,
             field_name="previous_restart_attempts",
         )
-        first_failure_at = normalize_clock_datetime(self.first_failure_at)
-        latest_failure_at = normalize_clock_datetime(self.latest_failure_at)
+        first_failure_at = _normalize_restart_datetime(
+            self.first_failure_at,
+            field_name="first_failure_at",
+            context={
+                "strategy_id": str(self.strategy_id),
+                "failure_kind": failure_kind.value,
+            },
+        )
+        latest_failure_at = _normalize_restart_datetime(
+            self.latest_failure_at,
+            field_name="latest_failure_at",
+            context={
+                "strategy_id": str(self.strategy_id),
+                "failure_kind": failure_kind.value,
+            },
+        )
         if latest_failure_at < first_failure_at:
             raise StrategyRestartPolicyError(
                 "latest_failure_at must not be before first_failure_at",
@@ -85,7 +99,9 @@ class StrategyRestartDecision:
         backoff = _validate_nonnegative_duration(self.backoff, field_name="backoff")
         jitter = _validate_nonnegative_duration(self.jitter, field_name="jitter")
         restart_after = (
-            None if self.restart_after is None else normalize_clock_datetime(self.restart_after)
+            None
+            if self.restart_after is None
+            else _normalize_restart_datetime(self.restart_after, field_name="restart_after")
         )
 
         if self.should_restart:
@@ -173,14 +189,19 @@ class BoundedRestartPolicy:
             return _deny("strategy_restart_failure_kind_not_restartable")
         if failure.previous_restart_attempts >= self.max_attempts:
             return _deny("strategy_restart_attempts_exhausted")
-        if failure.latest_failure_at - failure.first_failure_at > self.deadline:
+        deadline_at = failure.first_failure_at + self.deadline
+        if failure.latest_failure_at > deadline_at:
+            return _deny("strategy_restart_deadline_exceeded")
+        restart_after = failure.latest_failure_at + self.backoff
+        latest_scheduled_restart = restart_after + self.jitter
+        if latest_scheduled_restart > deadline_at:
             return _deny("strategy_restart_deadline_exceeded")
 
         return StrategyRestartDecision(
             should_restart=True,
             reason_code="strategy_restart_allowed",
             next_attempt=failure.previous_restart_attempts + 1,
-            restart_after=failure.latest_failure_at + self.backoff,
+            restart_after=restart_after,
             backoff=self.backoff,
             jitter=self.jitter,
         )
@@ -223,6 +244,24 @@ def _validate_failure_kinds(
             reason_code="strategy_restart_failure_kinds_invalid",
         )
     return failure_kinds
+
+
+def _normalize_restart_datetime(
+    value: datetime,
+    *,
+    field_name: str,
+    context: dict[str, str] | None = None,
+) -> datetime:
+    try:
+        return normalize_clock_datetime(value)
+    except (TypeError, ValueError):
+        safe_context = dict(context or {})
+        safe_context["field_name"] = field_name
+        raise StrategyRestartPolicyError(
+            f"{field_name} must be a timezone-aware datetime",
+            reason_code="strategy_restart_datetime_invalid",
+            context=safe_context,
+        ) from None
 
 
 def _validate_required_text(value: str, *, field_name: str) -> str:
