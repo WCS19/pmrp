@@ -12,11 +12,23 @@ from pmrp.schemas.identifiers import StrategyId
 from pmrp.schemas.numeric import Probability, Quantity
 from pmrp.schemas.strategy import StrategyConfigurationRecord, StrategyDefinition
 from pmrp.strategies import (
+    MIDPOINT_OBSERVER_CONFIGURATION_SCHEMA_VERSION,
+    MIDPOINT_OBSERVER_STRATEGY_TYPE,
+    MIDPOINT_OBSERVER_STRATEGY_VERSION,
+    THRESHOLD_SIGNAL_CONFIGURATION_SCHEMA_VERSION,
+    THRESHOLD_SIGNAL_STRATEGY_TYPE,
+    THRESHOLD_SIGNAL_STRATEGY_VERSION,
+    MidpointObserverConfiguration,
+    MidpointObserverStrategy,
     StrategyContext,
     StrategyRegistry,
     StrategyRegistryError,
     StrategyTypeRegistration,
+    ThresholdSignalConfiguration,
+    ThresholdSignalStrategy,
     UnknownStrategyTypeError,
+    baseline_strategy_registrations,
+    create_baseline_strategy_registry,
 )
 
 pytestmark = pytest.mark.unit
@@ -208,6 +220,84 @@ def test_strategy_registry_rejects_invalid_or_mismatched_factory_results() -> No
         schema_mismatch_error.value.context["strategy_instance_configuration_schema_version"]
         == "bool"
     )
+
+
+def test_baseline_strategy_registrations_are_deterministic_and_schema_aligned() -> None:
+    registrations = baseline_strategy_registrations()
+
+    assert tuple(registration.strategy_type for registration in registrations) == (
+        MIDPOINT_OBSERVER_STRATEGY_TYPE,
+        THRESHOLD_SIGNAL_STRATEGY_TYPE,
+    )
+    midpoint_registration, threshold_registration = registrations
+    assert midpoint_registration.strategy_version == MIDPOINT_OBSERVER_STRATEGY_VERSION
+    assert (
+        midpoint_registration.definition.configuration_schema_version
+        == MIDPOINT_OBSERVER_CONFIGURATION_SCHEMA_VERSION
+    )
+    assert midpoint_registration.definition.implementation_path == (
+        "pmrp.strategies.baseline:MidpointObserverStrategy"
+    )
+    assert midpoint_registration.definition.subscribed_event_types == (
+        "market.order_book_snapshot",
+    )
+    assert midpoint_registration.configuration_model is MidpointObserverConfiguration
+    assert not midpoint_registration.definition.supports_live
+
+    assert threshold_registration.strategy_version == THRESHOLD_SIGNAL_STRATEGY_VERSION
+    assert (
+        threshold_registration.definition.configuration_schema_version
+        == THRESHOLD_SIGNAL_CONFIGURATION_SCHEMA_VERSION
+    )
+    assert threshold_registration.definition.implementation_path == (
+        "pmrp.strategies.baseline:ThresholdSignalStrategy"
+    )
+    assert threshold_registration.definition.subscribed_event_types == (
+        "market.order_book_snapshot",
+    )
+    assert threshold_registration.configuration_model is ThresholdSignalConfiguration
+    assert not threshold_registration.definition.supports_live
+
+
+def test_create_baseline_strategy_registry_instantiates_midpoint_observer() -> None:
+    registry = create_baseline_strategy_registry()
+
+    strategy = registry.create_strategy(
+        strategy_type=MIDPOINT_OBSERVER_STRATEGY_TYPE,
+        strategy_version=MIDPOINT_OBSERVER_STRATEGY_VERSION,
+        configuration_record=_configuration_record(
+            strategy_id=StrategyId("strat_builtin_midpoint_registry"),
+            configuration={"market_id": "mkt_registry_test", "metric_prefix": "custom.midpoint"},
+        ),
+    )
+
+    assert isinstance(strategy, MidpointObserverStrategy)
+    assert strategy.strategy_id == "strat_builtin_midpoint_registry"
+    assert strategy.strategy_type == MIDPOINT_OBSERVER_STRATEGY_TYPE
+    assert strategy.strategy_version == MIDPOINT_OBSERVER_STRATEGY_VERSION
+
+
+def test_create_baseline_strategy_registry_instantiates_threshold_signal_strategy() -> None:
+    registry = create_baseline_strategy_registry()
+
+    strategy = registry.create_strategy(
+        strategy_type=THRESHOLD_SIGNAL_STRATEGY_TYPE,
+        strategy_version=THRESHOLD_SIGNAL_STRATEGY_VERSION,
+        configuration_record=_configuration_record(
+            strategy_id=StrategyId("strat_builtin_threshold_registry"),
+            configuration={
+                "market_id": "mkt_registry_test",
+                "threshold_probability": "0.45",
+                "confidence": "0.80",
+                "signal_type": "custom_threshold",
+            },
+        ),
+    )
+
+    assert isinstance(strategy, ThresholdSignalStrategy)
+    assert strategy.strategy_id == "strat_builtin_threshold_registry"
+    assert strategy.strategy_type == THRESHOLD_SIGNAL_STRATEGY_TYPE
+    assert strategy.strategy_version == THRESHOLD_SIGNAL_STRATEGY_VERSION
 
 
 class RecordingStrategy:

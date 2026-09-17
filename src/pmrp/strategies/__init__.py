@@ -49,6 +49,8 @@ from pmrp.strategies.registry import (
     StrategyRegistry,
     StrategyTypeRegistration,
     UnknownStrategyTypeError,
+    baseline_strategy_registrations,
+    create_baseline_strategy_registry,
 )
 from pmrp.strategies.restart import (
     BoundedRestartPolicy,
@@ -122,6 +124,8 @@ __all__ = [
     "ThresholdSignalFactory",
     "ThresholdSignalStrategy",
     "UnknownStrategyTypeError",
+    "baseline_strategy_registrations",
+    "create_baseline_strategy_registry",
     "thaw_checkpoint_state",
     "transition_strategy_state",
     "validate_strategy_state_transition",

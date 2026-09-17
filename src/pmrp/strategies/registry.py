@@ -11,6 +11,18 @@ from pmrp.schemas.base import CanonicalModel
 from pmrp.schemas.identifiers import StrategyId
 from pmrp.schemas.immutability import thaw_canonical_mapping
 from pmrp.schemas.strategy import StrategyConfigurationRecord, StrategyDefinition
+from pmrp.strategies.baseline import (
+    MIDPOINT_OBSERVER_CONFIGURATION_SCHEMA_VERSION,
+    MIDPOINT_OBSERVER_STRATEGY_TYPE,
+    MIDPOINT_OBSERVER_STRATEGY_VERSION,
+    THRESHOLD_SIGNAL_CONFIGURATION_SCHEMA_VERSION,
+    THRESHOLD_SIGNAL_STRATEGY_TYPE,
+    THRESHOLD_SIGNAL_STRATEGY_VERSION,
+    MidpointObserverConfiguration,
+    MidpointObserverFactory,
+    ThresholdSignalConfiguration,
+    ThresholdSignalFactory,
+)
 from pmrp.strategies.errors import StrategyRegistryError
 from pmrp.strategies.protocol import Strategy, StrategyFactory
 
@@ -151,6 +163,53 @@ class StrategyRegistry:
             self._registrations[key]
             for key in sorted(self._registrations, key=lambda item: (item[0], item[1]))
         )
+
+
+def baseline_strategy_registrations() -> tuple[StrategyTypeRegistration, ...]:
+    """Return the built-in M9 baseline strategy registrations."""
+
+    return (
+        StrategyTypeRegistration(
+            definition=StrategyDefinition(
+                strategy_type=MIDPOINT_OBSERVER_STRATEGY_TYPE,
+                version=MIDPOINT_OBSERVER_STRATEGY_VERSION,
+                implementation_path="pmrp.strategies.baseline:MidpointObserverStrategy",
+                description="Transparent midpoint observer that emits metrics only.",
+                configuration_schema_version=MIDPOINT_OBSERVER_CONFIGURATION_SCHEMA_VERSION,
+                subscribed_event_types=("market.order_book_snapshot",),
+                supports_replay=True,
+                supports_simulation=True,
+                supports_paper=True,
+                supports_shadow=True,
+                supports_live=False,
+            ),
+            factory=MidpointObserverFactory(),
+            configuration_model=MidpointObserverConfiguration,
+        ),
+        StrategyTypeRegistration(
+            definition=StrategyDefinition(
+                strategy_type=THRESHOLD_SIGNAL_STRATEGY_TYPE,
+                version=THRESHOLD_SIGNAL_STRATEGY_VERSION,
+                implementation_path="pmrp.strategies.baseline:ThresholdSignalStrategy",
+                description="Transparent threshold strategy that emits buy signals only.",
+                configuration_schema_version=THRESHOLD_SIGNAL_CONFIGURATION_SCHEMA_VERSION,
+                subscribed_event_types=("market.order_book_snapshot",),
+                supports_replay=True,
+                supports_simulation=True,
+                supports_paper=True,
+                supports_shadow=True,
+                supports_live=False,
+            ),
+            factory=ThresholdSignalFactory(),
+            configuration_model=ThresholdSignalConfiguration,
+        ),
+    )
+
+
+def create_baseline_strategy_registry() -> StrategyRegistry:
+    """Return a strategy registry containing the built-in baseline strategies."""
+
+    return StrategyRegistry(baseline_strategy_registrations())
 
 
 def _create_strategy(
