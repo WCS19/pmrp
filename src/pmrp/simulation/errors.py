@@ -36,6 +36,10 @@ class SimulationConfigurationError(SimulationError):
     """Raised when simulation model configuration is invalid."""
 
 
+class SimulationInputError(SimulationError):
+    """Raised when simulation model inputs are invalid."""
+
+
 def _validate_required_text(value: str, *, field_name: str) -> str:
     if type(value) is not str:
         msg = f"{field_name} must be a string"
