@@ -56,6 +56,10 @@ class StrategyRuntimeError(StrategyError):
     """A strategy runtime operation failed safely."""
 
 
+class StrategyRestartPolicyError(StrategyError):
+    """A strategy restart policy is invalid or cannot evaluate safely."""
+
+
 class StrategyStateStoreError(StrategyError):
     """A strategy state checkpoint operation failed safely."""
 

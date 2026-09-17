@@ -16,6 +16,7 @@ from pmrp.strategies.errors import (
     StrategyLifecycleError,
     StrategyProtocolError,
     StrategyRegistryError,
+    StrategyRestartPolicyError,
     StrategyRuntimeError,
     StrategyStateStoreError,
 )
@@ -32,6 +33,14 @@ from pmrp.strategies.registry import (
     StrategyRegistry,
     StrategyTypeRegistration,
     UnknownStrategyTypeError,
+)
+from pmrp.strategies.restart import (
+    BoundedRestartPolicy,
+    NeverRestartPolicy,
+    StrategyRestartDecision,
+    StrategyRestartFailure,
+    StrategyRestartFailureKind,
+    StrategyRestartPolicy,
 )
 from pmrp.strategies.runtime import (
     StrategyLifecycleEvent,
@@ -50,7 +59,9 @@ __all__ = [
     "APPROVED_STRATEGY_CONTEXT_SERVICES",
     "FORBIDDEN_STRATEGY_CONTEXT_SERVICES",
     "TERMINAL_STRATEGY_STATES",
+    "BoundedRestartPolicy",
     "InMemoryStrategyStateStore",
+    "NeverRestartPolicy",
     "Strategy",
     "StrategyConfigurationModel",
     "StrategyContext",
@@ -67,6 +78,11 @@ __all__ = [
     "StrategyProtocolError",
     "StrategyRegistry",
     "StrategyRegistryError",
+    "StrategyRestartDecision",
+    "StrategyRestartFailure",
+    "StrategyRestartFailureKind",
+    "StrategyRestartPolicy",
+    "StrategyRestartPolicyError",
     "StrategyRuntime",
     "StrategyRuntimeError",
     "StrategyRuntimeHealth",
