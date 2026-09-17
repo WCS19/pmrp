@@ -216,7 +216,8 @@ class StrategyRuntime:
         async for event in subscription:
             if handle.state is not StrategyState.RUNNING:
                 break
-            if event.event_type not in handle.subscribed_event_types:
+            event_type = _canonical_event_type(event)
+            if event_type not in handle.subscribed_event_types:
                 handle.ignored_events += 1
                 continue
             processed = await _try_process_strategy_event(handle.strategy, event)
@@ -354,7 +355,7 @@ class _StrategyHandle:
     state: StrategyState = StrategyState.CREATED
     health_status: HealthStatus = HealthStatus.UNKNOWN
     health_message: str | None = None
-    subscription: EventSubscription[EventEnvelope] | None = None
+    subscription: EventSubscription[object] | None = None
     task: asyncio.Task[None] | None = None
     processed_events: int = 0
     ignored_events: int = 0
@@ -419,10 +420,10 @@ async def _try_initialize_strategy(strategy: Strategy, context: StrategyContext)
     return True
 
 
-def _try_subscribe_strategy(handle: _StrategyHandle) -> EventSubscription[EventEnvelope] | None:
+def _try_subscribe_strategy(handle: _StrategyHandle) -> EventSubscription[object] | None:
     try:
         return handle.context.subscribe(
-            EventEnvelope,
+            object,
             consumer_name=f"strategy:{handle.strategy.strategy_id}",
             queue_size=handle.queue_size,
         )
@@ -430,7 +431,7 @@ def _try_subscribe_strategy(handle: _StrategyHandle) -> EventSubscription[EventE
         return None
 
 
-async def _try_process_strategy_event(strategy: Strategy, event: EventEnvelope) -> bool:
+async def _try_process_strategy_event(strategy: Strategy, event: object) -> bool:
     try:
         await strategy.on_event(event)
     except Exception:
@@ -446,13 +447,22 @@ async def _try_shutdown_strategy(strategy: Strategy, reason: str) -> bool:
     return True
 
 
-async def _close_subscription(subscription: EventSubscription[EventEnvelope] | None) -> None:
+async def _close_subscription(subscription: EventSubscription[object] | None) -> None:
     if subscription is None:
         return
     try:
         await subscription.close()
     except Exception:
         return
+
+
+def _canonical_event_type(event: object) -> str | None:
+    if isinstance(event, EventEnvelope):
+        return event.event_type
+    envelope = getattr(event, "envelope", None)
+    if isinstance(envelope, EventEnvelope):
+        return envelope.event_type
+    return None
 
 
 def _validate_strategy(strategy: Strategy) -> None:
