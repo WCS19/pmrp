@@ -21,11 +21,15 @@ from pmrp.schemas.identifiers import (
     StrategyId,
 )
 from pmrp.schemas.immutability import freeze_canonical_mapping, thaw_canonical_mapping
+from pmrp.schemas.market_data import OrderBookDelta, OrderBookSnapshot, Trade
 from pmrp.schemas.strategy import Signal, StrategyInstance
 from pmrp.schemas.time import UTCDateTime
 from pmrp.schemas.versions import SchemaVersion
 
 _DOTTED_EVENT_TYPE_PATTERN = r"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$"
+MARKET_ORDER_BOOK_DELTA_EVENT_TYPE = "market.order_book_delta"
+MARKET_ORDER_BOOK_SNAPSHOT_EVENT_TYPE = "market.order_book_snapshot"
+MARKET_TRADE_OBSERVED_EVENT_TYPE = "market.trade_observed"
 STRATEGY_STARTED_EVENT_TYPE = "strategy.started"
 STRATEGY_STOPPED_EVENT_TYPE = "strategy.stopped"
 STRATEGY_HEALTH_CHANGED_EVENT_TYPE = "strategy.health_changed"
@@ -134,6 +138,66 @@ class StrategyHealthChangedEvent(CanonicalModel):
         return self
 
 
+class OrderBookSnapshotEvent(CanonicalModel):
+    envelope: EventEnvelope
+    snapshot: OrderBookSnapshot
+
+    @model_validator(mode="after")
+    def validate_envelope(self) -> Self:
+        _validate_event_type(self.envelope, MARKET_ORDER_BOOK_SNAPSHOT_EVENT_TYPE)
+        _validate_market_lineage(
+            self.envelope.market_id,
+            self.snapshot.market_id,
+            field_name="snapshot.market_id",
+        )
+        _validate_exchange_lineage(
+            self.envelope.exchange,
+            self.snapshot.exchange,
+            field_name="snapshot.exchange",
+        )
+        return self
+
+
+class OrderBookDeltaEvent(CanonicalModel):
+    envelope: EventEnvelope
+    delta: OrderBookDelta
+
+    @model_validator(mode="after")
+    def validate_envelope(self) -> Self:
+        _validate_event_type(self.envelope, MARKET_ORDER_BOOK_DELTA_EVENT_TYPE)
+        _validate_market_lineage(
+            self.envelope.market_id,
+            self.delta.market_id,
+            field_name="delta.market_id",
+        )
+        _validate_exchange_lineage(
+            self.envelope.exchange,
+            self.delta.exchange,
+            field_name="delta.exchange",
+        )
+        return self
+
+
+class TradeObservedEvent(CanonicalModel):
+    envelope: EventEnvelope
+    trade: Trade
+
+    @model_validator(mode="after")
+    def validate_envelope(self) -> Self:
+        _validate_event_type(self.envelope, MARKET_TRADE_OBSERVED_EVENT_TYPE)
+        _validate_market_lineage(
+            self.envelope.market_id,
+            self.trade.market_id,
+            field_name="trade.market_id",
+        )
+        _validate_exchange_lineage(
+            self.envelope.exchange,
+            self.trade.exchange,
+            field_name="trade.exchange",
+        )
+        return self
+
+
 class SignalGeneratedEvent(CanonicalModel):
     envelope: EventEnvelope
     signal: Signal
@@ -146,15 +210,58 @@ class SignalGeneratedEvent(CanonicalModel):
             self.signal.strategy_id,
             field_name="signal.strategy_id",
         )
-        if self.envelope.market_id is not None and self.envelope.market_id != self.signal.market_id:
-            msg = "event envelope market_id must match signal market_id when provided"
-            raise ValueError(msg)
+        _validate_optional_market_lineage(
+            self.envelope.market_id,
+            self.signal.market_id,
+            field_name="signal.market_id",
+        )
         return self
 
 
 def _validate_event_type(envelope: EventEnvelope, expected_event_type: str) -> None:
     if envelope.event_type != expected_event_type:
         msg = f"event envelope event_type must be {expected_event_type!r}"
+        raise ValueError(msg)
+
+
+def _validate_market_lineage(
+    envelope_market_id: MarketId | None,
+    payload_market_id: MarketId,
+    *,
+    field_name: str,
+) -> None:
+    if envelope_market_id is None:
+        msg = "event envelope market_id is required for market events"
+        raise ValueError(msg)
+    _validate_optional_market_lineage(
+        envelope_market_id,
+        payload_market_id,
+        field_name=field_name,
+    )
+
+
+def _validate_optional_market_lineage(
+    envelope_market_id: MarketId | None,
+    payload_market_id: MarketId,
+    *,
+    field_name: str,
+) -> None:
+    if envelope_market_id is not None and envelope_market_id != payload_market_id:
+        msg = f"event envelope market_id must match {field_name} when provided"
+        raise ValueError(msg)
+
+
+def _validate_exchange_lineage(
+    envelope_exchange: str | None,
+    payload_exchange: str,
+    *,
+    field_name: str,
+) -> None:
+    if envelope_exchange is None:
+        msg = "event envelope exchange is required for market data events"
+        raise ValueError(msg)
+    if envelope_exchange != payload_exchange:
+        msg = f"event envelope exchange must match {field_name}"
         raise ValueError(msg)
 
 

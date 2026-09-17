@@ -69,10 +69,13 @@ def _registered_schemas() -> tuple[RegisteredSchema, ...]:
     from pmrp.schemas.commands import CommandEnvelope
     from pmrp.schemas.events import (
         EventEnvelope,
+        OrderBookDeltaEvent,
+        OrderBookSnapshotEvent,
         SignalGeneratedEvent,
         StrategyHealthChangedEvent,
         StrategyStartedEvent,
         StrategyStoppedEvent,
+        TradeObservedEvent,
     )
     from pmrp.schemas.market_data import OrderBookDelta, OrderBookSnapshot, Trade
     from pmrp.schemas.markets import Contract, Market, Outcome
@@ -149,6 +152,14 @@ def _registered_schemas() -> tuple[RegisteredSchema, ...]:
         RegisteredSchema("order_book_snapshot", 1, SchemaCategory.DOMAIN, OrderBookSnapshot),
         RegisteredSchema("order_book_delta", 1, SchemaCategory.DOMAIN, OrderBookDelta),
         RegisteredSchema("trade", 1, SchemaCategory.DOMAIN, Trade),
+        RegisteredSchema(
+            "order_book_snapshot_event",
+            1,
+            SchemaCategory.EVENT,
+            OrderBookSnapshotEvent,
+        ),
+        RegisteredSchema("order_book_delta_event", 1, SchemaCategory.EVENT, OrderBookDeltaEvent),
+        RegisteredSchema("trade_observed_event", 1, SchemaCategory.EVENT, TradeObservedEvent),
         RegisteredSchema("order_intent", 1, SchemaCategory.DOMAIN, OrderIntent),
         RegisteredSchema("approved_order", 1, SchemaCategory.DOMAIN, ApprovedOrder),
         RegisteredSchema("order", 1, SchemaCategory.DOMAIN, Order),
