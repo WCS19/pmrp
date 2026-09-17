@@ -17,6 +17,7 @@ from pmrp.strategies.errors import (
     StrategyProtocolError,
     StrategyRegistryError,
     StrategyRuntimeError,
+    StrategyStateStoreError,
 )
 from pmrp.strategies.health import StrategyRuntimeHealth
 from pmrp.strategies.lifecycle import (
@@ -37,12 +38,19 @@ from pmrp.strategies.runtime import (
     StrategyLifecycleEventPublisher,
     StrategyRuntime,
 )
+from pmrp.strategies.state_store import (
+    InMemoryStrategyStateStore,
+    StrategyStateCheckpoint,
+    StrategyStateStore,
+    thaw_checkpoint_state,
+)
 
 __all__ = [
     "ALLOWED_STRATEGY_STATE_TRANSITIONS",
     "APPROVED_STRATEGY_CONTEXT_SERVICES",
     "FORBIDDEN_STRATEGY_CONTEXT_SERVICES",
     "TERMINAL_STRATEGY_STATES",
+    "InMemoryStrategyStateStore",
     "Strategy",
     "StrategyConfigurationModel",
     "StrategyContext",
@@ -63,8 +71,12 @@ __all__ = [
     "StrategyRuntimeError",
     "StrategyRuntimeHealth",
     "StrategySignalPublisher",
+    "StrategyStateCheckpoint",
+    "StrategyStateStore",
+    "StrategyStateStoreError",
     "StrategyTypeRegistration",
     "UnknownStrategyTypeError",
+    "thaw_checkpoint_state",
     "transition_strategy_state",
     "validate_strategy_state_transition",
 ]
