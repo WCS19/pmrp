@@ -1,5 +1,14 @@
 """Strategy interfaces and context primitives."""
 
+from pmrp.strategies.baseline import (
+    MIDPOINT_OBSERVER_CONFIGURATION_SCHEMA_VERSION,
+    MIDPOINT_OBSERVER_STRATEGY_TYPE,
+    MIDPOINT_OBSERVER_STRATEGY_VERSION,
+    MidpointObservation,
+    MidpointObserverConfiguration,
+    MidpointObserverFactory,
+    MidpointObserverStrategy,
+)
 from pmrp.strategies.context import (
     APPROVED_STRATEGY_CONTEXT_SERVICES,
     FORBIDDEN_STRATEGY_CONTEXT_SERVICES,
@@ -58,9 +67,16 @@ __all__ = [
     "ALLOWED_STRATEGY_STATE_TRANSITIONS",
     "APPROVED_STRATEGY_CONTEXT_SERVICES",
     "FORBIDDEN_STRATEGY_CONTEXT_SERVICES",
+    "MIDPOINT_OBSERVER_CONFIGURATION_SCHEMA_VERSION",
+    "MIDPOINT_OBSERVER_STRATEGY_TYPE",
+    "MIDPOINT_OBSERVER_STRATEGY_VERSION",
     "TERMINAL_STRATEGY_STATES",
     "BoundedRestartPolicy",
     "InMemoryStrategyStateStore",
+    "MidpointObservation",
+    "MidpointObserverConfiguration",
+    "MidpointObserverFactory",
+    "MidpointObserverStrategy",
     "NeverRestartPolicy",
     "Strategy",
     "StrategyConfigurationModel",
