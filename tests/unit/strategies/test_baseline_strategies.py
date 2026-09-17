@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
+from pydantic import ValidationError
 
 from pmrp.bus import InProcessEventBus
 from pmrp.clock import FrozenClock
@@ -19,11 +20,14 @@ from pmrp.schemas.events import (
 from pmrp.schemas.identifiers import StrategyId
 from pmrp.schemas.market_data import OrderBookSnapshot
 from pmrp.schemas.orders import OrderIntent
-from pmrp.schemas.strategy import Signal
+from pmrp.schemas.strategy import Signal, SignalDirection
 from pmrp.strategies import (
     MIDPOINT_OBSERVER_CONFIGURATION_SCHEMA_VERSION,
     MIDPOINT_OBSERVER_STRATEGY_TYPE,
     MIDPOINT_OBSERVER_STRATEGY_VERSION,
+    THRESHOLD_SIGNAL_CONFIGURATION_SCHEMA_VERSION,
+    THRESHOLD_SIGNAL_STRATEGY_TYPE,
+    THRESHOLD_SIGNAL_STRATEGY_VERSION,
     MidpointObserverConfiguration,
     MidpointObserverFactory,
     MidpointObserverStrategy,
@@ -31,6 +35,9 @@ from pmrp.strategies import (
     StrategyContext,
     StrategyContextError,
     StrategyRuntime,
+    ThresholdSignalConfiguration,
+    ThresholdSignalFactory,
+    ThresholdSignalStrategy,
 )
 
 pytestmark = pytest.mark.unit
@@ -40,6 +47,7 @@ NOW = datetime(2026, 7, 29, 15, 0, tzinfo=UTC)
 
 async def test_midpoint_observer_calculates_midpoint_and_emits_metrics_only() -> None:
     metrics = RecordingMetrics()
+    signal_publisher = RecordingSignalPublisher()
     order_intents = RecordingOrderIntentPublisher()
     strategy = MidpointObserverStrategy(
         strategy_id=StrategyId("strat_midpoint_observer_test"),
@@ -48,6 +56,7 @@ async def test_midpoint_observer_calculates_midpoint_and_emits_metrics_only() ->
     context = _context(
         strategy.strategy_id,
         services={"metrics": metrics},
+        signal_publisher=signal_publisher,
         order_intent_publisher=order_intents,
     )
 
@@ -65,6 +74,7 @@ async def test_midpoint_observer_calculates_midpoint_and_emits_metrics_only() ->
     assert observation.best_ask == Decimal("0.43")
     assert observation.midpoint == Decimal("0.42")
     assert observation.spread == Decimal("0.02")
+    assert signal_publisher.signals == []
     assert order_intents.intents == []
     expected_tags = {
         "strategy_id": "strat_midpoint_observer_test",
@@ -164,6 +174,146 @@ def test_midpoint_observer_factory_requires_typed_configuration() -> None:
         )
 
 
+async def test_threshold_signal_strategy_emits_buy_signal_and_no_order_intent() -> None:
+    signal_publisher = RecordingSignalPublisher()
+    order_intents = RecordingOrderIntentPublisher()
+    strategy = ThresholdSignalStrategy(
+        strategy_id=StrategyId("strat_threshold_signal_test"),
+        configuration=ThresholdSignalConfiguration(
+            threshold_probability="0.45",
+            confidence="0.80",
+        ),
+    )
+    context = _context(
+        strategy.strategy_id,
+        signal_publisher=signal_publisher,
+        order_intent_publisher=order_intents,
+    )
+
+    await strategy.initialize(context)
+    await strategy.on_event(_snapshot_event(best_bid="0.39", best_ask="0.42"))
+
+    assert isinstance(strategy, Strategy)
+    assert strategy.strategy_type == THRESHOLD_SIGNAL_STRATEGY_TYPE
+    assert strategy.strategy_version == THRESHOLD_SIGNAL_STRATEGY_VERSION
+    assert strategy.configuration_schema_version == THRESHOLD_SIGNAL_CONFIGURATION_SCHEMA_VERSION
+    assert strategy.subscribed_event_types == (MARKET_ORDER_BOOK_SNAPSHOT_EVENT_TYPE,)
+    assert len(strategy.decisions) == 1
+    decision = strategy.decisions[0]
+    signal = decision.signal
+    assert strategy.generated_signals == (signal,)
+    assert signal_publisher.signals == [signal]
+    assert order_intents.intents == []
+    assert decision.best_ask == Decimal("0.42")
+    assert decision.threshold_probability == Decimal("0.45")
+    assert signal.signal_id.startswith("sig_threshold_")
+    assert signal.strategy_id == "strat_threshold_signal_test"
+    assert signal.market_id == "mkt_midpoint_observer_test"
+    assert signal.contract_id == "ctr_midpoint_observer_test"
+    assert signal.signal_type == "threshold_probability"
+    assert signal.direction is SignalDirection.BUY
+    assert signal.strength == Decimal("0.03")
+    assert signal.fair_probability == Decimal("0.45")
+    assert signal.confidence == Decimal("0.80")
+    assert signal.valid_from == NOW
+    assert signal.valid_until is None
+    assert signal.reason_code == "BEST_ASK_BELOW_THRESHOLD"
+    assert signal.correlation_id == "corr_midpoint_observer_test"
+
+
+async def test_threshold_signal_strategy_filters_and_skips_non_actionable_snapshots() -> None:
+    signal_publisher = RecordingSignalPublisher()
+    strategy = ThresholdSignalStrategy(
+        strategy_id=StrategyId("strat_threshold_signal_filter"),
+        configuration=ThresholdSignalConfiguration(
+            market_id="mkt_midpoint_observer_test",
+            threshold_probability="0.45",
+        ),
+    )
+    await strategy.initialize(_context(strategy.strategy_id, signal_publisher=signal_publisher))
+
+    await strategy.on_event(_snapshot_event(market_id="mkt_other_threshold_signal"))
+    await strategy.on_event(_snapshot_event(best_ask="0.45"))
+    await strategy.on_event(_snapshot_event(best_ask="0.46"))
+    await strategy.on_event(_snapshot_event(is_valid=False))
+    await strategy.on_event(_snapshot_event(asks=()))
+
+    assert strategy.decisions == ()
+    assert signal_publisher.signals == []
+
+
+async def test_threshold_signal_strategy_requires_initialization() -> None:
+    strategy = ThresholdSignalStrategy(
+        strategy_id=StrategyId("strat_threshold_signal_uninitialized"),
+        configuration=ThresholdSignalConfiguration(threshold_probability="0.45"),
+    )
+
+    with pytest.raises(StrategyContextError) as exc_info:
+        await strategy.on_event(_snapshot_event(best_ask="0.42"))
+
+    assert exc_info.value.reason_code == "threshold_signal_not_initialized"
+
+
+async def test_threshold_signal_strategy_runs_under_strategy_runtime() -> None:
+    event_bus = InProcessEventBus(deterministic=True)
+    signal_publisher = RecordingSignalPublisher()
+    order_intents = RecordingOrderIntentPublisher()
+    strategy = ThresholdSignalStrategy(
+        strategy_id=StrategyId("strat_threshold_signal_runtime"),
+        configuration=ThresholdSignalConfiguration(threshold_probability="0.45"),
+    )
+    runtime = StrategyRuntime(clock=FrozenClock(NOW))
+    runtime.register(
+        strategy,
+        _context(
+            strategy.strategy_id,
+            event_bus=event_bus,
+            signal_publisher=signal_publisher,
+            order_intent_publisher=order_intents,
+        ),
+    )
+
+    await runtime.start()
+    await event_bus.publish(_snapshot_event(best_bid="0.40", best_ask="0.44"))
+    await _wait_until(lambda: len(signal_publisher.signals) == 1)
+    await runtime.stop("test_complete")
+
+    assert strategy.generated_signals == (signal_publisher.signals[0],)
+    assert signal_publisher.signals[0].strength == Decimal("0.01")
+    assert order_intents.intents == []
+    assert strategy.shutdown_reason == "test_complete"
+
+
+def test_threshold_signal_configuration_rejects_invalid_probability_inputs() -> None:
+    with pytest.raises(TypeError, match="float input"):
+        ThresholdSignalConfiguration(threshold_probability=0.45)
+
+    with pytest.raises(ValidationError, match="less than or equal to 1"):
+        ThresholdSignalConfiguration(threshold_probability="1.01")
+
+    with pytest.raises(TypeError, match="float input"):
+        ThresholdSignalConfiguration(threshold_probability="0.45", confidence=1.0)
+
+
+def test_threshold_signal_factory_requires_typed_configuration() -> None:
+    factory = ThresholdSignalFactory()
+    strategy = factory.create(
+        strategy_id=StrategyId("strat_threshold_signal_factory"),
+        configuration=ThresholdSignalConfiguration(
+            threshold_probability="0.45",
+            signal_type="custom_threshold",
+        ),
+    )
+
+    assert strategy.strategy_id == "strat_threshold_signal_factory"
+
+    with pytest.raises(TypeError, match="ThresholdSignalConfiguration"):
+        factory.create(
+            strategy_id=StrategyId("strat_threshold_signal_bad_factory"),
+            configuration=object(),
+        )
+
+
 class RecordingMetrics:
     def __init__(self) -> None:
         self.increments: list[tuple[str, dict[str, str] | None]] = []
@@ -177,8 +327,11 @@ class RecordingMetrics:
 
 
 class RecordingSignalPublisher:
+    def __init__(self) -> None:
+        self.signals: list[Signal] = []
+
     async def publish_signal(self, signal: Signal) -> None:
-        del signal
+        self.signals.append(signal)
 
 
 class RecordingOrderIntentPublisher:
@@ -194,13 +347,14 @@ def _context(
     *,
     event_bus: InProcessEventBus | None = None,
     services: dict[str, object] | None = None,
+    signal_publisher: RecordingSignalPublisher | None = None,
     order_intent_publisher: RecordingOrderIntentPublisher | None = None,
 ) -> StrategyContext:
     return StrategyContext(
         strategy_id=strategy_id,
         clock=FrozenClock(NOW),
         event_bus=event_bus or InProcessEventBus(),
-        signal_publisher=RecordingSignalPublisher(),
+        signal_publisher=signal_publisher or RecordingSignalPublisher(),
         order_intent_publisher=order_intent_publisher or RecordingOrderIntentPublisher(),
         services=services,
     )
@@ -211,6 +365,7 @@ def _snapshot_event(
     market_id: str = "mkt_midpoint_observer_test",
     best_bid: str = "0.41",
     best_ask: str = "0.43",
+    asks: tuple[dict[str, object], ...] | None = None,
     is_valid: bool = True,
 ) -> OrderBookSnapshotEvent:
     return OrderBookSnapshotEvent(
@@ -235,7 +390,9 @@ def _snapshot_event(
                 "exchange_occurred_at": NOW,
                 "received_at": NOW,
                 "bids": ({"price": best_bid, "quantity": "10", "order_count": 1},),
-                "asks": ({"price": best_ask, "quantity": "10", "order_count": 1},),
+                "asks": asks
+                if asks is not None
+                else ({"price": best_ask, "quantity": "10", "order_count": 1},),
                 "is_valid": is_valid,
                 "snapshot_reason": "baseline_test",
             }
