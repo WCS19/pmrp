@@ -19,15 +19,18 @@ from pmrp.events import (
 )
 from pmrp.schemas.enums import Environment, HealthStatus, Side, StrategyState
 from pmrp.schemas.events import (
+    MARKET_ORDER_BOOK_SNAPSHOT_EVENT_TYPE,
     STRATEGY_HEALTH_CHANGED_EVENT_TYPE,
     STRATEGY_STARTED_EVENT_TYPE,
     STRATEGY_STOPPED_EVENT_TYPE,
     EventEnvelope,
+    OrderBookSnapshotEvent,
     StrategyHealthChangedEvent,
     StrategyStartedEvent,
     StrategyStoppedEvent,
 )
 from pmrp.schemas.identifiers import ReplaySessionId, SignalId, SimulationSessionId, StrategyId
+from pmrp.schemas.market_data import OrderBookSnapshot
 from pmrp.schemas.orders import OrderIntent
 from pmrp.schemas.strategy import StrategyInstance
 from pmrp.strategies import (
@@ -86,6 +89,32 @@ async def test_strategy_runtime_processes_matching_events_sequentially() -> None
     await runtime.stop("test_complete")
     assert strategy.shutdown_reason == "test_complete"
     assert runtime.strategy_health(strategy.strategy_id).state is StrategyState.STOPPED
+
+
+async def test_strategy_runtime_dispatches_typed_canonical_event_wrappers() -> None:
+    event_bus = InProcessEventBus(deterministic=True)
+    runtime = StrategyRuntime(clock=FrozenClock(NOW), queue_size=4)
+    strategy = RecordingStrategy(
+        strategy_id=StrategyId("strat_runtime_typed_event_v1"),
+        subscribed_event_types=(MARKET_ORDER_BOOK_SNAPSHOT_EVENT_TYPE,),
+    )
+    runtime.register(strategy, _context(strategy.strategy_id, event_bus=event_bus))
+    snapshot_event = _snapshot_event("evt_strategy_runtime_typed_event")
+
+    await runtime.start()
+    await event_bus.publish(_event("evt_strategy_runtime_typed_ignored", "market.trade_observed"))
+    await event_bus.publish(snapshot_event)
+    await _wait_until(lambda: len(strategy.events) == 1)
+
+    health = runtime.strategy_health(strategy.strategy_id)
+    assert strategy.events == [snapshot_event]
+    assert health.state is StrategyState.RUNNING
+    assert health.health_status is HealthStatus.HEALTHY
+    assert health.processed_events == 1
+    assert health.ignored_events == 1
+    assert health.failed_events == 0
+
+    await runtime.stop("test_complete")
 
 
 async def test_strategy_runtime_isolates_event_processing_failure() -> None:
@@ -362,7 +391,7 @@ class RecordingStrategy:
         self._fail_initialize = fail_initialize
         self._fail_on_event_type = fail_on_event_type
         self.initialized_context: StrategyContext | None = None
-        self.events: list[EventEnvelope] = []
+        self.events: list[object] = []
         self.shutdown_reason: str | None = None
 
     @property
@@ -391,9 +420,10 @@ class RecordingStrategy:
         self.initialized_context = context
 
     async def on_event(self, event: object) -> None:
-        if not isinstance(event, EventEnvelope):
-            raise TypeError("event must be an EventEnvelope")
-        if event.event_type == self._fail_on_event_type:
+        event_type = _event_type(event)
+        if event_type is None:
+            raise TypeError("event must be a canonical event")
+        if event_type == self._fail_on_event_type:
             raise RuntimeError("raw_sensitive_payload")
         self.events.append(event)
 
@@ -509,6 +539,46 @@ def _event(event_id: str, event_type: str) -> EventEnvelope:
         producer="unit_test",
         correlation_id="corr_strategy_runtime_test",
     )
+
+
+def _snapshot_event(event_id: str) -> OrderBookSnapshotEvent:
+    return OrderBookSnapshotEvent(
+        envelope=EventEnvelope(
+            event_id=event_id,
+            event_type=MARKET_ORDER_BOOK_SNAPSHOT_EVENT_TYPE,
+            schema_version=1,
+            occurred_at=NOW,
+            received_at=NOW,
+            published_at=NOW,
+            producer="unit_test",
+            exchange="kalshi",
+            market_id="mkt_strategy_runtime_typed_event",
+            correlation_id="corr_strategy_runtime_test",
+        ),
+        snapshot=OrderBookSnapshot.model_validate(
+            {
+                "market_id": "mkt_strategy_runtime_typed_event",
+                "contract_id": "ctr_strategy_runtime_typed_event",
+                "exchange": "kalshi",
+                "sequence": 1,
+                "exchange_occurred_at": NOW,
+                "received_at": NOW,
+                "bids": ({"price": "0.41", "quantity": "10", "order_count": 1},),
+                "asks": ({"price": "0.43", "quantity": "10", "order_count": 1},),
+                "is_valid": True,
+                "snapshot_reason": "runtime_test",
+            }
+        ),
+    )
+
+
+def _event_type(event: object) -> str | None:
+    if isinstance(event, EventEnvelope):
+        return event.event_type
+    envelope = getattr(event, "envelope", None)
+    if isinstance(envelope, EventEnvelope):
+        return envelope.event_type
+    return None
 
 
 def _order_intent(strategy_id: StrategyId) -> OrderIntent:
