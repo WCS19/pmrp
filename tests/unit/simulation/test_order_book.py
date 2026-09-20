@@ -170,6 +170,22 @@ def test_order_book_projection_rejects_invalid_inputs() -> None:
 
     assert ambiguous_error.value.reason_code == "simulation_order_book_sequence_ambiguous"
 
+    with pytest.raises(SimulationInputError) as sequenced_delta_error:
+        apply_order_book_delta(
+            _snapshot(sequence=None),
+            _delta(sequence=2, previous_sequence=None),
+        )
+
+    assert sequenced_delta_error.value.reason_code == "simulation_order_book_sequence_ambiguous"
+
+    with pytest.raises(SimulationInputError) as unsequenced_delta_error:
+        apply_order_book_delta(
+            _snapshot(),
+            _delta(sequence=None, previous_sequence=None),
+        )
+
+    assert unsequenced_delta_error.value.reason_code == "simulation_order_book_sequence_ambiguous"
+
     with pytest.raises(SimulationInputError) as sequence_error:
         apply_order_book_delta(
             _snapshot(),
@@ -177,6 +193,22 @@ def test_order_book_projection_rejects_invalid_inputs() -> None:
         )
 
     assert sequence_error.value.reason_code == "simulation_order_book_sequence_mismatch"
+
+    with pytest.raises(SimulationInputError) as missing_previous_gap_error:
+        apply_order_book_delta(
+            _snapshot(),
+            _delta(sequence=3, previous_sequence=None),
+        )
+
+    assert missing_previous_gap_error.value.reason_code == "simulation_order_book_sequence_gap"
+
+    with pytest.raises(SimulationInputError) as previous_gap_error:
+        apply_order_book_delta(
+            _snapshot(),
+            _delta(sequence=3, previous_sequence=1),
+        )
+
+    assert previous_gap_error.value.reason_code == "simulation_order_book_sequence_gap"
 
     with pytest.raises(SimulationInputError) as stale_error:
         apply_order_book_delta(

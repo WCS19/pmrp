@@ -169,11 +169,25 @@ def _validate_sequence(
     snapshot: OrderBookSnapshot,
     delta: OrderBookDelta,
 ) -> None:
-    if delta.previous_sequence is not None and snapshot.sequence is None:
+    if snapshot.sequence is None and (
+        delta.previous_sequence is not None or delta.sequence is not None
+    ):
         raise SimulationInputError(
-            "Order-book delta previous sequence cannot be checked against unsequenced snapshot",
+            "Order-book delta sequence cannot be checked against unsequenced snapshot",
             reason_code="simulation_order_book_sequence_ambiguous",
-            context={"delta_previous_sequence": str(delta.previous_sequence)},
+            context={
+                "delta_previous_sequence": str(delta.previous_sequence),
+                "delta_sequence": str(delta.sequence),
+            },
+        )
+    if snapshot.sequence is not None and delta.sequence is None:
+        raise SimulationInputError(
+            "Order-book delta sequence is required for sequenced snapshots",
+            reason_code="simulation_order_book_sequence_ambiguous",
+            context={
+                "snapshot_sequence": str(snapshot.sequence),
+                "delta_previous_sequence": str(delta.previous_sequence),
+            },
         )
     if (
         snapshot.sequence is not None
@@ -201,17 +215,30 @@ def _validate_sequence(
                 "delta_sequence": str(delta.sequence),
             },
         )
+    if snapshot.sequence is not None and delta.sequence is not None:
+        expected_sequence = snapshot.sequence + 1
+        if delta.sequence != expected_sequence:
+            raise SimulationInputError(
+                "Order-book delta sequence must be the next snapshot sequence",
+                reason_code="simulation_order_book_sequence_gap",
+                context={
+                    "snapshot_sequence": str(snapshot.sequence),
+                    "delta_sequence": str(delta.sequence),
+                    "expected_sequence": str(expected_sequence),
+                },
+            )
     if (
         delta.previous_sequence is not None
         and delta.sequence is not None
-        and delta.sequence <= delta.previous_sequence
+        and delta.sequence != delta.previous_sequence + 1
     ):
         raise SimulationInputError(
-            "Order-book delta sequence must advance the previous sequence",
+            "Order-book delta sequence must be the next previous sequence",
             reason_code="simulation_order_book_sequence_invalid",
             context={
                 "delta_previous_sequence": str(delta.previous_sequence),
                 "delta_sequence": str(delta.sequence),
+                "expected_sequence": str(delta.previous_sequence + 1),
             },
         )
 
