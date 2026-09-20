@@ -26,6 +26,16 @@ from pmrp.simulation.latency_models import (
     FixedLatencyModel,
     LatencyModel,
 )
+from pmrp.simulation.order_book import (
+    ORDER_BOOK_PROJECTION_MODEL_NAME,
+    ORDER_BOOK_PROJECTION_SNAPSHOT_REASON,
+    apply_order_book_delta,
+    apply_order_book_deltas,
+    best_ask,
+    best_bid,
+    is_crossed,
+    spread,
+)
 from pmrp.simulation.queue_models import (
     IMMEDIATE_TOUCH_QUEUE_MODEL_NAME,
     VOLUME_AHEAD_QUEUE_MODEL_NAME,
@@ -75,6 +85,8 @@ __all__ = [
     "IMMEDIATE_TOUCH_QUEUE_MODEL_NAME",
     "NO_SETTLEMENT_MODEL_NAME",
     "NO_SLIPPAGE_MODEL_NAME",
+    "ORDER_BOOK_PROJECTION_MODEL_NAME",
+    "ORDER_BOOK_PROJECTION_SNAPSHOT_REASON",
     "SIMULATION_RESULT_CHECKSUM_VERSION",
     "TOUCH_FILL_MODEL_NAME",
     "TRADE_THROUGH_FILL_MODEL_NAME",
@@ -113,5 +125,11 @@ __all__ = [
     "TouchFillModel",
     "TradeThroughFillModel",
     "VolumeAheadQueueModel",
+    "apply_order_book_delta",
+    "apply_order_book_deltas",
+    "best_ask",
+    "best_bid",
     "calculate_simulation_result_checksum",
+    "is_crossed",
+    "spread",
 ]
