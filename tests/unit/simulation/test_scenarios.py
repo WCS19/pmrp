@@ -13,6 +13,8 @@ from pmrp.schemas.orders import CancelOrderRequest, Fill, OrderIntent
 from pmrp.schemas.serialization import canonical_sha256
 from pmrp.schemas.simulation import SimulationConfiguration
 from pmrp.simulation import (
+    SIMULATION_CANCEL_BEFORE_ACTIVATION,
+    SIMULATION_CANCEL_FILL_RACE_LOST,
     SIMULATION_SCENARIO_HASH_VERSION,
     SIMULATION_SCENARIO_RUNNER_MODEL_NAME,
     DeterministicScenarioRunner,
@@ -436,7 +438,77 @@ def test_deterministic_scenario_runner_records_rejections_without_fill_outputs()
     assert run.result.source_type_counts[SimulationSourceType.SIMULATED_OUTPUT] == 2
 
 
-def test_deterministic_scenario_runner_rejects_unsupported_cancel_actions() -> None:
+def test_deterministic_scenario_runner_cancels_before_activation() -> None:
+    scenario = _scenario(
+        scenario_id="SIM-005",
+        name="cancel before activation",
+        order_actions=(
+            ScheduledOrderAction(
+                sequence=1,
+                scheduled_at=NOW,
+                action=_intent(quantity="10", limit_price="0.43"),
+            ),
+            ScheduledOrderAction(
+                sequence=2,
+                scheduled_at=NOW + timedelta(milliseconds=50),
+                action=_cancel_request(),
+            ),
+        ),
+    )
+
+    run = DeterministicScenarioRunner.from_configuration(scenario.configuration).run(scenario)
+    order_result = run.order_results[0]
+    metrics = {metric.name: metric.value for metric in run.result.metrics}
+
+    assert order_result.admission.accepted
+    assert order_result.cancel_result is not None
+    assert order_result.cancel_result.outcome_code == SIMULATION_CANCEL_BEFORE_ACTIVATION
+    assert order_result.activation_book is None
+    assert order_result.fill_estimate is None
+    assert order_result.fee_estimates == ()
+    assert "cancel_result" in order_result.canonical_payload()
+    assert metrics["cancel_action_count"] == Decimal("1")
+    assert metrics["canceled_before_activation_count"] == Decimal("1")
+    assert metrics["cancel_fill_race_count"] == Decimal("0")
+    assert metrics["filled_order_count"] == Decimal("0")
+    assert metrics["filled_quantity"] == Decimal("0")
+
+
+def test_deterministic_scenario_runner_records_fill_during_cancel_race() -> None:
+    scenario = _scenario(
+        scenario_id="SIM-006",
+        name="fill during cancel race",
+        order_actions=(
+            ScheduledOrderAction(
+                sequence=1,
+                scheduled_at=NOW,
+                action=_intent(quantity="10", limit_price="0.43"),
+            ),
+            ScheduledOrderAction(
+                sequence=2,
+                scheduled_at=NOW + timedelta(milliseconds=200),
+                action=_cancel_request(),
+            ),
+        ),
+    )
+
+    run = DeterministicScenarioRunner.from_configuration(scenario.configuration).run(scenario)
+    order_result = run.order_results[0]
+    metrics = {metric.name: metric.value for metric in run.result.metrics}
+
+    assert order_result.cancel_result is not None
+    assert order_result.cancel_result.outcome_code == SIMULATION_CANCEL_FILL_RACE_LOST
+    assert order_result.activation_book is not None
+    assert order_result.fill_estimate is not None
+    assert order_result.fill_estimate.filled_quantity == Decimal("10")
+    assert len(order_result.fee_estimates) == 1
+    assert metrics["cancel_action_count"] == Decimal("1")
+    assert metrics["cancel_fill_race_count"] == Decimal("1")
+    assert metrics["canceled_before_activation_count"] == Decimal("0")
+    assert metrics["filled_order_count"] == Decimal("1")
+
+
+def test_deterministic_scenario_runner_rejects_unmatched_cancel_actions() -> None:
     scenario = _scenario(
         order_actions=(
             ScheduledOrderAction(
@@ -450,7 +522,7 @@ def test_deterministic_scenario_runner_rejects_unsupported_cancel_actions() -> N
     with pytest.raises(SimulationConfigurationError) as error:
         DeterministicScenarioRunner.from_configuration(scenario.configuration).run(scenario)
 
-    assert error.value.reason_code == "simulation_scenario_cancel_unsupported"
+    assert error.value.reason_code == "simulation_scenario_cancel_unmatched"
 
 
 def test_deterministic_scenario_runner_rejects_unsupported_configuration() -> None:
