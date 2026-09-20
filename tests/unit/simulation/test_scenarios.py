@@ -7,13 +7,15 @@ from decimal import Decimal
 
 import pytest
 
-from pmrp.schemas.enums import LiquidityRole, OrderType, Side, TimeInForce
+from pmrp.schemas.enums import LiquidityRole, MarketStatus, OrderType, Side, TimeInForce
 from pmrp.schemas.market_data import OrderBookDelta, OrderBookDeltaAction, OrderBookSnapshot, Trade
 from pmrp.schemas.orders import CancelOrderRequest, Fill, OrderIntent
 from pmrp.schemas.serialization import canonical_sha256
 from pmrp.schemas.simulation import SimulationConfiguration
 from pmrp.simulation import (
     SIMULATION_SCENARIO_HASH_VERSION,
+    SIMULATION_SCENARIO_RUNNER_MODEL_NAME,
+    DeterministicScenarioRunner,
     ExpectedSimulationFill,
     ScheduledMarketEvent,
     ScheduledOrderAction,
@@ -281,6 +283,137 @@ def test_simulation_scenario_metadata_is_immutable() -> None:
     assert scenario.scenario_hash == original_hash
 
 
+def test_deterministic_scenario_runner_applies_latency_before_fill() -> None:
+    scenario = _scenario(
+        scenario_id="SIM-007",
+        name="stale quote after latency",
+        market_events=(
+            ScheduledMarketEvent(
+                sequence=1,
+                scheduled_at=NOW + timedelta(milliseconds=100),
+                event=_delta(
+                    sequence=2,
+                    previous_sequence=1,
+                    side=Side.SELL,
+                    price="0.43",
+                    quantity="4",
+                ),
+            ),
+        ),
+        order_actions=(
+            ScheduledOrderAction(
+                sequence=1,
+                scheduled_at=NOW,
+                action=_intent(quantity="10", limit_price="0.43"),
+            ),
+        ),
+    )
+
+    run = DeterministicScenarioRunner.from_configuration(scenario.configuration).run(scenario)
+    repeated = DeterministicScenarioRunner.from_configuration(scenario.configuration).run(scenario)
+    order_result = run.order_results[0]
+    metrics = {metric.name: metric.value for metric in run.result.metrics}
+
+    assert SIMULATION_SCENARIO_RUNNER_MODEL_NAME == "simulation_scenario_runner_v1"
+    assert run.result_checksum == repeated.result_checksum
+    assert run.run_hash == repeated.run_hash
+    assert order_result.admission.accepted
+    assert order_result.admission.activates_at == NOW + timedelta(milliseconds=125)
+    assert order_result.activation_book is not None
+    assert order_result.activation_book.sequence == 2
+    assert order_result.fill_estimate is not None
+    assert order_result.fill_estimate.filled_quantity == Decimal("4")
+    assert order_result.fill_estimate.remaining_quantity == Decimal("6")
+    assert order_result.fill_estimate.is_partial
+    assert run.final_book == order_result.activation_book
+    assert metrics["accepted_order_count"] == Decimal("1")
+    assert metrics["filled_order_count"] == Decimal("1")
+    assert metrics["partial_fill_count"] == Decimal("1")
+    assert metrics["filled_quantity"] == Decimal("4")
+    assert run.result.source_type_counts[SimulationSourceType.INFERRED_BEHAVIOR] == 1
+    assert run.result.source_type_counts[SimulationSourceType.SIMULATED_OUTPUT] == 3
+
+
+def test_deterministic_scenario_runner_records_passive_no_fill() -> None:
+    scenario = _scenario(
+        scenario_id="SIM-002",
+        name="passive order no fill",
+        order_actions=(
+            ScheduledOrderAction(
+                sequence=1,
+                scheduled_at=NOW,
+                action=_intent(limit_price="0.42"),
+            ),
+        ),
+    )
+
+    run = DeterministicScenarioRunner.from_configuration(scenario.configuration).run(scenario)
+    fill_estimate = run.order_results[0].fill_estimate
+    metrics = {metric.name: metric.value for metric in run.result.metrics}
+
+    assert fill_estimate is not None
+    assert not fill_estimate.has_fill
+    assert fill_estimate.average_fill_price is None
+    assert fill_estimate.reason_code == "simulation_touch_no_fill"
+    assert metrics["accepted_order_count"] == Decimal("1")
+    assert metrics["filled_order_count"] == Decimal("0")
+    assert metrics["filled_quantity"] == Decimal("0")
+
+
+def test_deterministic_scenario_runner_records_rejections_without_fill_outputs() -> None:
+    scenario = _scenario(
+        scenario_id="SIM-008",
+        name="market closes before activation",
+        order_actions=(
+            ScheduledOrderAction(
+                sequence=1,
+                scheduled_at=NOW,
+                action=_intent(),
+            ),
+        ),
+    )
+
+    run = DeterministicScenarioRunner.from_configuration(
+        scenario.configuration,
+        market_status=MarketStatus.CLOSED,
+    ).run(scenario)
+    order_result = run.order_results[0]
+    metrics = {metric.name: metric.value for metric in run.result.metrics}
+
+    assert order_result.admission.rejected
+    assert order_result.activation_book is None
+    assert order_result.fill_estimate is None
+    assert metrics["accepted_order_count"] == Decimal("0")
+    assert metrics["rejected_order_count"] == Decimal("1")
+    assert run.result.source_type_counts[SimulationSourceType.SIMULATED_OUTPUT] == 2
+
+
+def test_deterministic_scenario_runner_rejects_unsupported_cancel_actions() -> None:
+    scenario = _scenario(
+        order_actions=(
+            ScheduledOrderAction(
+                sequence=1,
+                scheduled_at=NOW,
+                action=_cancel_request(),
+            ),
+        ),
+    )
+
+    with pytest.raises(SimulationConfigurationError) as error:
+        DeterministicScenarioRunner.from_configuration(scenario.configuration).run(scenario)
+
+    assert error.value.reason_code == "simulation_scenario_cancel_unsupported"
+
+
+def test_deterministic_scenario_runner_rejects_unsupported_configuration() -> None:
+    scenario = _scenario(configuration=_configuration(fill_model="unsupported_fill_v1"))
+
+    with pytest.raises(SimulationConfigurationError) as error:
+        DeterministicScenarioRunner.from_configuration(scenario.configuration).run(scenario)
+
+    assert error.value.reason_code == "simulation_scenario_runner_fill_model_unsupported"
+
+
 def _scenario(
     *,
     scenario_id: str = "SIM-006",
@@ -367,6 +500,10 @@ def _delta(
     exchange: str = "kalshi",
     sequence: int | None = 2,
     previous_sequence: int | None = 1,
+    side: Side = Side.BUY,
+    price: str = "0.41",
+    quantity: str = "8",
+    action: OrderBookDeltaAction = OrderBookDeltaAction.UPSERT,
 ) -> OrderBookDelta:
     return OrderBookDelta.model_validate(
         {
@@ -379,10 +516,10 @@ def _delta(
             "received_at": NOW + timedelta(seconds=1),
             "changes": (
                 {
-                    "side": Side.BUY,
-                    "price": "0.41",
-                    "quantity": "8",
-                    "action": OrderBookDeltaAction.UPSERT,
+                    "side": side,
+                    "price": price,
+                    "quantity": quantity,
+                    "action": action,
                 },
             ),
         }
@@ -417,19 +554,23 @@ def _trade(
 
 def _intent(
     *,
+    intent_id: str = "intent_scenario_001",
     market_id: str = "mkt_scenario_market",
     contract_id: str = "ctr_scenario_contract",
+    side: Side = Side.BUY,
+    quantity: str | Decimal = "10",
+    limit_price: str | Decimal | None = "0.43",
 ) -> OrderIntent:
     return OrderIntent.model_validate(
         {
-            "intent_id": "intent_scenario_001",
+            "intent_id": intent_id,
             "strategy_id": "strat_scenario_v1",
             "market_id": market_id,
             "contract_id": contract_id,
             "outcome_id": "out_yes",
-            "side": Side.BUY,
-            "quantity": "10",
-            "limit_price": "0.43",
+            "side": side,
+            "quantity": quantity,
+            "limit_price": limit_price,
             "order_type": OrderType.LIMIT,
             "time_in_force": TimeInForce.GTC,
             "post_only": False,
@@ -439,7 +580,7 @@ def _intent(
             "expires_at": NOW + timedelta(seconds=5),
             "signal_ids": (),
             "correlation_id": "corr_scenario_001",
-            "idempotency_key": "idem-scenario-intent-001",
+            "idempotency_key": f"idem-{intent_id}",
         }
     )
 

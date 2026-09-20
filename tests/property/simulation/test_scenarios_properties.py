@@ -14,6 +14,7 @@ from pmrp.schemas.market_data import OrderBookDelta, OrderBookDeltaAction, Order
 from pmrp.schemas.orders import Fill, OrderIntent
 from pmrp.schemas.simulation import SimulationConfiguration
 from pmrp.simulation import (
+    DeterministicScenarioRunner,
     ExpectedSimulationFill,
     ScheduledMarketEvent,
     ScheduledOrderAction,
@@ -131,6 +132,28 @@ def test_simulation_scenario_hash_is_stable_across_input_order() -> None:
     assert first.scenario_hash == second.scenario_hash
 
 
+@given(quantity=_QUANTITY)
+def test_scenario_runner_result_checksum_is_deterministic(quantity: Decimal) -> None:
+    scenario = _scenario(
+        order_actions=(
+            ScheduledOrderAction(
+                sequence=1,
+                scheduled_at=NOW,
+                action=_intent(quantity=quantity),
+            ),
+        )
+    )
+
+    first = DeterministicScenarioRunner.from_configuration(scenario.configuration).run(scenario)
+    second = DeterministicScenarioRunner.from_configuration(scenario.configuration).run(scenario)
+    fill_estimate = first.order_results[0].fill_estimate
+
+    assert first.result_checksum == second.result_checksum
+    assert first.run_hash == second.run_hash
+    assert fill_estimate is not None
+    assert fill_estimate.filled_quantity == min(quantity, Decimal("12"))
+
+
 def _scenario(
     *,
     configuration: SimulationConfiguration | None = None,
@@ -210,7 +233,11 @@ def _delta(*, sequence: int, previous_sequence: int) -> OrderBookDelta:
     )
 
 
-def _intent(*, intent_id: str = "intent_scenario_property_001") -> OrderIntent:
+def _intent(
+    *,
+    intent_id: str = "intent_scenario_property_001",
+    quantity: Decimal | str = "10",
+) -> OrderIntent:
     return OrderIntent.model_validate(
         {
             "intent_id": intent_id,
@@ -219,7 +246,7 @@ def _intent(*, intent_id: str = "intent_scenario_property_001") -> OrderIntent:
             "contract_id": "ctr_scenario_property",
             "outcome_id": "out_yes",
             "side": Side.BUY,
-            "quantity": "10",
+            "quantity": quantity,
             "limit_price": "0.43",
             "order_type": OrderType.LIMIT,
             "time_in_force": TimeInForce.GTC,

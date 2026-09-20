@@ -6,22 +6,65 @@ from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
+from decimal import Decimal
 from types import MappingProxyType
+from typing import Protocol, runtime_checkable
 
+from pmrp.schemas.enums import MarketStatus
 from pmrp.schemas.market_data import OrderBookDelta, OrderBookSnapshot, Trade
+from pmrp.schemas.numeric import parse_decimal
 from pmrp.schemas.orders import CancelOrderRequest, Fill, OrderIntent
 from pmrp.schemas.serialization import canonical_sha256, to_canonical_data
 from pmrp.schemas.simulation import SimulationConfiguration
 from pmrp.schemas.time import parse_utc_datetime
 from pmrp.simulation.errors import SimulationConfigurationError
-from pmrp.simulation.results import SimulationArtifact, SimulationSourceType
+from pmrp.simulation.exchange import (
+    DeterministicSimulatedExchange,
+    SimulatedExchange,
+    SimulatedExchangeOrderAdmission,
+)
+from pmrp.simulation.fill_models import (
+    TOUCH_FILL_MODEL_NAME,
+    TRADE_THROUGH_FILL_MODEL_NAME,
+    FillEstimate,
+    FillModel,
+    SimulatedFillComponent,
+    TouchFillModel,
+    TradeThroughFillModel,
+)
+from pmrp.simulation.latency_models import (
+    FIXED_LATENCY_MODEL_NAME,
+    FixedLatencyModel,
+)
+from pmrp.simulation.order_book import apply_order_book_delta
+from pmrp.simulation.rejection_models import (
+    BOUNDED_REJECTION_MODEL_NAME,
+    BoundedRejectionModel,
+)
+from pmrp.simulation.results import (
+    SimulationArtifact,
+    SimulationMetric,
+    SimulationResult,
+    SimulationSourceType,
+)
 
 SIMULATION_SCENARIO_HASH_VERSION = "simulation_scenario_hash_v1"
+SIMULATION_SCENARIO_RUNNER_MODEL_NAME = "simulation_scenario_runner_v1"
 
 _MAX_TEXT_LENGTH = 128
+_ZERO = Decimal("0")
 
 type ScenarioMarketEventPayload = OrderBookSnapshot | OrderBookDelta | Trade
 type ScenarioOrderActionPayload = OrderIntent | CancelOrderRequest
+
+
+@runtime_checkable
+class ScenarioRunner(Protocol):
+    """Pure deterministic simulation scenario runner interface."""
+
+    def run(self, scenario: SimulationScenario) -> SimulationScenarioRun:
+        """Run a scenario without external exchange or persistence side effects."""
+        ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -248,6 +291,265 @@ class SimulationScenario:
             payload["expected_final_book"] = to_canonical_data(self.expected_final_book)
             payload["expected_final_book_source_type"] = self.expected_final_book_source_type
         return payload
+
+
+@dataclass(frozen=True, slots=True)
+class SimulatedScenarioOrderResult:
+    """One deterministic order-intent result produced by a scenario run."""
+
+    sequence: int
+    action: ScheduledOrderAction
+    admission: SimulatedExchangeOrderAdmission
+    activation_book: OrderBookSnapshot | None
+    fill_estimate: FillEstimate | None
+    source_type: SimulationSourceType = SimulationSourceType.SIMULATED_OUTPUT
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "sequence", _validate_sequence(self.sequence))
+        if not isinstance(self.action, ScheduledOrderAction):
+            msg = "action must be a ScheduledOrderAction"
+            raise TypeError(msg)
+        if not isinstance(self.action.action, OrderIntent):
+            raise SimulationConfigurationError(
+                "Scenario order results require an order intent action",
+                reason_code="simulation_scenario_order_result_action_invalid",
+                context={"action_type": self.action.action_type},
+            )
+        if not isinstance(self.admission, SimulatedExchangeOrderAdmission):
+            msg = "admission must be a SimulatedExchangeOrderAdmission"
+            raise TypeError(msg)
+        if self.activation_book is not None:
+            _validate_initial_book(self.activation_book)
+        if self.fill_estimate is not None and not isinstance(self.fill_estimate, FillEstimate):
+            msg = "fill_estimate must be a FillEstimate"
+            raise TypeError(msg)
+        if self.admission.rejected:
+            if self.activation_book is not None or self.fill_estimate is not None:
+                raise SimulationConfigurationError(
+                    "Rejected scenario orders must not include activation or fill outputs",
+                    reason_code="simulation_scenario_rejected_order_output_invalid",
+                )
+        elif self.activation_book is None or self.fill_estimate is None:
+            raise SimulationConfigurationError(
+                "Accepted scenario orders require activation book and fill estimate outputs",
+                reason_code="simulation_scenario_accepted_order_output_missing",
+            )
+        if self.source_type is not SimulationSourceType.SIMULATED_OUTPUT:
+            raise SimulationConfigurationError(
+                "Scenario order results must be classified as simulated output",
+                reason_code="simulation_scenario_order_result_source_invalid",
+                context={"source_type": str(self.source_type)},
+            )
+
+    @property
+    def order_result_hash(self) -> str:
+        """Return the deterministic hash of this order result."""
+
+        return canonical_sha256(self.canonical_payload())
+
+    def canonical_payload(self) -> Mapping[str, object]:
+        """Return stable JSON-compatible simulated order-result data."""
+
+        payload: dict[str, object] = {
+            "action": self.action.canonical_payload(),
+            "admission": self.admission.canonical_payload(),
+            "runner_model": SIMULATION_SCENARIO_RUNNER_MODEL_NAME,
+            "sequence": self.sequence,
+            "source_type": self.source_type,
+        }
+        if self.activation_book is not None:
+            payload["activation_book_hash"] = canonical_sha256(self.activation_book)
+            payload["activation_book_sequence"] = self.activation_book.sequence
+        if self.fill_estimate is not None:
+            payload["fill_estimate"] = _fill_estimate_payload(self.fill_estimate)
+        return payload
+
+
+@dataclass(frozen=True, slots=True)
+class SimulationScenarioRun:
+    """Deterministic output of a complete simulation scenario run."""
+
+    scenario: SimulationScenario
+    final_book: OrderBookSnapshot
+    order_results: tuple[SimulatedScenarioOrderResult, ...]
+    result: SimulationResult
+    source_type: SimulationSourceType = SimulationSourceType.SIMULATED_OUTPUT
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.scenario, SimulationScenario):
+            msg = "scenario must be a SimulationScenario"
+            raise TypeError(msg)
+        _validate_expected_final_book(self.final_book, initial_book=self.scenario.initial_book)
+        order_results = _normalize_order_results(self.order_results)
+        expected_result = _build_scenario_run_result(
+            scenario=self.scenario,
+            final_book=self.final_book,
+            order_results=order_results,
+        )
+        if self.result != expected_result:
+            raise SimulationConfigurationError(
+                "Scenario run result must match deterministic runner output",
+                reason_code="simulation_scenario_run_result_mismatch",
+                context={
+                    "expected_checksum": expected_result.result_checksum,
+                    "actual_checksum": self.result.result_checksum,
+                },
+            )
+        if self.source_type is not SimulationSourceType.SIMULATED_OUTPUT:
+            raise SimulationConfigurationError(
+                "Scenario runs must be classified as simulated output",
+                reason_code="simulation_scenario_run_source_invalid",
+                context={"source_type": str(self.source_type)},
+            )
+        object.__setattr__(self, "order_results", order_results)
+
+    @property
+    def run_hash(self) -> str:
+        """Return the deterministic hash of this scenario run."""
+
+        return canonical_sha256(self.canonical_payload())
+
+    @property
+    def result_checksum(self) -> str:
+        """Return the deterministic simulation result checksum."""
+
+        return self.result.result_checksum
+
+    def canonical_payload(self) -> Mapping[str, object]:
+        """Return stable JSON-compatible scenario-run data."""
+
+        return {
+            "final_book": to_canonical_data(self.final_book),
+            "order_results": [result.canonical_payload() for result in self.order_results],
+            "result": self.result.canonical_payload(),
+            "runner_model": SIMULATION_SCENARIO_RUNNER_MODEL_NAME,
+            "scenario_hash": self.scenario.scenario_hash,
+            "scenario_id": self.scenario.scenario_id,
+            "source_type": self.source_type,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class DeterministicScenarioRunner:
+    """Pure deterministic scenario runner composed from simulation models."""
+
+    exchange: SimulatedExchange
+    fill_model: FillModel
+    market_status: MarketStatus = MarketStatus.OPEN
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.exchange, SimulatedExchange):
+            msg = "exchange must implement SimulatedExchange"
+            raise TypeError(msg)
+        if not isinstance(self.fill_model, FillModel):
+            msg = "fill_model must implement FillModel"
+            raise TypeError(msg)
+        if not isinstance(self.market_status, MarketStatus):
+            raise SimulationConfigurationError(
+                "Scenario runner market_status must be a canonical MarketStatus",
+                reason_code="simulation_scenario_runner_market_status_invalid",
+            )
+
+    @classmethod
+    def from_configuration(
+        cls,
+        configuration: SimulationConfiguration,
+        *,
+        market_status: MarketStatus = MarketStatus.OPEN,
+    ) -> DeterministicScenarioRunner:
+        """Build the deterministic default runner supported by M10 foundations."""
+
+        _validate_runner_configuration(configuration)
+        fill_model: FillModel
+        if configuration.fill_model == TOUCH_FILL_MODEL_NAME:
+            fill_model = TouchFillModel()
+        else:
+            fill_model = TradeThroughFillModel()
+        return cls(
+            exchange=DeterministicSimulatedExchange(
+                rejection_model=BoundedRejectionModel(),
+                latency_model=FixedLatencyModel.from_configuration(configuration),
+            ),
+            fill_model=fill_model,
+            market_status=market_status,
+        )
+
+    def run(self, scenario: SimulationScenario) -> SimulationScenarioRun:
+        """Execute one scenario without live exchange, storage, or clock side effects."""
+
+        scenario = _validate_scenario(scenario)
+        _validate_runner_configuration(scenario.configuration)
+        final_book = _project_book_until(scenario=scenario, through=None)
+        order_results = tuple(
+            self._run_order_action(scenario=scenario, action=action, sequence=index)
+            for index, action in enumerate(scenario.order_actions)
+        )
+        result = _build_scenario_run_result(
+            scenario=scenario,
+            final_book=final_book,
+            order_results=order_results,
+        )
+        return SimulationScenarioRun(
+            scenario=scenario,
+            final_book=final_book,
+            order_results=order_results,
+            result=result,
+        )
+
+    def _run_order_action(
+        self,
+        *,
+        scenario: SimulationScenario,
+        action: ScheduledOrderAction,
+        sequence: int,
+    ) -> SimulatedScenarioOrderResult:
+        if not isinstance(action.action, OrderIntent):
+            raise SimulationConfigurationError(
+                "Scenario runner currently supports order intent actions only",
+                reason_code="simulation_scenario_cancel_unsupported",
+                context={"action_type": action.action_type},
+            )
+        intent = action.action
+        admission = self.exchange.admit_order(
+            intent=intent,
+            market_status=self.market_status,
+            submitted_at=action.scheduled_at,
+        )
+        if admission.rejected:
+            return SimulatedScenarioOrderResult(
+                sequence=sequence,
+                action=action,
+                admission=admission,
+                activation_book=None,
+                fill_estimate=None,
+            )
+        if admission.activates_at is None:
+            raise SimulationConfigurationError(
+                "Accepted scenario order is missing activation time",
+                reason_code="simulation_scenario_activation_missing",
+            )
+        if intent.limit_price is None:
+            raise SimulationConfigurationError(
+                "Accepted scenario order requires limit_price for deterministic fill",
+                reason_code="simulation_scenario_fill_price_missing",
+            )
+        activation_book = _project_book_until(
+            scenario=scenario,
+            through=admission.activates_at,
+        )
+        fill_estimate = self.fill_model.evaluate(
+            snapshot=activation_book,
+            side=intent.side,
+            limit_price=intent.limit_price,
+            quantity=intent.quantity,
+        )
+        return SimulatedScenarioOrderResult(
+            sequence=sequence,
+            action=action,
+            admission=admission,
+            activation_book=activation_book,
+            fill_estimate=fill_estimate,
+        )
 
 
 def _market_event_type(event: ScenarioMarketEventPayload) -> str:
@@ -524,3 +826,235 @@ def _validate_trade_lineage(trade: Trade, *, initial_book: OrderBookSnapshot) ->
             reason_code="simulation_scenario_market_event_mismatch",
             context={"trade_id": trade.trade_id},
         )
+
+
+def _validate_scenario(scenario: SimulationScenario) -> SimulationScenario:
+    if not isinstance(scenario, SimulationScenario):
+        raise SimulationConfigurationError(
+            "Scenario runner requires a SimulationScenario",
+            reason_code="simulation_scenario_runner_scenario_invalid",
+        )
+    return scenario
+
+
+def _validate_runner_configuration(configuration: SimulationConfiguration) -> None:
+    if not isinstance(configuration, SimulationConfiguration):
+        raise SimulationConfigurationError(
+            "Scenario runner requires a canonical SimulationConfiguration",
+            reason_code="simulation_scenario_runner_configuration_invalid",
+        )
+    if configuration.fill_model not in {
+        TOUCH_FILL_MODEL_NAME,
+        TRADE_THROUGH_FILL_MODEL_NAME,
+    }:
+        raise SimulationConfigurationError(
+            "Scenario runner does not support the configured fill model",
+            reason_code="simulation_scenario_runner_fill_model_unsupported",
+            context={"fill_model": configuration.fill_model},
+        )
+    if configuration.latency_model != FIXED_LATENCY_MODEL_NAME:
+        raise SimulationConfigurationError(
+            "Scenario runner currently supports fixed latency only",
+            reason_code="simulation_scenario_runner_latency_model_unsupported",
+            context={"latency_model": configuration.latency_model},
+        )
+    if configuration.rejection_model != BOUNDED_REJECTION_MODEL_NAME:
+        raise SimulationConfigurationError(
+            "Scenario runner currently supports bounded rejection only",
+            reason_code="simulation_scenario_runner_rejection_model_unsupported",
+            context={"rejection_model": configuration.rejection_model},
+        )
+
+
+def _project_book_until(
+    *,
+    scenario: SimulationScenario,
+    through: datetime | None,
+) -> OrderBookSnapshot:
+    projected = scenario.initial_book
+    through = parse_utc_datetime(through) if through is not None else None
+    for event in scenario.market_events:
+        if through is not None and event.scheduled_at > through:
+            continue
+        projected = _apply_scheduled_market_event(projected, event)
+    return projected
+
+
+def _apply_scheduled_market_event(
+    snapshot: OrderBookSnapshot,
+    event: ScheduledMarketEvent,
+) -> OrderBookSnapshot:
+    if isinstance(event.event, OrderBookSnapshot):
+        return event.event
+    if isinstance(event.event, OrderBookDelta):
+        return apply_order_book_delta(snapshot, event.event)
+    return snapshot
+
+
+def _normalize_order_results(
+    order_results: tuple[SimulatedScenarioOrderResult, ...],
+) -> tuple[SimulatedScenarioOrderResult, ...]:
+    if not isinstance(order_results, tuple):
+        msg = "order_results must be a tuple"
+        raise TypeError(msg)
+    if any(not isinstance(result, SimulatedScenarioOrderResult) for result in order_results):
+        msg = "order_results must contain only SimulatedScenarioOrderResult values"
+        raise TypeError(msg)
+    sorted_results = tuple(sorted(order_results, key=lambda result: result.sequence))
+    sequences = [result.sequence for result in sorted_results]
+    if len(set(sequences)) != len(sequences):
+        raise SimulationConfigurationError(
+            "Scenario order results must have unique sequences",
+            reason_code="simulation_scenario_order_result_sequence_duplicate",
+        )
+    return sorted_results
+
+
+def _build_scenario_run_result(
+    *,
+    scenario: SimulationScenario,
+    final_book: OrderBookSnapshot,
+    order_results: tuple[SimulatedScenarioOrderResult, ...],
+) -> SimulationResult:
+    order_results = _normalize_order_results(order_results)
+    return SimulationResult.build(
+        configuration=scenario.configuration,
+        artifacts=_scenario_run_artifacts(
+            scenario=scenario,
+            final_book=final_book,
+            order_results=order_results,
+        ),
+        metrics=_scenario_run_metrics(
+            scenario=scenario,
+            order_results=order_results,
+        ),
+    )
+
+
+def _scenario_run_artifacts(
+    *,
+    scenario: SimulationScenario,
+    final_book: OrderBookSnapshot,
+    order_results: tuple[SimulatedScenarioOrderResult, ...],
+) -> tuple[SimulationArtifact, ...]:
+    artifacts: list[SimulationArtifact] = [
+        scenario.as_result_artifact(sequence=0),
+        SimulationArtifact(
+            sequence=1,
+            artifact_type="simulation_final_book",
+            artifact_id=f"{scenario.scenario_id}:final_book",
+            artifact_hash=canonical_sha256(final_book),
+            source_type=SimulationSourceType.SIMULATED_OUTPUT,
+        ),
+    ]
+    for index, order_result in enumerate(order_results):
+        artifacts.append(
+            SimulationArtifact(
+                sequence=10 + index * 2,
+                artifact_type="simulation_order_result",
+                artifact_id=f"{scenario.scenario_id}:order:{order_result.sequence}",
+                artifact_hash=order_result.order_result_hash,
+                source_type=SimulationSourceType.SIMULATED_OUTPUT,
+            )
+        )
+        if order_result.fill_estimate is not None:
+            artifacts.append(
+                SimulationArtifact(
+                    sequence=11 + index * 2,
+                    artifact_type="simulation_fill_estimate",
+                    artifact_id=f"{scenario.scenario_id}:fill:{order_result.sequence}",
+                    artifact_hash=canonical_sha256(
+                        _fill_estimate_payload(order_result.fill_estimate)
+                    ),
+                    source_type=SimulationSourceType.SIMULATED_OUTPUT,
+                )
+            )
+    return tuple(artifacts)
+
+
+def _scenario_run_metrics(
+    *,
+    scenario: SimulationScenario,
+    order_results: tuple[SimulatedScenarioOrderResult, ...],
+) -> tuple[SimulationMetric, ...]:
+    accepted_count = sum(1 for result in order_results if result.admission.accepted)
+    rejected_count = sum(1 for result in order_results if result.admission.rejected)
+    filled_order_count = sum(
+        1
+        for result in order_results
+        if result.fill_estimate is not None and result.fill_estimate.has_fill
+    )
+    partial_fill_count = sum(
+        1
+        for result in order_results
+        if result.fill_estimate is not None and result.fill_estimate.is_partial
+    )
+    filled_quantity = sum(
+        (
+            result.fill_estimate.filled_quantity
+            for result in order_results
+            if result.fill_estimate is not None
+        ),
+        _ZERO,
+    )
+    return (
+        SimulationMetric(
+            name="accepted_order_count",
+            value=Decimal(accepted_count),
+            unit="count",
+        ),
+        SimulationMetric(
+            name="filled_order_count",
+            value=Decimal(filled_order_count),
+            unit="count",
+        ),
+        SimulationMetric(
+            name="filled_quantity",
+            value=parse_decimal(filled_quantity, field_name="filled_quantity metric"),
+            unit="contracts",
+        ),
+        SimulationMetric(
+            name="market_event_count",
+            value=Decimal(len(scenario.market_events)),
+            unit="count",
+        ),
+        SimulationMetric(
+            name="order_action_count",
+            value=Decimal(len(scenario.order_actions)),
+            unit="count",
+        ),
+        SimulationMetric(
+            name="partial_fill_count",
+            value=Decimal(partial_fill_count),
+            unit="count",
+        ),
+        SimulationMetric(
+            name="rejected_order_count",
+            value=Decimal(rejected_count),
+            unit="count",
+        ),
+    )
+
+
+def _fill_estimate_payload(fill_estimate: FillEstimate) -> Mapping[str, object]:
+    return {
+        "average_fill_price": fill_estimate.average_fill_price,
+        "components": [
+            _fill_component_payload(component) for component in fill_estimate.components
+        ],
+        "filled_quantity": fill_estimate.filled_quantity,
+        "limit_price": fill_estimate.limit_price,
+        "liquidity_role": fill_estimate.liquidity_role,
+        "order_quantity": fill_estimate.order_quantity,
+        "reason_code": fill_estimate.reason_code,
+        "remaining_quantity": fill_estimate.remaining_quantity,
+        "side": fill_estimate.side,
+    }
+
+
+def _fill_component_payload(component: SimulatedFillComponent) -> Mapping[str, object]:
+    return {
+        "liquidity_role": component.liquidity_role,
+        "price": component.price,
+        "quantity": component.quantity,
+    }
