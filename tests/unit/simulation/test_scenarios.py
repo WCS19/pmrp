@@ -25,6 +25,7 @@ from pmrp.simulation import (
     ScheduledOrderAction,
     SimulationArtifact,
     SimulationConfigurationError,
+    SimulationInputError,
     SimulationScenario,
     SimulationSourceType,
 )
@@ -649,6 +650,90 @@ def test_deterministic_scenario_runner_records_fill_during_cancel_race() -> None
     assert metrics["cancel_fill_race_count"] == Decimal("1")
     assert metrics["canceled_before_activation_count"] == Decimal("0")
     assert metrics["filled_order_count"] == Decimal("1")
+
+
+def test_deterministic_scenario_runner_ignores_duplicate_market_events() -> None:
+    duplicate_delta = _delta(
+        sequence=2,
+        previous_sequence=1,
+        side=Side.SELL,
+        price="0.42",
+        quantity="4",
+    )
+    scenario = _scenario(
+        scenario_id="SIM-017",
+        name="duplicate market event",
+        market_events=(
+            ScheduledMarketEvent(
+                sequence=1,
+                scheduled_at=NOW + timedelta(milliseconds=50),
+                event=duplicate_delta,
+            ),
+            ScheduledMarketEvent(
+                sequence=2,
+                scheduled_at=NOW + timedelta(milliseconds=75),
+                event=duplicate_delta,
+            ),
+        ),
+        order_actions=(
+            ScheduledOrderAction(
+                sequence=3,
+                scheduled_at=NOW,
+                action=_intent(quantity="10", limit_price="0.42"),
+            ),
+        ),
+    )
+
+    run = DeterministicScenarioRunner.from_configuration(scenario.configuration).run(scenario)
+    order_result = run.order_results[0]
+    metrics = {metric.name: metric.value for metric in run.result.metrics}
+
+    assert run.final_book.sequence == 2
+    assert run.final_book.asks[0].price == Decimal("0.42")
+    assert run.final_book.asks[0].quantity == Decimal("4")
+    assert order_result.activation_book == run.final_book
+    assert order_result.fill_estimate is not None
+    assert order_result.fill_estimate.filled_quantity == Decimal("4")
+    assert order_result.fill_estimate.remaining_quantity == Decimal("6")
+    assert metrics["market_event_count"] == Decimal("2")
+    assert metrics["duplicate_market_event_count"] == Decimal("1")
+    assert metrics["projected_market_event_count"] == Decimal("1")
+
+
+def test_deterministic_scenario_runner_rejects_conflicting_duplicate_market_sequence() -> None:
+    scenario = _scenario(
+        scenario_id="SIM-017-CONFLICT",
+        name="conflicting duplicate market sequence",
+        market_events=(
+            ScheduledMarketEvent(
+                sequence=1,
+                scheduled_at=NOW + timedelta(milliseconds=50),
+                event=_delta(
+                    sequence=2,
+                    previous_sequence=1,
+                    side=Side.SELL,
+                    price="0.42",
+                    quantity="4",
+                ),
+            ),
+            ScheduledMarketEvent(
+                sequence=2,
+                scheduled_at=NOW + timedelta(milliseconds=75),
+                event=_delta(
+                    sequence=2,
+                    previous_sequence=1,
+                    side=Side.SELL,
+                    price="0.42",
+                    quantity="5",
+                ),
+            ),
+        ),
+    )
+
+    with pytest.raises(SimulationInputError) as error:
+        DeterministicScenarioRunner.from_configuration(scenario.configuration).run(scenario)
+
+    assert error.value.reason_code == "simulation_order_book_sequence_mismatch"
 
 
 def test_deterministic_scenario_runner_uses_noncolliding_artifact_sequences() -> None:

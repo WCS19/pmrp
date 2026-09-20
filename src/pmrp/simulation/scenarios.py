@@ -1236,9 +1236,14 @@ def _project_book_until(
 ) -> OrderBookSnapshot:
     projected = scenario.initial_book
     through = parse_utc_datetime(through) if through is not None else None
+    seen_event_hashes: set[str] = set()
     for event in scenario.market_events:
         if through is not None and event.scheduled_at > through:
             continue
+        event_hash = _market_event_payload_hash(event)
+        if event_hash in seen_event_hashes:
+            continue
+        seen_event_hashes.add(event_hash)
         projected = _apply_scheduled_market_event(projected, event)
     return projected
 
@@ -1500,6 +1505,8 @@ def _scenario_run_metrics(
         if result.cancel_result is not None
         and result.cancel_result.outcome_code == SIMULATION_CANCEL_FILL_RACE_LOST
     )
+    duplicate_market_event_count = _duplicate_market_event_count(scenario.market_events)
+    projected_market_event_count = len(scenario.market_events) - duplicate_market_event_count
     settlement_estimate_count = sum(
         1 for result in order_results if result.settlement_result is not None
     )
@@ -1575,6 +1582,16 @@ def _scenario_run_metrics(
             name="filled_quantity",
             value=parse_decimal(filled_quantity, field_name="filled_quantity metric"),
             unit="contracts",
+        ),
+        SimulationMetric(
+            name="duplicate_market_event_count",
+            value=Decimal(duplicate_market_event_count),
+            unit="count",
+        ),
+        SimulationMetric(
+            name="projected_market_event_count",
+            value=Decimal(projected_market_event_count),
+            unit="count",
         ),
         SimulationMetric(
             name="settled_payout_amount",
@@ -1662,6 +1679,22 @@ def _fill_component_payload(component: SimulatedFillComponent) -> Mapping[str, o
         "price": component.price,
         "quantity": component.quantity,
     }
+
+
+def _market_event_payload_hash(event: ScheduledMarketEvent) -> str:
+    return canonical_sha256(event.event)
+
+
+def _duplicate_market_event_count(events: tuple[ScheduledMarketEvent, ...]) -> int:
+    seen: set[str] = set()
+    duplicate_count = 0
+    for event in events:
+        event_hash = _market_event_payload_hash(event)
+        if event_hash in seen:
+            duplicate_count += 1
+            continue
+        seen.add(event_hash)
+    return duplicate_count
 
 
 def _fee_model_for_scenario(
