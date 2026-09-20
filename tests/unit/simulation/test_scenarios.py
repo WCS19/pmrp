@@ -663,6 +663,81 @@ def test_deterministic_scenario_runner_balance_does_not_mask_invalid_price() -> 
     assert order_result.admission.available_balance == Decimal("10.00")
 
 
+def test_deterministic_scenario_runner_rejects_post_only_order_that_would_cross() -> None:
+    scenario = _scenario(
+        scenario_id="SIM-010",
+        name="post-only order would cross",
+        market_events=(
+            ScheduledMarketEvent(
+                sequence=1,
+                scheduled_at=NOW + timedelta(milliseconds=100),
+                event=_delta(
+                    sequence=2,
+                    previous_sequence=1,
+                    side=Side.SELL,
+                    price="0.42",
+                    quantity="4",
+                ),
+            ),
+        ),
+        order_actions=(
+            ScheduledOrderAction(
+                sequence=2,
+                scheduled_at=NOW,
+                action=_intent(
+                    intent_id="intent_scenario_post_only_cross",
+                    quantity="10",
+                    limit_price="0.42",
+                    post_only=True,
+                ),
+            ),
+        ),
+    )
+
+    run = DeterministicScenarioRunner.from_configuration(scenario.configuration).run(scenario)
+    order_result = run.order_results[0]
+    metrics = {metric.name: metric.value for metric in run.result.metrics}
+
+    assert run.final_book.sequence == 2
+    assert order_result.admission.rejected
+    assert order_result.admission.rejection_decision.reason_code is (
+        RejectionReason.POST_ONLY_WOULD_CROSS
+    )
+    assert order_result.activation_book is None
+    assert order_result.fill_estimate is None
+    assert order_result.fee_estimates == ()
+    assert order_result.settlement_result is None
+    assert metrics["accepted_order_count"] == Decimal("0")
+    assert metrics["rejected_order_count"] == Decimal("1")
+    assert metrics["filled_order_count"] == Decimal("0")
+
+
+def test_deterministic_scenario_runner_allows_passive_post_only_order() -> None:
+    scenario = _scenario(
+        scenario_id="SIM-010-PASSIVE",
+        name="post-only passive order",
+        order_actions=(
+            ScheduledOrderAction(
+                sequence=1,
+                scheduled_at=NOW,
+                action=_intent(
+                    intent_id="intent_scenario_post_only_passive",
+                    limit_price="0.42",
+                    post_only=True,
+                ),
+            ),
+        ),
+    )
+
+    run = DeterministicScenarioRunner.from_configuration(scenario.configuration).run(scenario)
+    order_result = run.order_results[0]
+
+    assert order_result.admission.accepted
+    assert order_result.activation_book is not None
+    assert order_result.fill_estimate is not None
+    assert not order_result.fill_estimate.has_fill
+
+
 def test_deterministic_scenario_runner_cancels_before_activation() -> None:
     scenario = _scenario(
         scenario_id="SIM-005",
@@ -1151,6 +1226,7 @@ def _intent(
     side: Side = Side.BUY,
     quantity: str | Decimal = "10",
     limit_price: str | Decimal | None = "0.43",
+    post_only: bool = False,
     correlation_id: str = "corr_scenario_001",
 ) -> OrderIntent:
     return OrderIntent.model_validate(
@@ -1165,7 +1241,7 @@ def _intent(
             "limit_price": limit_price,
             "order_type": OrderType.LIMIT,
             "time_in_force": TimeInForce.GTC,
-            "post_only": False,
+            "post_only": post_only,
             "reduce_only": False,
             "urgency": "0.75",
             "created_at": NOW,

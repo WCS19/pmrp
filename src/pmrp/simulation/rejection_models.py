@@ -24,6 +24,7 @@ class RejectionReason(StrEnum):
     INVALID_PRICE = "simulation_invalid_price"
     INVALID_QUANTITY = "simulation_invalid_quantity"
     MARKET_CLOSED = "simulation_market_closed"
+    POST_ONLY_WOULD_CROSS = "simulation_post_only_would_cross"
 
 
 @dataclass(frozen=True, slots=True)
