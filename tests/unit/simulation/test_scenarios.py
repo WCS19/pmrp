@@ -325,13 +325,59 @@ def test_deterministic_scenario_runner_applies_latency_before_fill() -> None:
     assert order_result.fill_estimate.filled_quantity == Decimal("4")
     assert order_result.fill_estimate.remaining_quantity == Decimal("6")
     assert order_result.fill_estimate.is_partial
+    assert len(order_result.fee_estimates) == 1
+    assert order_result.fee_estimates[0].net_fee_amount == Decimal("0")
     assert run.final_book == order_result.activation_book
     assert metrics["accepted_order_count"] == Decimal("1")
     assert metrics["filled_order_count"] == Decimal("1")
     assert metrics["partial_fill_count"] == Decimal("1")
     assert metrics["filled_quantity"] == Decimal("4")
+    assert metrics["total_fee_amount"] == Decimal("0")
+    assert metrics["total_filled_notional"] == Decimal("1.72")
+    assert metrics["total_net_fee_amount"] == Decimal("0")
+    assert metrics["total_rebate_amount"] == Decimal("0")
     assert run.result.source_type_counts[SimulationSourceType.INFERRED_BEHAVIOR] == 1
-    assert run.result.source_type_counts[SimulationSourceType.SIMULATED_OUTPUT] == 3
+    assert run.result.source_type_counts[SimulationSourceType.SIMULATED_OUTPUT] == 4
+
+
+def test_deterministic_scenario_runner_records_decimal_fees_from_configuration() -> None:
+    scenario = _scenario(
+        scenario_id="SIM-011",
+        name="fee calculation",
+        configuration=_configuration(
+            parameters={
+                "fee.currency": "USD",
+                "fee.taker.rate_bps": "10",
+                "fee.taker.fixed": "0.01",
+                "fee.taker.rebate_rate_bps": "1",
+                "fee.taker.fixed_rebate": "0.002",
+            }
+        ),
+        order_actions=(
+            ScheduledOrderAction(
+                sequence=1,
+                scheduled_at=NOW,
+                action=_intent(quantity="10", limit_price="0.43"),
+            ),
+        ),
+    )
+
+    run = DeterministicScenarioRunner.from_configuration(scenario.configuration).run(scenario)
+    order_result = run.order_results[0]
+    fee_estimate = order_result.fee_estimates[0]
+    metrics = {metric.name: metric.value for metric in run.result.metrics}
+
+    assert order_result.fill_estimate is not None
+    assert order_result.fill_estimate.filled_quantity == Decimal("10")
+    assert fee_estimate.notional == Decimal("4.30")
+    assert fee_estimate.fee_amount == Decimal("0.01430")
+    assert fee_estimate.rebate_amount == Decimal("0.00243")
+    assert fee_estimate.net_fee_amount == Decimal("0.01187")
+    assert "fee_estimates" in order_result.canonical_payload()
+    assert metrics["total_filled_notional"] == Decimal("4.30")
+    assert metrics["total_fee_amount"] == Decimal("0.01430")
+    assert metrics["total_rebate_amount"] == Decimal("0.00243")
+    assert metrics["total_net_fee_amount"] == Decimal("0.01187")
 
 
 def test_deterministic_scenario_runner_records_passive_no_fill() -> None:
@@ -355,9 +401,11 @@ def test_deterministic_scenario_runner_records_passive_no_fill() -> None:
     assert not fill_estimate.has_fill
     assert fill_estimate.average_fill_price is None
     assert fill_estimate.reason_code == "simulation_touch_no_fill"
+    assert run.order_results[0].fee_estimates == ()
     assert metrics["accepted_order_count"] == Decimal("1")
     assert metrics["filled_order_count"] == Decimal("0")
     assert metrics["filled_quantity"] == Decimal("0")
+    assert metrics["total_fee_amount"] == Decimal("0")
 
 
 def test_deterministic_scenario_runner_records_rejections_without_fill_outputs() -> None:
@@ -412,6 +460,32 @@ def test_deterministic_scenario_runner_rejects_unsupported_configuration() -> No
         DeterministicScenarioRunner.from_configuration(scenario.configuration).run(scenario)
 
     assert error.value.reason_code == "simulation_scenario_runner_fill_model_unsupported"
+
+    fee_scenario = _scenario(configuration=_configuration(fee_model="unsupported_fee_v1"))
+
+    with pytest.raises(SimulationConfigurationError) as fee_error:
+        DeterministicScenarioRunner.from_configuration(fee_scenario.configuration)
+
+    assert fee_error.value.reason_code == "simulation_scenario_runner_fee_model_unsupported"
+
+
+def test_deterministic_scenario_runner_validates_fee_configuration_without_fills() -> None:
+    scenario = _scenario(
+        configuration=_configuration(
+            parameters={
+                "fee.currency": "usd",
+                "fee.taker.rate_bps": "not-a-decimal",
+            }
+        ),
+        order_actions=(),
+    )
+
+    with pytest.raises(SimulationConfigurationError) as error:
+        DeterministicScenarioRunner.from_configuration(scenario.configuration).run(scenario)
+
+    assert error.value.reason_code == "simulation_scenario_runner_fee_configuration_invalid"
+    assert "not-a-decimal" not in str(error.value)
+    assert "usd" not in str(error.value)
 
 
 def _scenario(
