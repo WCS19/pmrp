@@ -821,6 +821,13 @@ class DeterministicScenarioRunner:
             limit_price=intent.limit_price,
             quantity=intent.quantity,
         )
+        fill_estimate = _fill_resting_order_from_trade_events(
+            scenario=scenario,
+            intent=intent,
+            activation_at=admission.activates_at,
+            cancel_action=cancel_action,
+            fill_estimate=fill_estimate,
+        )
         fee_estimates = _estimate_fees(
             fee_model=fee_model,
             exchange=scenario.initial_book.exchange,
@@ -1276,6 +1283,96 @@ def _apply_scheduled_market_event(
     if isinstance(event.event, OrderBookDelta):
         return apply_order_book_delta(snapshot, event.event)
     return snapshot
+
+
+def _fill_resting_order_from_trade_events(
+    *,
+    scenario: SimulationScenario,
+    intent: OrderIntent,
+    activation_at: datetime,
+    cancel_action: ScheduledOrderAction | None,
+    fill_estimate: FillEstimate,
+) -> FillEstimate:
+    if fill_estimate.has_fill:
+        return fill_estimate
+
+    remaining_quantity = fill_estimate.remaining_quantity
+    components: list[SimulatedFillComponent] = []
+    seen_event_hashes: set[str] = set()
+    for event in scenario.market_events:
+        if event.scheduled_at < activation_at:
+            continue
+        if cancel_action is not None and event.scheduled_at > cancel_action.scheduled_at:
+            continue
+        event_hash = _market_event_payload_hash(event)
+        if event_hash in seen_event_hashes:
+            continue
+        seen_event_hashes.add(event_hash)
+        if not isinstance(event.event, Trade):
+            continue
+        if not _trade_fills_resting_intent(trade=event.event, intent=intent):
+            continue
+
+        fill_quantity = min(remaining_quantity, event.event.quantity)
+        if fill_quantity == _ZERO:
+            break
+        components.append(
+            SimulatedFillComponent(
+                price=event.event.price,
+                quantity=fill_quantity,
+                liquidity_role=LiquidityRole.MAKER,
+            )
+        )
+        remaining_quantity -= fill_quantity
+        if remaining_quantity == _ZERO:
+            break
+
+    if not components:
+        return fill_estimate
+
+    filled_quantity = fill_estimate.order_quantity - remaining_quantity
+    return FillEstimate(
+        side=fill_estimate.side,
+        limit_price=fill_estimate.limit_price,
+        order_quantity=fill_estimate.order_quantity,
+        filled_quantity=filled_quantity,
+        remaining_quantity=remaining_quantity,
+        average_fill_price=_average_fill_price(components),
+        liquidity_role=LiquidityRole.MAKER,
+        components=tuple(components),
+        reason_code=_resting_trade_fill_reason_code(
+            filled_quantity=filled_quantity,
+            order_quantity=fill_estimate.order_quantity,
+        ),
+    )
+
+
+def _trade_fills_resting_intent(*, trade: Trade, intent: OrderIntent) -> bool:
+    if intent.limit_price is None:
+        return False
+    if trade.outcome_id != intent.outcome_id:
+        return False
+    if trade.aggressor_side is None:
+        return False
+    if intent.side is Side.BUY:
+        return trade.aggressor_side is Side.SELL and trade.price <= intent.limit_price
+    return trade.aggressor_side is Side.BUY and trade.price >= intent.limit_price
+
+
+def _average_fill_price(components: list[SimulatedFillComponent]) -> Decimal:
+    filled_quantity = sum((component.quantity for component in components), _ZERO)
+    notional = sum((component.price * component.quantity for component in components), _ZERO)
+    return notional / filled_quantity
+
+
+def _resting_trade_fill_reason_code(
+    *,
+    filled_quantity: Decimal,
+    order_quantity: Decimal,
+) -> str:
+    if filled_quantity < order_quantity:
+        return "simulation_resting_trade_partial_fill"
+    return "simulation_resting_trade_full_fill"
 
 
 def _normalize_order_results(
