@@ -41,6 +41,14 @@ from pmrp.simulation.rejection_models import (
     RejectionModel,
     RejectionReason,
 )
+from pmrp.simulation.results import (
+    SIMULATION_RESULT_CHECKSUM_VERSION,
+    SimulationArtifact,
+    SimulationMetric,
+    SimulationResult,
+    SimulationSourceType,
+    calculate_simulation_result_checksum,
+)
 from pmrp.simulation.settlement import (
     BINARY_SETTLEMENT_MODEL_NAME,
     NO_SETTLEMENT_MODEL_NAME,
@@ -67,6 +75,7 @@ __all__ = [
     "IMMEDIATE_TOUCH_QUEUE_MODEL_NAME",
     "NO_SETTLEMENT_MODEL_NAME",
     "NO_SLIPPAGE_MODEL_NAME",
+    "SIMULATION_RESULT_CHECKSUM_VERSION",
     "TOUCH_FILL_MODEL_NAME",
     "TRADE_THROUGH_FILL_MODEL_NAME",
     "VOLUME_AHEAD_QUEUE_MODEL_NAME",
@@ -92,12 +101,17 @@ __all__ = [
     "SettlementEstimate",
     "SettlementModel",
     "SimulatedFillComponent",
+    "SimulationArtifact",
     "SimulationConfigurationError",
     "SimulationError",
     "SimulationInputError",
+    "SimulationMetric",
+    "SimulationResult",
+    "SimulationSourceType",
     "SlippageEstimate",
     "SlippageModel",
     "TouchFillModel",
     "TradeThroughFillModel",
     "VolumeAheadQueueModel",
+    "calculate_simulation_result_checksum",
 ]
