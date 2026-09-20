@@ -346,13 +346,49 @@ def test_deterministic_scenario_runner_applies_latency_before_fill() -> None:
 
 def test_deterministic_scenario_runner_records_decimal_fees_from_configuration() -> None:
     scenario = _scenario(
-        scenario_id="SIM-011",
-        name="fee calculation",
+        scenario_id="SIM-012",
+        name="taker fee calculation",
         configuration=_configuration(
             parameters={
                 "fee.currency": "USD",
                 "fee.taker.rate_bps": "10",
                 "fee.taker.fixed": "0.01",
+            }
+        ),
+        order_actions=(
+            ScheduledOrderAction(
+                sequence=1,
+                scheduled_at=NOW,
+                action=_intent(quantity="10", limit_price="0.43"),
+            ),
+        ),
+    )
+
+    run = DeterministicScenarioRunner.from_configuration(scenario.configuration).run(scenario)
+    order_result = run.order_results[0]
+    fee_estimate = order_result.fee_estimates[0]
+    metrics = {metric.name: metric.value for metric in run.result.metrics}
+
+    assert order_result.fill_estimate is not None
+    assert order_result.fill_estimate.filled_quantity == Decimal("10")
+    assert fee_estimate.notional == Decimal("4.30")
+    assert fee_estimate.fee_amount == Decimal("0.01430")
+    assert fee_estimate.rebate_amount == Decimal("0")
+    assert fee_estimate.net_fee_amount == Decimal("0.01430")
+    assert "fee_estimates" in order_result.canonical_payload()
+    assert metrics["total_filled_notional"] == Decimal("4.30")
+    assert metrics["total_fee_amount"] == Decimal("0.01430")
+    assert metrics["total_rebate_amount"] == Decimal("0")
+    assert metrics["total_net_fee_amount"] == Decimal("0.01430")
+
+
+def test_deterministic_scenario_runner_records_rebates_from_configuration() -> None:
+    scenario = _scenario(
+        scenario_id="SIM-013",
+        name="rebate calculation",
+        configuration=_configuration(
+            parameters={
+                "fee.currency": "USD",
                 "fee.taker.rebate_rate_bps": "1",
                 "fee.taker.fixed_rebate": "0.002",
             }
@@ -374,20 +410,20 @@ def test_deterministic_scenario_runner_records_decimal_fees_from_configuration()
     assert order_result.fill_estimate is not None
     assert order_result.fill_estimate.filled_quantity == Decimal("10")
     assert fee_estimate.notional == Decimal("4.30")
-    assert fee_estimate.fee_amount == Decimal("0.01430")
+    assert fee_estimate.fee_amount == Decimal("0")
     assert fee_estimate.rebate_amount == Decimal("0.00243")
-    assert fee_estimate.net_fee_amount == Decimal("0.01187")
+    assert fee_estimate.net_fee_amount == Decimal("-0.00243")
     assert "fee_estimates" in order_result.canonical_payload()
     assert metrics["total_filled_notional"] == Decimal("4.30")
-    assert metrics["total_fee_amount"] == Decimal("0.01430")
+    assert metrics["total_fee_amount"] == Decimal("0")
     assert metrics["total_rebate_amount"] == Decimal("0.00243")
-    assert metrics["total_net_fee_amount"] == Decimal("0.01187")
+    assert metrics["total_net_fee_amount"] == Decimal("-0.00243")
 
 
 def test_deterministic_scenario_runner_records_settlement_payout() -> None:
     scenario = _scenario(
-        scenario_id="SIM-012",
-        name="settlement payout",
+        scenario_id="SIM-014",
+        name="settlement win",
         configuration=_configuration(
             parameters={
                 "settlement_winning_outcome_ids": "out_yes",
@@ -425,9 +461,43 @@ def test_deterministic_scenario_runner_records_settlement_payout() -> None:
     assert metrics["settled_payout_amount"] == Decimal("10.00")
 
 
+def test_deterministic_scenario_runner_records_settlement_loss() -> None:
+    scenario = _scenario(
+        scenario_id="SIM-015",
+        name="settlement loss",
+        configuration=_configuration(
+            parameters={
+                "settlement_winning_outcome_ids": "out_no",
+                "settlement_payout_per_unit": "1.00",
+            }
+        ),
+        order_actions=(
+            ScheduledOrderAction(
+                sequence=1,
+                scheduled_at=NOW,
+                action=_intent(quantity="10", limit_price="0.43"),
+            ),
+        ),
+    )
+
+    run = DeterministicScenarioRunner.from_configuration(scenario.configuration).run(scenario)
+    settlement_result = run.order_results[0].settlement_result
+    metrics = {metric.name: metric.value for metric in run.result.metrics}
+
+    assert settlement_result is not None
+    assert settlement_result.estimate.status is SettlementStatus.SETTLED
+    assert settlement_result.estimate.outcome_id == "out_yes"
+    assert settlement_result.estimate.winning_outcome_ids == ("out_no",)
+    assert settlement_result.estimate.payout_amount == Decimal("0")
+    assert settlement_result.estimate.is_winning_outcome is False
+    assert metrics["settlement_estimate_count"] == Decimal("1")
+    assert metrics["settled_winning_quantity"] == Decimal("0")
+    assert metrics["settled_payout_amount"] == Decimal("0")
+
+
 def test_deterministic_scenario_runner_records_unresolved_no_settlement_estimate() -> None:
     scenario = _scenario(
-        scenario_id="SIM-012-NONE",
+        scenario_id="SIM-SETTLEMENT-NONE",
         name="unresolved settlement",
         configuration=_configuration(settlement_model=NO_SETTLEMENT_MODEL_NAME),
         order_actions=(
