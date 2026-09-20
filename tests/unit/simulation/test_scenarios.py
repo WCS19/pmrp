@@ -17,6 +17,7 @@ from pmrp.simulation import (
     NO_SETTLEMENT_MODEL_NAME,
     SIMULATION_CANCEL_BEFORE_ACTIVATION,
     SIMULATION_CANCEL_FILL_RACE_LOST,
+    SIMULATION_DISCONNECT_OPEN_ORDER,
     SIMULATION_SCENARIO_HASH_VERSION,
     SIMULATION_SCENARIO_RUNNER_MODEL_NAME,
     DeterministicScenarioRunner,
@@ -727,6 +728,60 @@ def test_deterministic_scenario_runner_records_maker_fees_from_configuration() -
     assert metrics["total_net_fee_amount"] == Decimal("0.01210")
 
 
+def test_deterministic_scenario_runner_records_disconnect_with_open_order() -> None:
+    disconnected_at = NOW + timedelta(milliseconds=140)
+    scenario = _scenario(
+        scenario_id="SIM-016",
+        name="disconnect with open order",
+        configuration=_configuration(
+            parameters={
+                "connectivity.disconnected_at": disconnected_at.isoformat(),
+            }
+        ),
+        market_events=(
+            ScheduledMarketEvent(
+                sequence=1,
+                scheduled_at=NOW + timedelta(milliseconds=150),
+                event=_trade(
+                    price="0.42",
+                    quantity="10",
+                    aggressor_side=Side.SELL,
+                ),
+            ),
+        ),
+        order_actions=(
+            ScheduledOrderAction(
+                sequence=2,
+                scheduled_at=NOW,
+                action=_intent(quantity="10", limit_price="0.42"),
+            ),
+        ),
+    )
+
+    run = DeterministicScenarioRunner.from_configuration(scenario.configuration).run(scenario)
+    order_result = run.order_results[0]
+    fill_estimate = order_result.fill_estimate
+    disconnect_result = order_result.disconnect_result
+    metrics = {metric.name: metric.value for metric in run.result.metrics}
+    artifact_types = {artifact.artifact_type for artifact in run.result.artifacts}
+
+    assert fill_estimate is not None
+    assert not fill_estimate.has_fill
+    assert fill_estimate.reason_code == "simulation_touch_no_fill"
+    assert order_result.fee_estimates == ()
+    assert disconnect_result is not None
+    assert disconnect_result.target_order_sequence == order_result.sequence
+    assert disconnect_result.disconnected_at == disconnected_at
+    assert disconnect_result.reconnected_at is None
+    assert disconnect_result.outcome_code == SIMULATION_DISCONNECT_OPEN_ORDER
+    assert "disconnect_result" in order_result.canonical_payload()
+    assert "simulation_disconnect_result" in artifact_types
+    assert metrics["disconnect_window_count"] == Decimal("1")
+    assert metrics["open_order_disconnect_count"] == Decimal("1")
+    assert metrics["filled_order_count"] == Decimal("0")
+    assert metrics["filled_quantity"] == Decimal("0")
+
+
 def test_deterministic_scenario_runner_records_rejections_without_fill_outputs() -> None:
     scenario = _scenario(
         scenario_id="SIM-008",
@@ -1186,6 +1241,62 @@ def test_deterministic_scenario_runner_validates_balance_configuration_without_f
     assert (
         negative_error.value.reason_code
         == "simulation_scenario_runner_balance_configuration_invalid"
+    )
+
+
+def test_deterministic_scenario_runner_validates_disconnect_configuration_without_fills() -> None:
+    reconnected_at = NOW + timedelta(milliseconds=200)
+    reconnected_only = _scenario(
+        configuration=_configuration(
+            parameters={"connectivity.reconnected_at": reconnected_at.isoformat()}
+        ),
+        order_actions=(),
+    )
+
+    with pytest.raises(SimulationConfigurationError) as reconnected_only_error:
+        DeterministicScenarioRunner.from_configuration(reconnected_only.configuration).run(
+            reconnected_only
+        )
+
+    assert (
+        reconnected_only_error.value.reason_code
+        == "simulation_scenario_runner_disconnect_configuration_invalid"
+    )
+
+    invalid_datetime = _scenario(
+        configuration=_configuration(parameters={"connectivity.disconnected_at": "not-a-datetime"}),
+        order_actions=(),
+    )
+
+    with pytest.raises(SimulationConfigurationError) as invalid_datetime_error:
+        DeterministicScenarioRunner.from_configuration(invalid_datetime.configuration).run(
+            invalid_datetime
+        )
+
+    assert (
+        invalid_datetime_error.value.reason_code
+        == "simulation_scenario_runner_disconnect_configuration_invalid"
+    )
+    assert "not-a-datetime" not in str(invalid_datetime_error.value)
+
+    reversed_window = _scenario(
+        configuration=_configuration(
+            parameters={
+                "connectivity.disconnected_at": reconnected_at.isoformat(),
+                "connectivity.reconnected_at": NOW.isoformat(),
+            }
+        ),
+        order_actions=(),
+    )
+
+    with pytest.raises(SimulationConfigurationError) as reversed_window_error:
+        DeterministicScenarioRunner.from_configuration(reversed_window.configuration).run(
+            reversed_window
+        )
+
+    assert (
+        reversed_window_error.value.reason_code
+        == "simulation_scenario_runner_disconnect_configuration_invalid"
     )
 
 

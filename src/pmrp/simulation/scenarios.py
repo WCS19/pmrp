@@ -71,11 +71,14 @@ SIMULATION_SCENARIO_RUNNER_MODEL_NAME = "simulation_scenario_runner_v1"
 SIMULATION_CANCEL_AFTER_ACTIVATION_NO_FILL = "simulation_cancel_after_activation_no_fill"
 SIMULATION_CANCEL_BEFORE_ACTIVATION = "simulation_cancel_before_activation"
 SIMULATION_CANCEL_FILL_RACE_LOST = "simulation_cancel_fill_race_lost"
+SIMULATION_DISCONNECT_OPEN_ORDER = "simulation_disconnect_open_order"
 
 _MAX_TEXT_LENGTH = 128
 _ONE = Decimal("1")
 _ZERO = Decimal("0")
 _AVAILABLE_BALANCE_PARAMETER = "balance.available"
+_CONNECTIVITY_DISCONNECTED_AT_PARAMETER = "connectivity.disconnected_at"
+_CONNECTIVITY_RECONNECTED_AT_PARAMETER = "connectivity.reconnected_at"
 _DEFAULT_FEE_CURRENCY = "USD"
 _FEE_CURRENCY_PARAMETER = "fee.currency"
 _FEE_FIXED_PARAMETER = "fee.{role}.fixed"
@@ -84,7 +87,7 @@ _FEE_RATE_BPS_PARAMETER = "fee.{role}.rate_bps"
 _FEE_REBATE_RATE_BPS_PARAMETER = "fee.{role}.rebate_rate_bps"
 _SETTLEMENT_WINNING_OUTCOME_IDS_PARAMETER = "settlement_winning_outcome_ids"
 _ORDER_RESULT_ARTIFACT_BASE_SEQUENCE = 10
-_ORDER_RESULT_ARTIFACT_STRIDE = 5
+_ORDER_RESULT_ARTIFACT_STRIDE = 6
 _CANCEL_OUTCOME_CODES = frozenset(
     {
         SIMULATION_CANCEL_AFTER_ACTIVATION_NO_FILL,
@@ -92,6 +95,7 @@ _CANCEL_OUTCOME_CODES = frozenset(
         SIMULATION_CANCEL_FILL_RACE_LOST,
     }
 )
+_DISCONNECT_OUTCOME_CODES = frozenset({SIMULATION_DISCONNECT_OPEN_ORDER})
 
 type ScenarioMarketEventPayload = OrderBookSnapshot | OrderBookDelta | Trade
 type ScenarioOrderActionPayload = OrderIntent | CancelOrderRequest
@@ -344,6 +348,7 @@ class SimulatedScenarioOrderResult:
     fee_estimates: tuple[FeeEstimate, ...] = ()
     cancel_result: SimulatedScenarioCancelResult | None = None
     settlement_result: SimulatedScenarioSettlementResult | None = None
+    disconnect_result: SimulatedScenarioDisconnectResult | None = None
     source_type: SimulationSourceType = SimulationSourceType.SIMULATED_OUTPUT
 
     def __post_init__(self) -> None:
@@ -372,12 +377,17 @@ class SimulatedScenarioOrderResult:
             fill_estimate=self.fill_estimate,
             order_sequence=self.sequence,
         )
+        disconnect_result = _validate_disconnect_result(
+            self.disconnect_result,
+            order_sequence=self.sequence,
+        )
         if self.admission.rejected:
             if (
                 self.activation_book is not None
                 or self.fill_estimate is not None
                 or fee_estimates
                 or settlement_result is not None
+                or disconnect_result is not None
             ):
                 raise SimulationConfigurationError(
                     "Rejected scenario orders must not include simulated order outputs",
@@ -394,6 +404,7 @@ class SimulatedScenarioOrderResult:
                 or self.fill_estimate is not None
                 or fee_estimates
                 or settlement_result is not None
+                or disconnect_result is not None
             ):
                 raise SimulationConfigurationError(
                     "Pre-activation cancelled scenario orders must not include fill outputs",
@@ -422,6 +433,7 @@ class SimulatedScenarioOrderResult:
         object.__setattr__(self, "fee_estimates", fee_estimates)
         object.__setattr__(self, "cancel_result", cancel_result)
         object.__setattr__(self, "settlement_result", settlement_result)
+        object.__setattr__(self, "disconnect_result", disconnect_result)
 
     @property
     def order_result_hash(self) -> str:
@@ -452,6 +464,8 @@ class SimulatedScenarioOrderResult:
             payload["cancel_result"] = self.cancel_result.canonical_payload()
         if self.settlement_result is not None:
             payload["settlement_result"] = self.settlement_result.canonical_payload()
+        if self.disconnect_result is not None:
+            payload["disconnect_result"] = self.disconnect_result.canonical_payload()
         return payload
 
 
@@ -567,6 +581,69 @@ class SimulatedScenarioSettlementResult:
             "source_type": self.source_type,
             "target_order_sequence": self.target_order_sequence,
         }
+
+
+@dataclass(frozen=True, slots=True)
+class SimulatedScenarioDisconnectResult:
+    """One deterministic exchange-connectivity result for an open scenario order."""
+
+    sequence: int
+    target_order_sequence: int
+    disconnected_at: datetime
+    reconnected_at: datetime | None
+    outcome_code: str
+    source_type: SimulationSourceType = SimulationSourceType.SIMULATED_OUTPUT
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "sequence", _validate_sequence(self.sequence))
+        object.__setattr__(
+            self,
+            "target_order_sequence",
+            _validate_sequence(self.target_order_sequence),
+        )
+        disconnected_at = parse_utc_datetime(self.disconnected_at)
+        reconnected_at = (
+            parse_utc_datetime(self.reconnected_at) if self.reconnected_at is not None else None
+        )
+        if reconnected_at is not None and reconnected_at <= disconnected_at:
+            raise SimulationConfigurationError(
+                "Scenario disconnect reconnected_at must be after disconnected_at",
+                reason_code="simulation_scenario_disconnect_time_invalid",
+            )
+        object.__setattr__(self, "disconnected_at", disconnected_at)
+        object.__setattr__(self, "reconnected_at", reconnected_at)
+        object.__setattr__(
+            self,
+            "outcome_code",
+            _validate_disconnect_outcome(self.outcome_code),
+        )
+        if self.source_type is not SimulationSourceType.SIMULATED_OUTPUT:
+            raise SimulationConfigurationError(
+                "Scenario disconnect results must be classified as simulated output",
+                reason_code="simulation_scenario_disconnect_result_source_invalid",
+                context={"source_type": str(self.source_type)},
+            )
+
+    @property
+    def disconnect_result_hash(self) -> str:
+        """Return the deterministic hash of this disconnect result."""
+
+        return canonical_sha256(self.canonical_payload())
+
+    def canonical_payload(self) -> Mapping[str, object]:
+        """Return stable JSON-compatible simulated disconnect-result data."""
+
+        payload: dict[str, object] = {
+            "disconnected_at": self.disconnected_at,
+            "outcome_code": self.outcome_code,
+            "runner_model": SIMULATION_SCENARIO_RUNNER_MODEL_NAME,
+            "sequence": self.sequence,
+            "source_type": self.source_type,
+            "target_order_sequence": self.target_order_sequence,
+        }
+        if self.reconnected_at is not None:
+            payload["reconnected_at"] = self.reconnected_at
+        return payload
 
 
 @dataclass(frozen=True, slots=True)
@@ -705,6 +782,7 @@ class DeterministicScenarioRunner:
             scenario.configuration
         )
         available_balance = _available_balance_from_configuration(scenario.configuration)
+        disconnect_window = _disconnect_window_from_configuration(scenario.configuration)
         final_book = _project_book_until(scenario=scenario, through=None)
         used_cancel_sequences: set[int] = set()
         order_results_list: list[SimulatedScenarioOrderResult] = []
@@ -722,6 +800,7 @@ class DeterministicScenarioRunner:
                 settlement_model=settlement_model,
                 winning_outcome_ids=winning_outcome_ids,
                 available_balance=available_balance,
+                disconnect_window=disconnect_window,
                 cancel_action=cancel_action,
             )
             if order_result.cancel_result is not None:
@@ -754,6 +833,7 @@ class DeterministicScenarioRunner:
         settlement_model: SettlementModel,
         winning_outcome_ids: tuple[OutcomeId, ...],
         available_balance: Decimal | None,
+        disconnect_window: tuple[datetime, datetime | None] | None,
         cancel_action: ScheduledOrderAction | None,
     ) -> SimulatedScenarioOrderResult:
         if not isinstance(action.action, OrderIntent):
@@ -826,6 +906,7 @@ class DeterministicScenarioRunner:
             intent=intent,
             activation_at=admission.activates_at,
             cancel_action=cancel_action,
+            disconnect_window=disconnect_window,
             fill_estimate=fill_estimate,
         )
         fee_estimates = _estimate_fees(
@@ -853,6 +934,15 @@ class DeterministicScenarioRunner:
             sequence=sequence,
             winning_outcome_ids=winning_outcome_ids,
         )
+        disconnect_result = _disconnect_result_for_order(
+            scenario=scenario,
+            intent=intent,
+            sequence=sequence,
+            activation_at=admission.activates_at,
+            cancel_result=cancel_result,
+            disconnect_window=disconnect_window,
+            fill_estimate=fill_estimate,
+        )
         return SimulatedScenarioOrderResult(
             sequence=sequence,
             action=action,
@@ -862,6 +952,7 @@ class DeterministicScenarioRunner:
             fee_estimates=fee_estimates,
             cancel_result=cancel_result,
             settlement_result=settlement_result,
+            disconnect_result=disconnect_result,
         )
 
 
@@ -908,6 +999,19 @@ def _validate_cancel_outcome(outcome_code: str) -> str:
     return outcome_code
 
 
+def _validate_disconnect_outcome(outcome_code: str) -> str:
+    if type(outcome_code) is not str:
+        msg = "outcome_code must be a string"
+        raise TypeError(msg)
+    if outcome_code not in _DISCONNECT_OUTCOME_CODES:
+        raise SimulationConfigurationError(
+            "Scenario disconnect result outcome_code is unsupported",
+            reason_code="simulation_scenario_disconnect_result_outcome_invalid",
+            context={"outcome_code": outcome_code},
+        )
+    return outcome_code
+
+
 def _validate_cancel_result(
     cancel_result: SimulatedScenarioCancelResult | None,
 ) -> SimulatedScenarioCancelResult | None:
@@ -917,6 +1021,28 @@ def _validate_cancel_result(
         msg = "cancel_result must be a SimulatedScenarioCancelResult"
         raise TypeError(msg)
     return cancel_result
+
+
+def _validate_disconnect_result(
+    disconnect_result: SimulatedScenarioDisconnectResult | None,
+    *,
+    order_sequence: int,
+) -> SimulatedScenarioDisconnectResult | None:
+    if disconnect_result is None:
+        return None
+    if not isinstance(disconnect_result, SimulatedScenarioDisconnectResult):
+        msg = "disconnect_result must be a SimulatedScenarioDisconnectResult"
+        raise TypeError(msg)
+    if disconnect_result.target_order_sequence != order_sequence:
+        raise SimulationConfigurationError(
+            "Scenario disconnect result must reference its order result sequence",
+            reason_code="simulation_scenario_disconnect_order_sequence_mismatch",
+            context={
+                "disconnect_order_sequence": str(disconnect_result.target_order_sequence),
+                "order_sequence": str(order_sequence),
+            },
+        )
+    return disconnect_result
 
 
 def _validate_settlement_result(
@@ -1291,6 +1417,7 @@ def _fill_resting_order_from_trade_events(
     intent: OrderIntent,
     activation_at: datetime,
     cancel_action: ScheduledOrderAction | None,
+    disconnect_window: tuple[datetime, datetime | None] | None,
     fill_estimate: FillEstimate,
 ) -> FillEstimate:
     if fill_estimate.has_fill:
@@ -1303,6 +1430,11 @@ def _fill_resting_order_from_trade_events(
         if event.scheduled_at < activation_at:
             continue
         if cancel_action is not None and event.scheduled_at > cancel_action.scheduled_at:
+            continue
+        if _scheduled_at_during_disconnect(
+            scheduled_at=event.scheduled_at,
+            disconnect_window=disconnect_window,
+        ):
             continue
         event_hash = _market_event_payload_hash(event)
         if event_hash in seen_event_hashes:
@@ -1345,6 +1477,90 @@ def _fill_resting_order_from_trade_events(
             order_quantity=fill_estimate.order_quantity,
         ),
     )
+
+
+def _disconnect_result_for_order(
+    *,
+    scenario: SimulationScenario,
+    intent: OrderIntent,
+    sequence: int,
+    activation_at: datetime,
+    cancel_result: SimulatedScenarioCancelResult | None,
+    disconnect_window: tuple[datetime, datetime | None] | None,
+    fill_estimate: FillEstimate,
+) -> SimulatedScenarioDisconnectResult | None:
+    if disconnect_window is None:
+        return None
+    disconnected_at, reconnected_at = disconnect_window
+    if activation_at >= disconnected_at:
+        return None
+    if cancel_result is not None and cancel_result.effective_at <= disconnected_at:
+        return None
+    filled_before_disconnect = (
+        fill_estimate.filled_quantity
+        if fill_estimate.liquidity_role is LiquidityRole.TAKER
+        else _ZERO
+    )
+    if filled_before_disconnect >= fill_estimate.order_quantity:
+        return None
+    remaining_quantity = fill_estimate.order_quantity - filled_before_disconnect
+    filled_before_disconnect += _pre_disconnect_resting_fill_quantity(
+        scenario=scenario,
+        intent=intent,
+        activation_at=activation_at,
+        disconnected_at=disconnected_at,
+        order_quantity=remaining_quantity,
+    )
+    if filled_before_disconnect >= fill_estimate.order_quantity:
+        return None
+    return SimulatedScenarioDisconnectResult(
+        sequence=sequence,
+        target_order_sequence=sequence,
+        disconnected_at=disconnected_at,
+        reconnected_at=reconnected_at,
+        outcome_code=SIMULATION_DISCONNECT_OPEN_ORDER,
+    )
+
+
+def _pre_disconnect_resting_fill_quantity(
+    *,
+    scenario: SimulationScenario,
+    intent: OrderIntent,
+    activation_at: datetime,
+    disconnected_at: datetime,
+    order_quantity: Decimal,
+) -> Decimal:
+    filled_quantity = _ZERO
+    seen_event_hashes: set[str] = set()
+    for event in scenario.market_events:
+        if event.scheduled_at < activation_at or event.scheduled_at >= disconnected_at:
+            continue
+        event_hash = _market_event_payload_hash(event)
+        if event_hash in seen_event_hashes:
+            continue
+        seen_event_hashes.add(event_hash)
+        if not isinstance(event.event, Trade):
+            continue
+        if not _trade_fills_resting_intent(trade=event.event, intent=intent):
+            continue
+        remaining_quantity = order_quantity - filled_quantity
+        filled_quantity += min(remaining_quantity, event.event.quantity)
+        if filled_quantity >= order_quantity:
+            return order_quantity
+    return filled_quantity
+
+
+def _scheduled_at_during_disconnect(
+    *,
+    scheduled_at: datetime,
+    disconnect_window: tuple[datetime, datetime | None] | None,
+) -> bool:
+    if disconnect_window is None:
+        return False
+    disconnected_at, reconnected_at = disconnect_window
+    if scheduled_at < disconnected_at:
+        return False
+    return reconnected_at is None or scheduled_at < reconnected_at
 
 
 def _trade_fills_resting_intent(*, trade: Trade, intent: OrderIntent) -> bool:
@@ -1588,6 +1804,16 @@ def _scenario_run_artifacts(
                     source_type=SimulationSourceType.SIMULATED_OUTPUT,
                 )
             )
+        if order_result.disconnect_result is not None:
+            artifacts.append(
+                SimulationArtifact(
+                    sequence=sequence_base + 5,
+                    artifact_type="simulation_disconnect_result",
+                    artifact_id=f"{scenario.scenario_id}:disconnect:{order_result.sequence}",
+                    artifact_hash=order_result.disconnect_result.disconnect_result_hash,
+                    source_type=SimulationSourceType.SIMULATED_OUTPUT,
+                )
+            )
     return tuple(artifacts)
 
 
@@ -1620,6 +1846,12 @@ def _scenario_run_metrics(
         for result in order_results
         if result.cancel_result is not None
         and result.cancel_result.outcome_code == SIMULATION_CANCEL_FILL_RACE_LOST
+    )
+    disconnect_window_count = (
+        1 if _disconnect_window_from_configuration(scenario.configuration) is not None else 0
+    )
+    open_order_disconnect_count = sum(
+        1 for result in order_results if result.disconnect_result is not None
     )
     duplicate_market_event_count = _duplicate_market_event_count(scenario.market_events)
     projected_market_event_count = len(scenario.market_events) - duplicate_market_event_count
@@ -1695,9 +1927,19 @@ def _scenario_run_metrics(
             unit="count",
         ),
         SimulationMetric(
+            name="disconnect_window_count",
+            value=Decimal(disconnect_window_count),
+            unit="count",
+        ),
+        SimulationMetric(
             name="filled_quantity",
             value=parse_decimal(filled_quantity, field_name="filled_quantity metric"),
             unit="contracts",
+        ),
+        SimulationMetric(
+            name="open_order_disconnect_count",
+            value=Decimal(open_order_disconnect_count),
+            unit="count",
         ),
         SimulationMetric(
             name="duplicate_market_event_count",
@@ -1918,6 +2160,36 @@ def _available_balance_from_configuration(
             reason_code="simulation_scenario_runner_balance_configuration_invalid",
         )
     return available_balance
+
+
+def _disconnect_window_from_configuration(
+    configuration: SimulationConfiguration,
+) -> tuple[datetime, datetime | None] | None:
+    disconnected_at_raw = configuration.parameters.get(_CONNECTIVITY_DISCONNECTED_AT_PARAMETER)
+    reconnected_at_raw = configuration.parameters.get(_CONNECTIVITY_RECONNECTED_AT_PARAMETER)
+    if disconnected_at_raw is None and reconnected_at_raw is None:
+        return None
+    if disconnected_at_raw is None:
+        raise SimulationConfigurationError(
+            "Scenario runner disconnect configuration is invalid",
+            reason_code="simulation_scenario_runner_disconnect_configuration_invalid",
+        )
+    try:
+        disconnected_at = parse_utc_datetime(disconnected_at_raw)
+        reconnected_at = (
+            parse_utc_datetime(reconnected_at_raw) if reconnected_at_raw is not None else None
+        )
+    except (TypeError, ValueError) as exc:
+        raise SimulationConfigurationError(
+            "Scenario runner disconnect configuration is invalid",
+            reason_code="simulation_scenario_runner_disconnect_configuration_invalid",
+        ) from exc
+    if reconnected_at is not None and reconnected_at <= disconnected_at:
+        raise SimulationConfigurationError(
+            "Scenario runner disconnect configuration is invalid",
+            reason_code="simulation_scenario_runner_disconnect_configuration_invalid",
+        )
+    return disconnected_at, reconnected_at
 
 
 def _required_balance_for_intent(intent: OrderIntent) -> Decimal | None:
