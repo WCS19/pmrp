@@ -8,6 +8,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
+from pmrp.schemas.serialization import canonical_sha256
 from pmrp.schemas.simulation import SimulationConfiguration
 from pmrp.simulation import (
     SimulationArtifact,
@@ -76,14 +77,14 @@ def test_simulation_result_artifact_order_uses_explicit_sequence(value: Decimal)
         sequence=0,
         artifact_type="order",
         artifact_id="ord_001",
-        artifact_hash="sha256:order001",
+        artifact_hash=_artifact_hash("order-001"),
         source_type=SimulationSourceType.SIMULATED_OUTPUT,
     )
     later_artifact = SimulationArtifact(
         sequence=1,
         artifact_type="fill",
         artifact_id="fill_001",
-        artifact_hash="sha256:fill001",
+        artifact_hash=_artifact_hash("fill-001"),
         source_type=SimulationSourceType.SIMULATED_OUTPUT,
     )
 
@@ -119,3 +120,7 @@ def _configuration() -> SimulationConfiguration:
             "parameters": {},
         }
     )
+
+
+def _artifact_hash(value: str) -> str:
+    return canonical_sha256({"artifact": value})

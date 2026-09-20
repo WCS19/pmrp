@@ -29,14 +29,14 @@ def test_simulation_result_builds_deterministic_summary() -> None:
             sequence=1,
             artifact_type="fill",
             artifact_id="fill_001",
-            artifact_hash="sha256:fill001",
+            artifact_hash=_artifact_hash("fill-001"),
             source_type=SimulationSourceType.SIMULATED_OUTPUT,
         ),
         SimulationArtifact(
             sequence=0,
             artifact_type="order_intent",
             artifact_id="intent_001",
-            artifact_hash="sha256:intent001",
+            artifact_hash=_artifact_hash("intent-001"),
             source_type=SimulationSourceType.OBSERVED_FACT,
         ),
     )
@@ -72,14 +72,14 @@ def test_simulation_result_checksum_is_independent_of_metric_and_artifact_input_
         sequence=0,
         artifact_type="order",
         artifact_id="ord_001",
-        artifact_hash="sha256:order001",
+        artifact_hash=_artifact_hash("order-001"),
         source_type=SimulationSourceType.SIMULATED_OUTPUT,
     )
     second_artifact = SimulationArtifact(
         sequence=1,
         artifact_type="fill",
         artifact_id="fill_001",
-        artifact_hash="sha256:fill001",
+        artifact_hash=_artifact_hash("fill-001"),
         source_type=SimulationSourceType.SIMULATED_OUTPUT,
     )
     first_metric = SimulationMetric(name="filled_quantity", value=Decimal("3"), unit="contracts")
@@ -118,6 +118,60 @@ def test_simulation_result_checksum_changes_when_inputs_change() -> None:
     assert base_checksum != changed_checksum
 
 
+def test_simulation_result_constructor_enforces_invariants() -> None:
+    configuration = _configuration()
+    first_artifact = SimulationArtifact(
+        sequence=0,
+        artifact_type="order",
+        artifact_id="ord_001",
+        artifact_hash=_artifact_hash("order-001"),
+        source_type=SimulationSourceType.SIMULATED_OUTPUT,
+    )
+    second_artifact = SimulationArtifact(
+        sequence=1,
+        artifact_type="fill",
+        artifact_id="fill_001",
+        artifact_hash=_artifact_hash("fill-001"),
+        source_type=SimulationSourceType.SIMULATED_OUTPUT,
+    )
+    metric = SimulationMetric(name="filled_quantity", value=Decimal("3"), unit="contracts")
+    result_checksum = calculate_simulation_result_checksum(
+        configuration=configuration,
+        artifacts=(second_artifact, first_artifact),
+        metrics=(metric,),
+    )
+
+    result = SimulationResult(
+        configuration=configuration,
+        artifacts=(second_artifact, first_artifact),
+        metrics=(metric,),
+        result_checksum=result_checksum,
+    )
+
+    assert result.artifacts == (first_artifact, second_artifact)
+    assert result.result_checksum == result_checksum
+
+    with pytest.raises(SimulationConfigurationError) as checksum_error:
+        SimulationResult(
+            configuration=configuration,
+            artifacts=(first_artifact, second_artifact),
+            metrics=(metric,),
+            result_checksum=_artifact_hash("stale-result"),
+        )
+
+    assert checksum_error.value.reason_code == "simulation_result_checksum_mismatch"
+
+    with pytest.raises(SimulationConfigurationError) as duplicate_error:
+        SimulationResult(
+            configuration=configuration,
+            artifacts=(first_artifact, first_artifact),
+            metrics=(),
+            result_checksum=_artifact_hash("unused-result"),
+        )
+
+    assert duplicate_error.value.reason_code == "simulation_result_artifact_sequence_duplicate"
+
+
 def test_simulation_results_reject_invalid_inputs() -> None:
     configuration = _configuration()
 
@@ -140,14 +194,14 @@ def test_simulation_results_reject_invalid_inputs() -> None:
                     sequence=0,
                     artifact_type="order",
                     artifact_id="ord_001",
-                    artifact_hash="sha256:order001",
+                    artifact_hash=_artifact_hash("order-001"),
                     source_type=SimulationSourceType.SIMULATED_OUTPUT,
                 ),
                 SimulationArtifact(
                     sequence=0,
                     artifact_type="fill",
                     artifact_id="fill_001",
-                    artifact_hash="sha256:fill001",
+                    artifact_hash=_artifact_hash("fill-001"),
                     source_type=SimulationSourceType.SIMULATED_OUTPUT,
                 ),
             ),
@@ -173,11 +227,11 @@ def test_simulation_artifacts_and_metrics_reject_invalid_values() -> None:
             sequence=-1,
             artifact_type="fill",
             artifact_id="fill_001",
-            artifact_hash="sha256:fill001",
+            artifact_hash=_artifact_hash("fill-001"),
             source_type=SimulationSourceType.SIMULATED_OUTPUT,
         )
 
-    with pytest.raises(ValueError, match="start with"):
+    with pytest.raises(ValueError, match="canonical sha256 digest"):
         SimulationArtifact(
             sequence=0,
             artifact_type="fill",
@@ -186,12 +240,21 @@ def test_simulation_artifacts_and_metrics_reject_invalid_values() -> None:
             source_type=SimulationSourceType.SIMULATED_OUTPUT,
         )
 
+    with pytest.raises(ValueError, match="canonical sha256 digest"):
+        SimulationArtifact(
+            sequence=0,
+            artifact_type="fill",
+            artifact_id="fill_001",
+            artifact_hash="sha256:raw_payload_must_not_fit_digest_shape",
+            source_type=SimulationSourceType.SIMULATED_OUTPUT,
+        )
+
     with pytest.raises(TypeError, match="SimulationSourceType"):
         SimulationArtifact(
             sequence=0,
             artifact_type="fill",
             artifact_id="fill_001",
-            artifact_hash="sha256:fill001",
+            artifact_hash=_artifact_hash("fill-001"),
             source_type="simulated_output",  # type: ignore[arg-type]
         )
 
@@ -237,3 +300,7 @@ def _configuration(**overrides: object) -> SimulationConfiguration:
     }
     payload.update(overrides)
     return SimulationConfiguration.model_validate(payload)
+
+
+def _artifact_hash(value: str) -> str:
+    return canonical_sha256({"artifact": value})

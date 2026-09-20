@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -16,9 +17,8 @@ from pmrp.simulation.errors import SimulationConfigurationError
 
 SIMULATION_RESULT_CHECKSUM_VERSION = "simulation_result_checksum_v1"
 
-_HASH_PREFIX = "sha256:"
-_MAX_HASH_LENGTH = 256
 _MAX_TEXT_LENGTH = 128
+_SHA256_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
 class SimulationSourceType(StrEnum):
@@ -109,6 +109,30 @@ class SimulationResult:
     artifacts: tuple[SimulationArtifact, ...]
     metrics: tuple[SimulationMetric, ...]
     result_checksum: str
+
+    def __post_init__(self) -> None:
+        configuration = _validate_configuration(self.configuration)
+        artifacts = _normalize_artifacts(self.artifacts)
+        metrics = _normalize_metrics(self.metrics)
+        result_checksum = _validate_hash(self.result_checksum, field_name="result_checksum")
+        expected_checksum = calculate_simulation_result_checksum(
+            configuration=configuration,
+            artifacts=artifacts,
+            metrics=metrics,
+        )
+        if result_checksum != expected_checksum:
+            raise SimulationConfigurationError(
+                "Simulation result checksum must match canonical result payload",
+                reason_code="simulation_result_checksum_mismatch",
+                context={
+                    "expected_checksum": expected_checksum,
+                    "actual_checksum": result_checksum,
+                },
+            )
+        object.__setattr__(self, "configuration", configuration)
+        object.__setattr__(self, "artifacts", artifacts)
+        object.__setattr__(self, "metrics", metrics)
+        object.__setattr__(self, "result_checksum", result_checksum)
 
     @classmethod
     def build(
@@ -258,9 +282,9 @@ def _normalize_metrics(metrics: tuple[SimulationMetric, ...]) -> tuple[Simulatio
 
 
 def _validate_hash(value: str, *, field_name: str) -> str:
-    value = _validate_text(value, field_name=field_name, max_length=_MAX_HASH_LENGTH)
-    if not value.startswith(_HASH_PREFIX):
-        msg = f"{field_name} must start with {_HASH_PREFIX!r}"
+    value = _validate_text(value, field_name=field_name)
+    if _SHA256_PATTERN.fullmatch(value) is None:
+        msg = f"{field_name} must be a canonical sha256 digest"
         raise ValueError(msg)
     return value
 
