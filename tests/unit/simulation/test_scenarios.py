@@ -13,6 +13,8 @@ from pmrp.schemas.orders import CancelOrderRequest, Fill, OrderIntent
 from pmrp.schemas.serialization import canonical_sha256
 from pmrp.schemas.simulation import SimulationConfiguration
 from pmrp.simulation import (
+    SIMULATION_CANCEL_BEFORE_ACTIVATION,
+    SIMULATION_CANCEL_FILL_RACE_LOST,
     SIMULATION_SCENARIO_HASH_VERSION,
     SIMULATION_SCENARIO_RUNNER_MODEL_NAME,
     DeterministicScenarioRunner,
@@ -436,7 +438,110 @@ def test_deterministic_scenario_runner_records_rejections_without_fill_outputs()
     assert run.result.source_type_counts[SimulationSourceType.SIMULATED_OUTPUT] == 2
 
 
-def test_deterministic_scenario_runner_rejects_unsupported_cancel_actions() -> None:
+def test_deterministic_scenario_runner_cancels_before_activation() -> None:
+    scenario = _scenario(
+        scenario_id="SIM-005",
+        name="cancel before activation",
+        order_actions=(
+            ScheduledOrderAction(
+                sequence=1,
+                scheduled_at=NOW,
+                action=_intent(quantity="10", limit_price="0.43"),
+            ),
+            ScheduledOrderAction(
+                sequence=2,
+                scheduled_at=NOW + timedelta(milliseconds=50),
+                action=_cancel_request(),
+            ),
+        ),
+    )
+
+    run = DeterministicScenarioRunner.from_configuration(scenario.configuration).run(scenario)
+    order_result = run.order_results[0]
+    metrics = {metric.name: metric.value for metric in run.result.metrics}
+
+    assert order_result.admission.accepted
+    assert order_result.cancel_result is not None
+    assert order_result.cancel_result.outcome_code == SIMULATION_CANCEL_BEFORE_ACTIVATION
+    assert order_result.activation_book is None
+    assert order_result.fill_estimate is None
+    assert order_result.fee_estimates == ()
+    assert "cancel_result" in order_result.canonical_payload()
+    assert metrics["cancel_action_count"] == Decimal("1")
+    assert metrics["canceled_before_activation_count"] == Decimal("1")
+    assert metrics["cancel_fill_race_count"] == Decimal("0")
+    assert metrics["filled_order_count"] == Decimal("0")
+    assert metrics["filled_quantity"] == Decimal("0")
+
+
+def test_deterministic_scenario_runner_records_fill_during_cancel_race() -> None:
+    scenario = _scenario(
+        scenario_id="SIM-006",
+        name="fill during cancel race",
+        order_actions=(
+            ScheduledOrderAction(
+                sequence=1,
+                scheduled_at=NOW,
+                action=_intent(quantity="10", limit_price="0.43"),
+            ),
+            ScheduledOrderAction(
+                sequence=2,
+                scheduled_at=NOW + timedelta(milliseconds=200),
+                action=_cancel_request(),
+            ),
+        ),
+    )
+
+    run = DeterministicScenarioRunner.from_configuration(scenario.configuration).run(scenario)
+    order_result = run.order_results[0]
+    metrics = {metric.name: metric.value for metric in run.result.metrics}
+
+    assert order_result.cancel_result is not None
+    assert order_result.cancel_result.outcome_code == SIMULATION_CANCEL_FILL_RACE_LOST
+    assert order_result.activation_book is not None
+    assert order_result.fill_estimate is not None
+    assert order_result.fill_estimate.filled_quantity == Decimal("10")
+    assert len(order_result.fee_estimates) == 1
+    assert metrics["cancel_action_count"] == Decimal("1")
+    assert metrics["cancel_fill_race_count"] == Decimal("1")
+    assert metrics["canceled_before_activation_count"] == Decimal("0")
+    assert metrics["filled_order_count"] == Decimal("1")
+
+
+def test_deterministic_scenario_runner_uses_noncolliding_artifact_sequences() -> None:
+    order_actions = tuple(
+        ScheduledOrderAction(
+            sequence=index + 1,
+            scheduled_at=NOW,
+            action=_intent(
+                intent_id=f"intent_scenario_bulk_{index:03d}",
+                correlation_id=f"corr_scenario_bulk_{index:03d}",
+                quantity="1",
+            ),
+        )
+        for index in range(331)
+    )
+    scenario = _scenario(
+        scenario_id="SIM-BULK-CANCEL",
+        name="bulk cancel artifact sequence regression",
+        order_actions=(
+            *order_actions,
+            ScheduledOrderAction(
+                sequence=332,
+                scheduled_at=NOW + timedelta(milliseconds=200),
+                action=_cancel_request(correlation_id="corr_scenario_bulk_330"),
+            ),
+        ),
+    )
+
+    run = DeterministicScenarioRunner.from_configuration(scenario.configuration).run(scenario)
+    artifact_sequences = [artifact.sequence for artifact in run.result.artifacts]
+
+    assert run.order_results[330].cancel_result is not None
+    assert len(set(artifact_sequences)) == len(artifact_sequences)
+
+
+def test_deterministic_scenario_runner_rejects_unmatched_cancel_actions() -> None:
     scenario = _scenario(
         order_actions=(
             ScheduledOrderAction(
@@ -450,7 +555,7 @@ def test_deterministic_scenario_runner_rejects_unsupported_cancel_actions() -> N
     with pytest.raises(SimulationConfigurationError) as error:
         DeterministicScenarioRunner.from_configuration(scenario.configuration).run(scenario)
 
-    assert error.value.reason_code == "simulation_scenario_cancel_unsupported"
+    assert error.value.reason_code == "simulation_scenario_cancel_unmatched"
 
 
 def test_deterministic_scenario_runner_rejects_unsupported_configuration() -> None:
@@ -634,6 +739,7 @@ def _intent(
     side: Side = Side.BUY,
     quantity: str | Decimal = "10",
     limit_price: str | Decimal | None = "0.43",
+    correlation_id: str = "corr_scenario_001",
 ) -> OrderIntent:
     return OrderIntent.model_validate(
         {
@@ -653,13 +759,17 @@ def _intent(
             "created_at": NOW,
             "expires_at": NOW + timedelta(seconds=5),
             "signal_ids": (),
-            "correlation_id": "corr_scenario_001",
+            "correlation_id": correlation_id,
             "idempotency_key": f"idem-{intent_id}",
         }
     )
 
 
-def _cancel_request(*, exchange: str = "kalshi") -> CancelOrderRequest:
+def _cancel_request(
+    *,
+    exchange: str = "kalshi",
+    correlation_id: str = "corr_scenario_001",
+) -> CancelOrderRequest:
     return CancelOrderRequest.model_validate(
         {
             "cancel_request_id": "cancel_scenario_001",
@@ -670,7 +780,7 @@ def _cancel_request(*, exchange: str = "kalshi") -> CancelOrderRequest:
             "exchange_order_id": "exchange-order-scenario-001",
             "requested_at": NOW + timedelta(milliseconds=300),
             "idempotency_key": "idem-scenario-cancel-001",
-            "correlation_id": "corr_scenario_001",
+            "correlation_id": correlation_id,
         }
     )
 

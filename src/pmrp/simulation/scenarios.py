@@ -57,6 +57,9 @@ from pmrp.simulation.results import (
 
 SIMULATION_SCENARIO_HASH_VERSION = "simulation_scenario_hash_v1"
 SIMULATION_SCENARIO_RUNNER_MODEL_NAME = "simulation_scenario_runner_v1"
+SIMULATION_CANCEL_AFTER_ACTIVATION_NO_FILL = "simulation_cancel_after_activation_no_fill"
+SIMULATION_CANCEL_BEFORE_ACTIVATION = "simulation_cancel_before_activation"
+SIMULATION_CANCEL_FILL_RACE_LOST = "simulation_cancel_fill_race_lost"
 
 _MAX_TEXT_LENGTH = 128
 _ZERO = Decimal("0")
@@ -66,6 +69,15 @@ _FEE_FIXED_PARAMETER = "fee.{role}.fixed"
 _FEE_FIXED_REBATE_PARAMETER = "fee.{role}.fixed_rebate"
 _FEE_RATE_BPS_PARAMETER = "fee.{role}.rate_bps"
 _FEE_REBATE_RATE_BPS_PARAMETER = "fee.{role}.rebate_rate_bps"
+_ORDER_RESULT_ARTIFACT_BASE_SEQUENCE = 10
+_ORDER_RESULT_ARTIFACT_STRIDE = 4
+_CANCEL_OUTCOME_CODES = frozenset(
+    {
+        SIMULATION_CANCEL_AFTER_ACTIVATION_NO_FILL,
+        SIMULATION_CANCEL_BEFORE_ACTIVATION,
+        SIMULATION_CANCEL_FILL_RACE_LOST,
+    }
+)
 
 type ScenarioMarketEventPayload = OrderBookSnapshot | OrderBookDelta | Trade
 type ScenarioOrderActionPayload = OrderIntent | CancelOrderRequest
@@ -316,6 +328,7 @@ class SimulatedScenarioOrderResult:
     activation_book: OrderBookSnapshot | None
     fill_estimate: FillEstimate | None
     fee_estimates: tuple[FeeEstimate, ...] = ()
+    cancel_result: SimulatedScenarioCancelResult | None = None
     source_type: SimulationSourceType = SimulationSourceType.SIMULATED_OUTPUT
 
     def __post_init__(self) -> None:
@@ -338,11 +351,23 @@ class SimulatedScenarioOrderResult:
             msg = "fill_estimate must be a FillEstimate"
             raise TypeError(msg)
         fee_estimates = _normalize_fee_estimates(self.fee_estimates)
+        cancel_result = _validate_cancel_result(self.cancel_result)
         if self.admission.rejected:
             if self.activation_book is not None or self.fill_estimate is not None or fee_estimates:
                 raise SimulationConfigurationError(
                     "Rejected scenario orders must not include activation, fill, or fee outputs",
                     reason_code="simulation_scenario_rejected_order_output_invalid",
+                )
+            if cancel_result is not None:
+                raise SimulationConfigurationError(
+                    "Rejected scenario orders must not include cancellation outputs",
+                    reason_code="simulation_scenario_rejected_order_cancel_invalid",
+                )
+        elif cancel_result is not None and cancel_result.before_activation:
+            if self.activation_book is not None or self.fill_estimate is not None or fee_estimates:
+                raise SimulationConfigurationError(
+                    "Pre-activation cancelled scenario orders must not include fill outputs",
+                    reason_code="simulation_scenario_cancelled_order_output_invalid",
                 )
         elif self.activation_book is None or self.fill_estimate is None:
             raise SimulationConfigurationError(
@@ -365,6 +390,7 @@ class SimulatedScenarioOrderResult:
                 context={"source_type": str(self.source_type)},
             )
         object.__setattr__(self, "fee_estimates", fee_estimates)
+        object.__setattr__(self, "cancel_result", cancel_result)
 
     @property
     def order_result_hash(self) -> str:
@@ -391,7 +417,79 @@ class SimulatedScenarioOrderResult:
             payload["fee_estimates"] = [
                 _fee_estimate_payload(estimate) for estimate in self.fee_estimates
             ]
+        if self.cancel_result is not None:
+            payload["cancel_result"] = self.cancel_result.canonical_payload()
         return payload
+
+
+@dataclass(frozen=True, slots=True)
+class SimulatedScenarioCancelResult:
+    """One deterministic cancellation result produced by a scenario run."""
+
+    sequence: int
+    action: ScheduledOrderAction
+    target_order_sequence: int
+    requested_at: datetime
+    effective_at: datetime
+    outcome_code: str
+    source_type: SimulationSourceType = SimulationSourceType.SIMULATED_OUTPUT
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "sequence", _validate_sequence(self.sequence))
+        if not isinstance(self.action, ScheduledOrderAction):
+            msg = "action must be a ScheduledOrderAction"
+            raise TypeError(msg)
+        if not isinstance(self.action.action, CancelOrderRequest):
+            raise SimulationConfigurationError(
+                "Scenario cancel results require a cancel request action",
+                reason_code="simulation_scenario_cancel_result_action_invalid",
+                context={"action_type": self.action.action_type},
+            )
+        object.__setattr__(
+            self,
+            "target_order_sequence",
+            _validate_sequence(self.target_order_sequence),
+        )
+        object.__setattr__(self, "requested_at", parse_utc_datetime(self.requested_at))
+        object.__setattr__(self, "effective_at", parse_utc_datetime(self.effective_at))
+        if self.effective_at < self.requested_at:
+            raise SimulationConfigurationError(
+                "Scenario cancel effective_at must be at or after requested_at",
+                reason_code="simulation_scenario_cancel_time_invalid",
+            )
+        object.__setattr__(self, "outcome_code", _validate_cancel_outcome(self.outcome_code))
+        if self.source_type is not SimulationSourceType.SIMULATED_OUTPUT:
+            raise SimulationConfigurationError(
+                "Scenario cancel results must be classified as simulated output",
+                reason_code="simulation_scenario_cancel_result_source_invalid",
+                context={"source_type": str(self.source_type)},
+            )
+
+    @property
+    def before_activation(self) -> bool:
+        """Return whether this cancel prevented order activation."""
+
+        return self.outcome_code == SIMULATION_CANCEL_BEFORE_ACTIVATION
+
+    @property
+    def cancel_result_hash(self) -> str:
+        """Return the deterministic hash of this cancel result."""
+
+        return canonical_sha256(self.canonical_payload())
+
+    def canonical_payload(self) -> Mapping[str, object]:
+        """Return stable JSON-compatible simulated cancel-result data."""
+
+        return {
+            "action": self.action.canonical_payload(),
+            "effective_at": self.effective_at,
+            "outcome_code": self.outcome_code,
+            "requested_at": self.requested_at,
+            "runner_model": SIMULATION_SCENARIO_RUNNER_MODEL_NAME,
+            "sequence": self.sequence,
+            "source_type": self.source_type,
+            "target_order_sequence": self.target_order_sequence,
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -515,15 +613,29 @@ class DeterministicScenarioRunner:
         _validate_runner_configuration(scenario.configuration)
         fee_model = _fee_model_for_scenario(scenario, fee_model=self.fee_model)
         final_book = _project_book_until(scenario=scenario, through=None)
-        order_results = tuple(
-            self._run_order_action(
+        used_cancel_sequences: set[int] = set()
+        order_results_list: list[SimulatedScenarioOrderResult] = []
+        for index, action in enumerate(_order_intent_actions(scenario.order_actions)):
+            cancel_action = _matching_cancel_action(
+                scenario=scenario,
+                action=action,
+                used_cancel_sequences=used_cancel_sequences,
+            )
+            order_result = self._run_order_action(
                 scenario=scenario,
                 action=action,
                 sequence=index,
                 fee_model=fee_model,
+                cancel_action=cancel_action,
             )
-            for index, action in enumerate(scenario.order_actions)
+            if order_result.cancel_result is not None:
+                used_cancel_sequences.add(order_result.cancel_result.sequence)
+            order_results_list.append(order_result)
+        _validate_no_unmatched_cancel_actions(
+            scenario.order_actions,
+            used_cancel_sequences=used_cancel_sequences,
         )
+        order_results = tuple(order_results_list)
         result = _build_scenario_run_result(
             scenario=scenario,
             final_book=final_book,
@@ -543,11 +655,12 @@ class DeterministicScenarioRunner:
         action: ScheduledOrderAction,
         sequence: int,
         fee_model: FeeModel,
+        cancel_action: ScheduledOrderAction | None,
     ) -> SimulatedScenarioOrderResult:
         if not isinstance(action.action, OrderIntent):
             raise SimulationConfigurationError(
-                "Scenario runner currently supports order intent actions only",
-                reason_code="simulation_scenario_cancel_unsupported",
+                "Scenario runner order execution requires an order intent action",
+                reason_code="simulation_scenario_order_action_invalid",
                 context={"action_type": action.action_type},
             )
         intent = action.action
@@ -569,6 +682,19 @@ class DeterministicScenarioRunner:
                 "Accepted scenario order is missing activation time",
                 reason_code="simulation_scenario_activation_missing",
             )
+        if cancel_action is not None and cancel_action.scheduled_at < admission.activates_at:
+            return SimulatedScenarioOrderResult(
+                sequence=sequence,
+                action=action,
+                admission=admission,
+                activation_book=None,
+                fill_estimate=None,
+                cancel_result=_cancel_result(
+                    action=cancel_action,
+                    target_order_sequence=sequence,
+                    outcome_code=SIMULATION_CANCEL_BEFORE_ACTIVATION,
+                ),
+            )
         if intent.limit_price is None:
             raise SimulationConfigurationError(
                 "Accepted scenario order requires limit_price for deterministic fill",
@@ -589,6 +715,19 @@ class DeterministicScenarioRunner:
             exchange=scenario.initial_book.exchange,
             fill_estimate=fill_estimate,
         )
+        cancel_result = (
+            _cancel_result(
+                action=cancel_action,
+                target_order_sequence=sequence,
+                outcome_code=(
+                    SIMULATION_CANCEL_FILL_RACE_LOST
+                    if fill_estimate.has_fill
+                    else SIMULATION_CANCEL_AFTER_ACTIVATION_NO_FILL
+                ),
+            )
+            if cancel_action is not None
+            else None
+        )
         return SimulatedScenarioOrderResult(
             sequence=sequence,
             action=action,
@@ -596,6 +735,7 @@ class DeterministicScenarioRunner:
             activation_book=activation_book,
             fill_estimate=fill_estimate,
             fee_estimates=fee_estimates,
+            cancel_result=cancel_result,
         )
 
 
@@ -627,6 +767,30 @@ def _validate_source_type(source_type: SimulationSourceType) -> None:
     if not isinstance(source_type, SimulationSourceType):
         msg = "source_type must be a SimulationSourceType"
         raise TypeError(msg)
+
+
+def _validate_cancel_outcome(outcome_code: str) -> str:
+    if type(outcome_code) is not str:
+        msg = "outcome_code must be a string"
+        raise TypeError(msg)
+    if outcome_code not in _CANCEL_OUTCOME_CODES:
+        raise SimulationConfigurationError(
+            "Scenario cancel result outcome_code is unsupported",
+            reason_code="simulation_scenario_cancel_result_outcome_invalid",
+            context={"outcome_code": outcome_code},
+        )
+    return outcome_code
+
+
+def _validate_cancel_result(
+    cancel_result: SimulatedScenarioCancelResult | None,
+) -> SimulatedScenarioCancelResult | None:
+    if cancel_result is None:
+        return None
+    if not isinstance(cancel_result, SimulatedScenarioCancelResult):
+        msg = "cancel_result must be a SimulatedScenarioCancelResult"
+        raise TypeError(msg)
+    return cancel_result
 
 
 def _validate_text(value: str, *, field_name: str, max_length: int = _MAX_TEXT_LENGTH) -> str:
@@ -963,6 +1127,80 @@ def _normalize_order_results(
     return sorted_results
 
 
+def _order_intent_actions(
+    actions: tuple[ScheduledOrderAction, ...],
+) -> tuple[ScheduledOrderAction, ...]:
+    return tuple(action for action in actions if isinstance(action.action, OrderIntent))
+
+
+def _cancel_request_actions(
+    actions: tuple[ScheduledOrderAction, ...],
+) -> tuple[ScheduledOrderAction, ...]:
+    return tuple(action for action in actions if isinstance(action.action, CancelOrderRequest))
+
+
+def _matching_cancel_action(
+    *,
+    scenario: SimulationScenario,
+    action: ScheduledOrderAction,
+    used_cancel_sequences: set[int],
+) -> ScheduledOrderAction | None:
+    if not isinstance(action.action, OrderIntent):
+        return None
+    candidates = [
+        cancel_action
+        for cancel_action in _cancel_request_actions(scenario.order_actions)
+        if _cancel_matches_order_intent(
+            cancel_action=cancel_action,
+            action=action,
+            exchange=scenario.initial_book.exchange,
+            used_cancel_sequences=used_cancel_sequences,
+        )
+    ]
+    if not candidates:
+        return None
+    return min(candidates, key=lambda candidate: (candidate.scheduled_at, candidate.sequence))
+
+
+def _cancel_matches_order_intent(
+    *,
+    cancel_action: ScheduledOrderAction,
+    action: ScheduledOrderAction,
+    exchange: str,
+    used_cancel_sequences: set[int],
+) -> bool:
+    if cancel_action.sequence in used_cancel_sequences:
+        return False
+    if not isinstance(cancel_action.action, CancelOrderRequest):
+        return False
+    if not isinstance(action.action, OrderIntent):
+        return False
+    return (
+        cancel_action.scheduled_at >= action.scheduled_at
+        and cancel_action.action.exchange == exchange
+        and cancel_action.action.correlation_id == action.action.correlation_id
+    )
+
+
+def _validate_no_unmatched_cancel_actions(
+    actions: tuple[ScheduledOrderAction, ...],
+    *,
+    used_cancel_sequences: set[int],
+) -> None:
+    unmatched = [
+        action
+        for action in _cancel_request_actions(actions)
+        if action.sequence not in used_cancel_sequences
+    ]
+    if not unmatched:
+        return
+    raise SimulationConfigurationError(
+        "Scenario cancel action did not match an order intent",
+        reason_code="simulation_scenario_cancel_unmatched",
+        context={"cancel_sequence": str(unmatched[0].sequence)},
+    )
+
+
 def _normalize_fee_estimates(
     fee_estimates: tuple[FeeEstimate, ...],
 ) -> tuple[FeeEstimate, ...]:
@@ -973,6 +1211,22 @@ def _normalize_fee_estimates(
         msg = "fee_estimates must contain only FeeEstimate values"
         raise TypeError(msg)
     return fee_estimates
+
+
+def _cancel_result(
+    *,
+    action: ScheduledOrderAction,
+    target_order_sequence: int,
+    outcome_code: str,
+) -> SimulatedScenarioCancelResult:
+    return SimulatedScenarioCancelResult(
+        sequence=action.sequence,
+        action=action,
+        target_order_sequence=target_order_sequence,
+        requested_at=action.scheduled_at,
+        effective_at=action.scheduled_at,
+        outcome_code=outcome_code,
+    )
 
 
 def _build_scenario_run_result(
@@ -1013,9 +1267,10 @@ def _scenario_run_artifacts(
         ),
     ]
     for index, order_result in enumerate(order_results):
+        sequence_base = _ORDER_RESULT_ARTIFACT_BASE_SEQUENCE + index * _ORDER_RESULT_ARTIFACT_STRIDE
         artifacts.append(
             SimulationArtifact(
-                sequence=10 + index * 3,
+                sequence=sequence_base,
                 artifact_type="simulation_order_result",
                 artifact_id=f"{scenario.scenario_id}:order:{order_result.sequence}",
                 artifact_hash=order_result.order_result_hash,
@@ -1025,7 +1280,7 @@ def _scenario_run_artifacts(
         if order_result.fill_estimate is not None:
             artifacts.append(
                 SimulationArtifact(
-                    sequence=11 + index * 3,
+                    sequence=sequence_base + 1,
                     artifact_type="simulation_fill_estimate",
                     artifact_id=f"{scenario.scenario_id}:fill:{order_result.sequence}",
                     artifact_hash=canonical_sha256(
@@ -1037,12 +1292,22 @@ def _scenario_run_artifacts(
         if order_result.fee_estimates:
             artifacts.append(
                 SimulationArtifact(
-                    sequence=12 + index * 3,
+                    sequence=sequence_base + 2,
                     artifact_type="simulation_fee_estimates",
                     artifact_id=f"{scenario.scenario_id}:fees:{order_result.sequence}",
                     artifact_hash=canonical_sha256(
                         [_fee_estimate_payload(estimate) for estimate in order_result.fee_estimates]
                     ),
+                    source_type=SimulationSourceType.SIMULATED_OUTPUT,
+                )
+            )
+        if order_result.cancel_result is not None:
+            artifacts.append(
+                SimulationArtifact(
+                    sequence=sequence_base + 3,
+                    artifact_type="simulation_cancel_result",
+                    artifact_id=f"{scenario.scenario_id}:cancel:{order_result.sequence}",
+                    artifact_hash=order_result.cancel_result.cancel_result_hash,
                     source_type=SimulationSourceType.SIMULATED_OUTPUT,
                 )
             )
@@ -1065,6 +1330,19 @@ def _scenario_run_metrics(
         1
         for result in order_results
         if result.fill_estimate is not None and result.fill_estimate.is_partial
+    )
+    cancel_action_count = sum(1 for result in order_results if result.cancel_result is not None)
+    canceled_before_activation_count = sum(
+        1
+        for result in order_results
+        if result.cancel_result is not None
+        and result.cancel_result.outcome_code == SIMULATION_CANCEL_BEFORE_ACTIVATION
+    )
+    cancel_fill_race_count = sum(
+        1
+        for result in order_results
+        if result.cancel_result is not None
+        and result.cancel_result.outcome_code == SIMULATION_CANCEL_FILL_RACE_LOST
     )
     filled_quantity = sum(
         (
@@ -1100,6 +1378,21 @@ def _scenario_run_metrics(
         SimulationMetric(
             name="filled_order_count",
             value=Decimal(filled_order_count),
+            unit="count",
+        ),
+        SimulationMetric(
+            name="cancel_action_count",
+            value=Decimal(cancel_action_count),
+            unit="count",
+        ),
+        SimulationMetric(
+            name="cancel_fill_race_count",
+            value=Decimal(cancel_fill_race_count),
+            unit="count",
+        ),
+        SimulationMetric(
+            name="canceled_before_activation_count",
+            value=Decimal(canceled_before_activation_count),
             unit="count",
         ),
         SimulationMetric(
