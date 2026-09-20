@@ -469,6 +469,25 @@ def test_deterministic_scenario_runner_rejects_unsupported_configuration() -> No
     assert fee_error.value.reason_code == "simulation_scenario_runner_fee_model_unsupported"
 
 
+def test_deterministic_scenario_runner_validates_fee_configuration_without_fills() -> None:
+    scenario = _scenario(
+        configuration=_configuration(
+            parameters={
+                "fee.currency": "usd",
+                "fee.taker.rate_bps": "not-a-decimal",
+            }
+        ),
+        order_actions=(),
+    )
+
+    with pytest.raises(SimulationConfigurationError) as error:
+        DeterministicScenarioRunner.from_configuration(scenario.configuration).run(scenario)
+
+    assert error.value.reason_code == "simulation_scenario_runner_fee_configuration_invalid"
+    assert "not-a-decimal" not in str(error.value)
+    assert "usd" not in str(error.value)
+
+
 def _scenario(
     *,
     scenario_id: str = "SIM-006",

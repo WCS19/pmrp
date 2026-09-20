@@ -513,9 +513,15 @@ class DeterministicScenarioRunner:
 
         scenario = _validate_scenario(scenario)
         _validate_runner_configuration(scenario.configuration)
+        fee_model = _fee_model_for_scenario(scenario, fee_model=self.fee_model)
         final_book = _project_book_until(scenario=scenario, through=None)
         order_results = tuple(
-            self._run_order_action(scenario=scenario, action=action, sequence=index)
+            self._run_order_action(
+                scenario=scenario,
+                action=action,
+                sequence=index,
+                fee_model=fee_model,
+            )
             for index, action in enumerate(scenario.order_actions)
         )
         result = _build_scenario_run_result(
@@ -536,6 +542,7 @@ class DeterministicScenarioRunner:
         scenario: SimulationScenario,
         action: ScheduledOrderAction,
         sequence: int,
+        fee_model: FeeModel,
     ) -> SimulatedScenarioOrderResult:
         if not isinstance(action.action, OrderIntent):
             raise SimulationConfigurationError(
@@ -578,7 +585,7 @@ class DeterministicScenarioRunner:
             quantity=intent.quantity,
         )
         fee_estimates = _estimate_fees(
-            fee_model=_fee_model_for_scenario(scenario, fee_model=self.fee_model),
+            fee_model=fee_model,
             exchange=scenario.initial_book.exchange,
             fill_estimate=fill_estimate,
         )
@@ -1187,26 +1194,33 @@ def _fee_table_model_from_configuration(
 ) -> FeeTableModel:
     parameters = configuration.parameters
     currency = parameters.get(_FEE_CURRENCY_PARAMETER, _DEFAULT_FEE_CURRENCY)
-    return FeeTableModel.from_rules(
-        _fee_rule_from_parameters(
-            exchange=exchange,
-            liquidity_role=LiquidityRole.TAKER,
-            currency=currency,
-            parameters=parameters,
-        ),
-        _fee_rule_from_parameters(
-            exchange=exchange,
-            liquidity_role=LiquidityRole.MAKER,
-            currency=currency,
-            parameters=parameters,
-        ),
-        _fee_rule_from_parameters(
-            exchange=exchange,
-            liquidity_role=LiquidityRole.UNKNOWN,
-            currency=currency,
-            parameters=parameters,
-        ),
-    )
+    try:
+        return FeeTableModel.from_rules(
+            _fee_rule_from_parameters(
+                exchange=exchange,
+                liquidity_role=LiquidityRole.TAKER,
+                currency=currency,
+                parameters=parameters,
+            ),
+            _fee_rule_from_parameters(
+                exchange=exchange,
+                liquidity_role=LiquidityRole.MAKER,
+                currency=currency,
+                parameters=parameters,
+            ),
+            _fee_rule_from_parameters(
+                exchange=exchange,
+                liquidity_role=LiquidityRole.UNKNOWN,
+                currency=currency,
+                parameters=parameters,
+            ),
+        )
+    except (TypeError, ValueError) as exc:
+        raise SimulationConfigurationError(
+            "Scenario runner fee configuration is invalid",
+            reason_code="simulation_scenario_runner_fee_configuration_invalid",
+            context={"fee_model": configuration.fee_model},
+        ) from exc
 
 
 def _fee_rule_from_parameters(
@@ -1272,10 +1286,11 @@ def _fee_metric_currency(
     for result in order_results:
         for estimate in result.fee_estimates:
             return estimate.currency
-    return scenario.configuration.parameters.get(
-        _FEE_CURRENCY_PARAMETER,
-        _DEFAULT_FEE_CURRENCY,
+    fee_model = _fee_table_model_from_configuration(
+        scenario.configuration,
+        exchange=scenario.initial_book.exchange,
     )
+    return fee_model.rules[0].currency
 
 
 def _sum_fee_estimate_field(
