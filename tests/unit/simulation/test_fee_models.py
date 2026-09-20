@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from decimal import Decimal
+from decimal import Decimal, localcontext
 
 import pytest
 
@@ -96,6 +96,42 @@ def test_fee_table_model_supports_explicit_zero_fee_rule() -> None:
     assert estimate.net_fee_amount == Decimal("0")
 
 
+def test_fee_table_model_uses_explicit_decimal_arithmetic_context() -> None:
+    model = FeeTableModel.from_rules(
+        FeeRule(
+            exchange="kalshi",
+            liquidity_role=LiquidityRole.TAKER,
+            fee_rate_bps=Decimal("0.123456789012"),
+            fixed_fee=Decimal("0.000000000001"),
+            rebate_rate_bps=Decimal("0.012345678901"),
+        )
+    )
+    price = Decimal("0.123456789012")
+    quantity = Decimal("0.987654321098")
+
+    with localcontext() as context:
+        context.prec = 12
+        low_precision_estimate = model.estimate(
+            exchange="kalshi",
+            price=price,
+            quantity=quantity,
+            liquidity_role=LiquidityRole.TAKER,
+        )
+        context_sensitive_product = price * quantity
+
+    with localcontext() as context:
+        context.prec = 28
+        default_precision_estimate = model.estimate(
+            exchange="kalshi",
+            price=price,
+            quantity=quantity,
+            liquidity_role=LiquidityRole.TAKER,
+        )
+
+    assert low_precision_estimate == default_precision_estimate
+    assert low_precision_estimate.notional != context_sensitive_product
+
+
 def test_fee_table_model_rejects_missing_and_duplicate_rules() -> None:
     model = FeeTableModel.from_rules(FeeRule(exchange="kalshi", liquidity_role=LiquidityRole.TAKER))
 
@@ -144,6 +180,20 @@ def test_fee_rules_reject_invalid_configuration() -> None:
             fixed_fee=Decimal("-0.01"),
         )
 
+    with pytest.raises(ValueError, match="significant digits"):
+        FeeRule(
+            exchange="kalshi",
+            liquidity_role=LiquidityRole.TAKER,
+            fee_rate_bps=Decimal("0.12345678901234567890123456789"),
+        )
+
+    with pytest.raises(ValueError, match="fractional digits"):
+        FeeRule(
+            exchange="kalshi",
+            liquidity_role=LiquidityRole.TAKER,
+            fixed_rebate=Decimal("0.0000000000000000001"),
+        )
+
 
 def test_fee_table_model_rejects_invalid_estimate_inputs() -> None:
     model = FeeTableModel.from_rules(FeeRule(exchange="kalshi", liquidity_role=LiquidityRole.TAKER))
@@ -171,5 +221,13 @@ def test_fee_table_model_rejects_invalid_estimate_inputs() -> None:
             exchange="kalshi",
             price=Decimal("0.50"),
             quantity=Decimal("0"),
+            liquidity_role=LiquidityRole.TAKER,
+        )
+
+    with pytest.raises(ValueError, match="adjusted exponent"):
+        model.estimate(
+            exchange="kalshi",
+            price=Decimal("1E+37"),
+            quantity=Decimal("1"),
             liquidity_role=LiquidityRole.TAKER,
         )

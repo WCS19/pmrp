@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from decimal import Decimal
+from decimal import Context, Decimal, localcontext
 from typing import Protocol, runtime_checkable
 
 from pmrp.schemas.enums import LiquidityRole
@@ -13,6 +13,10 @@ from pmrp.simulation.errors import SimulationConfigurationError, SimulationInput
 FEE_TABLE_MODEL_NAME = "fee_table_v1"
 
 _BASIS_POINTS_DENOMINATOR = Decimal("10000")
+_FEE_ARITHMETIC_CONTEXT = Context(prec=128)
+_MAX_DECIMAL_ADJUSTED_EXPONENT = 36
+_MAX_DECIMAL_DIGITS = 28
+_MAX_DECIMAL_SCALE = 18
 _ZERO = Decimal("0")
 
 
@@ -37,22 +41,28 @@ class FeeRule:
         object.__setattr__(
             self,
             "fee_rate_bps",
-            _parse_nonnegative_decimal(self.fee_rate_bps, field_name="fee_rate_bps"),
+            _parse_bounded_nonnegative_decimal(self.fee_rate_bps, field_name="fee_rate_bps"),
         )
         object.__setattr__(
             self,
             "fixed_fee",
-            _parse_nonnegative_decimal(self.fixed_fee, field_name="fixed_fee"),
+            _parse_bounded_nonnegative_decimal(self.fixed_fee, field_name="fixed_fee"),
         )
         object.__setattr__(
             self,
             "rebate_rate_bps",
-            _parse_nonnegative_decimal(self.rebate_rate_bps, field_name="rebate_rate_bps"),
+            _parse_bounded_nonnegative_decimal(
+                self.rebate_rate_bps,
+                field_name="rebate_rate_bps",
+            ),
         )
         object.__setattr__(
             self,
             "fixed_rebate",
-            _parse_nonnegative_decimal(self.fixed_rebate, field_name="fixed_rebate"),
+            _parse_bounded_nonnegative_decimal(
+                self.fixed_rebate,
+                field_name="fixed_rebate",
+            ),
         )
 
     @classmethod
@@ -150,8 +160,8 @@ class FeeTableModel:
                 "Fee model liquidity_role must be a canonical LiquidityRole",
                 reason_code="simulation_fee_liquidity_role_invalid",
             )
-        parsed_price = parse_decimal(price, field_name="fee model price")
-        parsed_quantity = parse_decimal(quantity, field_name="fee model quantity")
+        parsed_price = _parse_bounded_decimal(price, field_name="fee model price")
+        parsed_quantity = _parse_bounded_decimal(quantity, field_name="fee model quantity")
         if parsed_price < _ZERO:
             msg = "fee model price must be nonnegative"
             raise ValueError(msg)
@@ -160,11 +170,13 @@ class FeeTableModel:
             raise ValueError(msg)
 
         rule = self._rule_for(exchange=exchange, liquidity_role=liquidity_role)
-        notional = parsed_price * parsed_quantity
-        fee_amount = (notional * rule.fee_rate_bps / _BASIS_POINTS_DENOMINATOR) + rule.fixed_fee
-        rebate_amount = (
-            notional * rule.rebate_rate_bps / _BASIS_POINTS_DENOMINATOR
-        ) + rule.fixed_rebate
+        with localcontext(_FEE_ARITHMETIC_CONTEXT):
+            notional = parsed_price * parsed_quantity
+            fee_amount = (notional * rule.fee_rate_bps / _BASIS_POINTS_DENOMINATOR) + rule.fixed_fee
+            rebate_amount = (
+                notional * rule.rebate_rate_bps / _BASIS_POINTS_DENOMINATOR
+            ) + rule.fixed_rebate
+            net_fee_amount = fee_amount - rebate_amount
         return FeeEstimate(
             exchange=exchange,
             liquidity_role=liquidity_role,
@@ -172,7 +184,7 @@ class FeeTableModel:
             notional=notional,
             fee_amount=fee_amount,
             rebate_amount=rebate_amount,
-            net_fee_amount=fee_amount - rebate_amount,
+            net_fee_amount=net_fee_amount,
         )
 
     def _rule_for(self, *, exchange: str, liquidity_role: LiquidityRole) -> FeeRule:
@@ -186,12 +198,36 @@ class FeeTableModel:
         )
 
 
-def _parse_nonnegative_decimal(value: Decimal, *, field_name: str) -> Decimal:
-    parsed = parse_decimal(value, field_name=field_name)
+def _parse_bounded_nonnegative_decimal(value: Decimal, *, field_name: str) -> Decimal:
+    parsed = _parse_bounded_decimal(value, field_name=field_name)
     if parsed < _ZERO:
         msg = f"{field_name} must be nonnegative"
         raise ValueError(msg)
     return parsed
+
+
+def _parse_bounded_decimal(value: Decimal, *, field_name: str) -> Decimal:
+    parsed = parse_decimal(value, field_name=field_name)
+    _validate_decimal_bounds(parsed, field_name=field_name)
+    return parsed
+
+
+def _validate_decimal_bounds(value: Decimal, *, field_name: str) -> None:
+    decimal_tuple = value.as_tuple()
+    if not isinstance(decimal_tuple.exponent, int):
+        msg = f"{field_name} must be finite"
+        raise ValueError(msg)
+    digits = len(decimal_tuple.digits)
+    scale = max(-decimal_tuple.exponent, 0)
+    if digits > _MAX_DECIMAL_DIGITS:
+        msg = f"{field_name} must have at most {_MAX_DECIMAL_DIGITS} significant digits"
+        raise ValueError(msg)
+    if scale > _MAX_DECIMAL_SCALE:
+        msg = f"{field_name} must have at most {_MAX_DECIMAL_SCALE} fractional digits"
+        raise ValueError(msg)
+    if value.adjusted() > _MAX_DECIMAL_ADJUSTED_EXPONENT:
+        msg = f"{field_name} adjusted exponent must be at most {_MAX_DECIMAL_ADJUSTED_EXPONENT}"
+        raise ValueError(msg)
 
 
 def _validate_text(value: str, *, field_name: str) -> str:
