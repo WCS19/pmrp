@@ -69,6 +69,8 @@ _FEE_FIXED_PARAMETER = "fee.{role}.fixed"
 _FEE_FIXED_REBATE_PARAMETER = "fee.{role}.fixed_rebate"
 _FEE_RATE_BPS_PARAMETER = "fee.{role}.rate_bps"
 _FEE_REBATE_RATE_BPS_PARAMETER = "fee.{role}.rebate_rate_bps"
+_ORDER_RESULT_ARTIFACT_BASE_SEQUENCE = 10
+_ORDER_RESULT_ARTIFACT_STRIDE = 4
 _CANCEL_OUTCOME_CODES = frozenset(
     {
         SIMULATION_CANCEL_AFTER_ACTIVATION_NO_FILL,
@@ -1265,9 +1267,10 @@ def _scenario_run_artifacts(
         ),
     ]
     for index, order_result in enumerate(order_results):
+        sequence_base = _ORDER_RESULT_ARTIFACT_BASE_SEQUENCE + index * _ORDER_RESULT_ARTIFACT_STRIDE
         artifacts.append(
             SimulationArtifact(
-                sequence=10 + index * 3,
+                sequence=sequence_base,
                 artifact_type="simulation_order_result",
                 artifact_id=f"{scenario.scenario_id}:order:{order_result.sequence}",
                 artifact_hash=order_result.order_result_hash,
@@ -1277,7 +1280,7 @@ def _scenario_run_artifacts(
         if order_result.fill_estimate is not None:
             artifacts.append(
                 SimulationArtifact(
-                    sequence=11 + index * 3,
+                    sequence=sequence_base + 1,
                     artifact_type="simulation_fill_estimate",
                     artifact_id=f"{scenario.scenario_id}:fill:{order_result.sequence}",
                     artifact_hash=canonical_sha256(
@@ -1289,7 +1292,7 @@ def _scenario_run_artifacts(
         if order_result.fee_estimates:
             artifacts.append(
                 SimulationArtifact(
-                    sequence=12 + index * 3,
+                    sequence=sequence_base + 2,
                     artifact_type="simulation_fee_estimates",
                     artifact_id=f"{scenario.scenario_id}:fees:{order_result.sequence}",
                     artifact_hash=canonical_sha256(
@@ -1301,7 +1304,7 @@ def _scenario_run_artifacts(
         if order_result.cancel_result is not None:
             artifacts.append(
                 SimulationArtifact(
-                    sequence=1000 + index,
+                    sequence=sequence_base + 3,
                     artifact_type="simulation_cancel_result",
                     artifact_id=f"{scenario.scenario_id}:cancel:{order_result.sequence}",
                     artifact_hash=order_result.cancel_result.cancel_result_hash,

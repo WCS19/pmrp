@@ -508,6 +508,39 @@ def test_deterministic_scenario_runner_records_fill_during_cancel_race() -> None
     assert metrics["filled_order_count"] == Decimal("1")
 
 
+def test_deterministic_scenario_runner_uses_noncolliding_artifact_sequences() -> None:
+    order_actions = tuple(
+        ScheduledOrderAction(
+            sequence=index + 1,
+            scheduled_at=NOW,
+            action=_intent(
+                intent_id=f"intent_scenario_bulk_{index:03d}",
+                correlation_id=f"corr_scenario_bulk_{index:03d}",
+                quantity="1",
+            ),
+        )
+        for index in range(331)
+    )
+    scenario = _scenario(
+        scenario_id="SIM-BULK-CANCEL",
+        name="bulk cancel artifact sequence regression",
+        order_actions=(
+            *order_actions,
+            ScheduledOrderAction(
+                sequence=332,
+                scheduled_at=NOW + timedelta(milliseconds=200),
+                action=_cancel_request(correlation_id="corr_scenario_bulk_330"),
+            ),
+        ),
+    )
+
+    run = DeterministicScenarioRunner.from_configuration(scenario.configuration).run(scenario)
+    artifact_sequences = [artifact.sequence for artifact in run.result.artifacts]
+
+    assert run.order_results[330].cancel_result is not None
+    assert len(set(artifact_sequences)) == len(artifact_sequences)
+
+
 def test_deterministic_scenario_runner_rejects_unmatched_cancel_actions() -> None:
     scenario = _scenario(
         order_actions=(
@@ -706,6 +739,7 @@ def _intent(
     side: Side = Side.BUY,
     quantity: str | Decimal = "10",
     limit_price: str | Decimal | None = "0.43",
+    correlation_id: str = "corr_scenario_001",
 ) -> OrderIntent:
     return OrderIntent.model_validate(
         {
@@ -725,13 +759,17 @@ def _intent(
             "created_at": NOW,
             "expires_at": NOW + timedelta(seconds=5),
             "signal_ids": (),
-            "correlation_id": "corr_scenario_001",
+            "correlation_id": correlation_id,
             "idempotency_key": f"idem-{intent_id}",
         }
     )
 
 
-def _cancel_request(*, exchange: str = "kalshi") -> CancelOrderRequest:
+def _cancel_request(
+    *,
+    exchange: str = "kalshi",
+    correlation_id: str = "corr_scenario_001",
+) -> CancelOrderRequest:
     return CancelOrderRequest.model_validate(
         {
             "cancel_request_id": "cancel_scenario_001",
@@ -742,7 +780,7 @@ def _cancel_request(*, exchange: str = "kalshi") -> CancelOrderRequest:
             "exchange_order_id": "exchange-order-scenario-001",
             "requested_at": NOW + timedelta(milliseconds=300),
             "idempotency_key": "idem-scenario-cancel-001",
-            "correlation_id": "corr_scenario_001",
+            "correlation_id": correlation_id,
         }
     )
 
