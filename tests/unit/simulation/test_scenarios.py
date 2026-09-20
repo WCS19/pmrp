@@ -333,7 +333,9 @@ def test_deterministic_scenario_runner_applies_latency_before_fill() -> None:
     assert order_result.fill_estimate.remaining_quantity == Decimal("6")
     assert order_result.fill_estimate.is_partial
     assert len(order_result.fee_estimates) == 1
+    assert len(order_result.slippage_estimates) == 1
     assert order_result.fee_estimates[0].net_fee_amount == Decimal("0")
+    assert order_result.slippage_estimates[0].total_slippage == Decimal("0.0002580")
     assert run.final_book == order_result.activation_book
     assert metrics["accepted_order_count"] == Decimal("1")
     assert metrics["filled_order_count"] == Decimal("1")
@@ -343,8 +345,9 @@ def test_deterministic_scenario_runner_applies_latency_before_fill() -> None:
     assert metrics["total_filled_notional"] == Decimal("1.72")
     assert metrics["total_net_fee_amount"] == Decimal("0")
     assert metrics["total_rebate_amount"] == Decimal("0")
+    assert metrics["total_slippage_amount"] == Decimal("0.0002580")
     assert run.result.source_type_counts[SimulationSourceType.INFERRED_BEHAVIOR] == 1
-    assert run.result.source_type_counts[SimulationSourceType.SIMULATED_OUTPUT] == 4
+    assert run.result.source_type_counts[SimulationSourceType.SIMULATED_OUTPUT] == 5
 
 
 def test_deterministic_scenario_runner_records_decimal_fees_from_configuration() -> None:
@@ -383,6 +386,42 @@ def test_deterministic_scenario_runner_records_decimal_fees_from_configuration()
     assert metrics["total_fee_amount"] == Decimal("0.01430")
     assert metrics["total_rebate_amount"] == Decimal("0")
     assert metrics["total_net_fee_amount"] == Decimal("0.01430")
+
+
+def test_deterministic_scenario_runner_records_taker_slippage_from_configuration() -> None:
+    scenario = _scenario(
+        scenario_id="SIM-SLIPPAGE-TAKER",
+        name="taker slippage calculation",
+        configuration=_configuration(taker_slippage_bps="10"),
+        order_actions=(
+            ScheduledOrderAction(
+                sequence=1,
+                scheduled_at=NOW,
+                action=_intent(quantity="10", limit_price="0.43"),
+            ),
+        ),
+    )
+
+    run = DeterministicScenarioRunner.from_configuration(scenario.configuration).run(scenario)
+    order_result = run.order_results[0]
+    slippage_estimate = order_result.slippage_estimates[0]
+    metrics = {metric.name: metric.value for metric in run.result.metrics}
+    artifact_types = {artifact.artifact_type for artifact in run.result.artifacts}
+
+    assert order_result.fill_estimate is not None
+    assert order_result.fill_estimate.filled_quantity == Decimal("10")
+    assert slippage_estimate.side is Side.BUY
+    assert slippage_estimate.liquidity_role is LiquidityRole.TAKER
+    assert slippage_estimate.input_price == Decimal("0.43")
+    assert slippage_estimate.adjusted_price == Decimal("0.43043")
+    assert slippage_estimate.quantity == Decimal("10")
+    assert slippage_estimate.slippage_bps == Decimal("10")
+    assert slippage_estimate.slippage_amount_per_unit == Decimal("0.00043")
+    assert slippage_estimate.total_slippage == Decimal("0.00430")
+    assert "slippage_estimates" in order_result.canonical_payload()
+    assert "simulation_slippage_estimates" in artifact_types
+    assert metrics["slippage_estimate_count"] == Decimal("1")
+    assert metrics["total_slippage_amount"] == Decimal("0.00430")
 
 
 def test_deterministic_scenario_runner_records_rebates_from_configuration() -> None:
@@ -549,6 +588,7 @@ def test_deterministic_scenario_runner_records_passive_no_fill() -> None:
     assert fill_estimate.average_fill_price is None
     assert fill_estimate.reason_code == "simulation_touch_no_fill"
     assert run.order_results[0].fee_estimates == ()
+    assert run.order_results[0].slippage_estimates == ()
     assert run.order_results[0].settlement_result is None
     assert metrics["accepted_order_count"] == Decimal("1")
     assert metrics["filled_order_count"] == Decimal("0")
@@ -1194,6 +1234,15 @@ def test_deterministic_scenario_runner_rejects_unsupported_configuration() -> No
     assert (
         settlement_error.value.reason_code
         == "simulation_scenario_runner_settlement_model_unsupported"
+    )
+
+    slippage_scenario = _scenario(configuration=_configuration(slippage_model="sampled_v1"))
+
+    with pytest.raises(SimulationConfigurationError) as slippage_error:
+        DeterministicScenarioRunner.from_configuration(slippage_scenario.configuration)
+
+    assert (
+        slippage_error.value.reason_code == "simulation_scenario_runner_slippage_model_unsupported"
     )
 
 

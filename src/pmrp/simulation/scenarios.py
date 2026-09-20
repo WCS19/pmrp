@@ -65,6 +65,14 @@ from pmrp.simulation.settlement import (
     SettlementEstimate,
     SettlementModel,
 )
+from pmrp.simulation.slippage_models import (
+    BPS_SLIPPAGE_MODEL_NAME,
+    NO_SLIPPAGE_MODEL_NAME,
+    BpsSlippageModel,
+    NoSlippageModel,
+    SlippageEstimate,
+    SlippageModel,
+)
 
 SIMULATION_SCENARIO_HASH_VERSION = "simulation_scenario_hash_v1"
 SIMULATION_SCENARIO_RUNNER_MODEL_NAME = "simulation_scenario_runner_v1"
@@ -87,7 +95,7 @@ _FEE_RATE_BPS_PARAMETER = "fee.{role}.rate_bps"
 _FEE_REBATE_RATE_BPS_PARAMETER = "fee.{role}.rebate_rate_bps"
 _SETTLEMENT_WINNING_OUTCOME_IDS_PARAMETER = "settlement_winning_outcome_ids"
 _ORDER_RESULT_ARTIFACT_BASE_SEQUENCE = 10
-_ORDER_RESULT_ARTIFACT_STRIDE = 6
+_ORDER_RESULT_ARTIFACT_STRIDE = 7
 _CANCEL_OUTCOME_CODES = frozenset(
     {
         SIMULATION_CANCEL_AFTER_ACTIVATION_NO_FILL,
@@ -346,6 +354,7 @@ class SimulatedScenarioOrderResult:
     activation_book: OrderBookSnapshot | None
     fill_estimate: FillEstimate | None
     fee_estimates: tuple[FeeEstimate, ...] = ()
+    slippage_estimates: tuple[SlippageEstimate, ...] = ()
     cancel_result: SimulatedScenarioCancelResult | None = None
     settlement_result: SimulatedScenarioSettlementResult | None = None
     disconnect_result: SimulatedScenarioDisconnectResult | None = None
@@ -371,6 +380,7 @@ class SimulatedScenarioOrderResult:
             msg = "fill_estimate must be a FillEstimate"
             raise TypeError(msg)
         fee_estimates = _normalize_fee_estimates(self.fee_estimates)
+        slippage_estimates = _normalize_slippage_estimates(self.slippage_estimates)
         cancel_result = _validate_cancel_result(self.cancel_result)
         settlement_result = _validate_settlement_result(
             self.settlement_result,
@@ -386,6 +396,7 @@ class SimulatedScenarioOrderResult:
                 self.activation_book is not None
                 or self.fill_estimate is not None
                 or fee_estimates
+                or slippage_estimates
                 or settlement_result is not None
                 or disconnect_result is not None
             ):
@@ -403,6 +414,7 @@ class SimulatedScenarioOrderResult:
                 self.activation_book is not None
                 or self.fill_estimate is not None
                 or fee_estimates
+                or slippage_estimates
                 or settlement_result is not None
                 or disconnect_result is not None
             ):
@@ -424,6 +436,15 @@ class SimulatedScenarioOrderResult:
                     "fill_component_count": str(len(self.fill_estimate.components)),
                 },
             )
+        elif len(slippage_estimates) != len(self.fill_estimate.components):
+            raise SimulationConfigurationError(
+                "Scenario order slippage estimates must match fill components",
+                reason_code="simulation_scenario_slippage_component_count_mismatch",
+                context={
+                    "slippage_estimate_count": str(len(slippage_estimates)),
+                    "fill_component_count": str(len(self.fill_estimate.components)),
+                },
+            )
         if self.source_type is not SimulationSourceType.SIMULATED_OUTPUT:
             raise SimulationConfigurationError(
                 "Scenario order results must be classified as simulated output",
@@ -431,6 +452,7 @@ class SimulatedScenarioOrderResult:
                 context={"source_type": str(self.source_type)},
             )
         object.__setattr__(self, "fee_estimates", fee_estimates)
+        object.__setattr__(self, "slippage_estimates", slippage_estimates)
         object.__setattr__(self, "cancel_result", cancel_result)
         object.__setattr__(self, "settlement_result", settlement_result)
         object.__setattr__(self, "disconnect_result", disconnect_result)
@@ -459,6 +481,10 @@ class SimulatedScenarioOrderResult:
         if self.fee_estimates:
             payload["fee_estimates"] = [
                 _fee_estimate_payload(estimate) for estimate in self.fee_estimates
+            ]
+        if self.slippage_estimates:
+            payload["slippage_estimates"] = [
+                _slippage_estimate_payload(estimate) for estimate in self.slippage_estimates
             ]
         if self.cancel_result is not None:
             payload["cancel_result"] = self.cancel_result.canonical_payload()
@@ -718,6 +744,7 @@ class DeterministicScenarioRunner:
     fill_model: FillModel
     fee_model: FeeModel | None = None
     settlement_model: SettlementModel | None = None
+    slippage_model: SlippageModel | None = None
     market_status: MarketStatus = MarketStatus.OPEN
 
     def __post_init__(self) -> None:
@@ -735,6 +762,12 @@ class DeterministicScenarioRunner:
             SettlementModel,
         ):
             msg = "settlement_model must implement SettlementModel"
+            raise TypeError(msg)
+        if self.slippage_model is not None and not isinstance(
+            self.slippage_model,
+            SlippageModel,
+        ):
+            msg = "slippage_model must implement SlippageModel"
             raise TypeError(msg)
         if not isinstance(self.market_status, MarketStatus):
             raise SimulationConfigurationError(
@@ -765,6 +798,7 @@ class DeterministicScenarioRunner:
             fill_model=fill_model,
             fee_model=None,
             settlement_model=None,
+            slippage_model=None,
             market_status=market_status,
         )
 
@@ -774,6 +808,10 @@ class DeterministicScenarioRunner:
         scenario = _validate_scenario(scenario)
         _validate_runner_configuration(scenario.configuration)
         fee_model = _fee_model_for_scenario(scenario, fee_model=self.fee_model)
+        slippage_model = _slippage_model_for_scenario(
+            scenario,
+            slippage_model=self.slippage_model,
+        )
         settlement_model = _settlement_model_for_scenario(
             scenario,
             settlement_model=self.settlement_model,
@@ -797,6 +835,7 @@ class DeterministicScenarioRunner:
                 action=action,
                 sequence=index,
                 fee_model=fee_model,
+                slippage_model=slippage_model,
                 settlement_model=settlement_model,
                 winning_outcome_ids=winning_outcome_ids,
                 available_balance=available_balance,
@@ -830,6 +869,7 @@ class DeterministicScenarioRunner:
         action: ScheduledOrderAction,
         sequence: int,
         fee_model: FeeModel,
+        slippage_model: SlippageModel,
         settlement_model: SettlementModel,
         winning_outcome_ids: tuple[OutcomeId, ...],
         available_balance: Decimal | None,
@@ -914,6 +954,10 @@ class DeterministicScenarioRunner:
             exchange=scenario.initial_book.exchange,
             fill_estimate=fill_estimate,
         )
+        slippage_estimates = _estimate_slippage(
+            slippage_model=slippage_model,
+            fill_estimate=fill_estimate,
+        )
         cancel_result = (
             _cancel_result(
                 action=cancel_action,
@@ -950,6 +994,7 @@ class DeterministicScenarioRunner:
             activation_book=activation_book,
             fill_estimate=fill_estimate,
             fee_estimates=fee_estimates,
+            slippage_estimates=slippage_estimates,
             cancel_result=cancel_result,
             settlement_result=settlement_result,
             disconnect_result=disconnect_result,
@@ -1379,6 +1424,15 @@ def _validate_runner_configuration(configuration: SimulationConfiguration) -> No
             reason_code="simulation_scenario_runner_settlement_model_unsupported",
             context={"settlement_model": configuration.settlement_model},
         )
+    if configuration.slippage_model not in {
+        BPS_SLIPPAGE_MODEL_NAME,
+        NO_SLIPPAGE_MODEL_NAME,
+    }:
+        raise SimulationConfigurationError(
+            "Scenario runner currently supports BPS or no slippage only",
+            reason_code="simulation_scenario_runner_slippage_model_unsupported",
+            context={"slippage_model": configuration.slippage_model},
+        )
 
 
 def _project_book_until(
@@ -1696,6 +1750,18 @@ def _normalize_fee_estimates(
     return fee_estimates
 
 
+def _normalize_slippage_estimates(
+    slippage_estimates: tuple[SlippageEstimate, ...],
+) -> tuple[SlippageEstimate, ...]:
+    if not isinstance(slippage_estimates, tuple):
+        msg = "slippage_estimates must be a tuple"
+        raise TypeError(msg)
+    if any(not isinstance(estimate, SlippageEstimate) for estimate in slippage_estimates):
+        msg = "slippage_estimates must contain only SlippageEstimate values"
+        raise TypeError(msg)
+    return slippage_estimates
+
+
 def _cancel_result(
     *,
     action: ScheduledOrderAction,
@@ -1784,10 +1850,25 @@ def _scenario_run_artifacts(
                     source_type=SimulationSourceType.SIMULATED_OUTPUT,
                 )
             )
-        if order_result.cancel_result is not None:
+        if order_result.slippage_estimates:
             artifacts.append(
                 SimulationArtifact(
                     sequence=sequence_base + 3,
+                    artifact_type="simulation_slippage_estimates",
+                    artifact_id=f"{scenario.scenario_id}:slippage:{order_result.sequence}",
+                    artifact_hash=canonical_sha256(
+                        [
+                            _slippage_estimate_payload(estimate)
+                            for estimate in order_result.slippage_estimates
+                        ]
+                    ),
+                    source_type=SimulationSourceType.SIMULATED_OUTPUT,
+                )
+            )
+        if order_result.cancel_result is not None:
+            artifacts.append(
+                SimulationArtifact(
+                    sequence=sequence_base + 4,
                     artifact_type="simulation_cancel_result",
                     artifact_id=f"{scenario.scenario_id}:cancel:{order_result.sequence}",
                     artifact_hash=order_result.cancel_result.cancel_result_hash,
@@ -1797,7 +1878,7 @@ def _scenario_run_artifacts(
         if order_result.settlement_result is not None:
             artifacts.append(
                 SimulationArtifact(
-                    sequence=sequence_base + 4,
+                    sequence=sequence_base + 5,
                     artifact_type="simulation_settlement_result",
                     artifact_id=f"{scenario.scenario_id}:settlement:{order_result.sequence}",
                     artifact_hash=order_result.settlement_result.settlement_result_hash,
@@ -1807,7 +1888,7 @@ def _scenario_run_artifacts(
         if order_result.disconnect_result is not None:
             artifacts.append(
                 SimulationArtifact(
-                    sequence=sequence_base + 5,
+                    sequence=sequence_base + 6,
                     artifact_type="simulation_disconnect_result",
                     artifact_id=f"{scenario.scenario_id}:disconnect:{order_result.sequence}",
                     artifact_hash=order_result.disconnect_result.disconnect_result_hash,
@@ -1855,6 +1936,7 @@ def _scenario_run_metrics(
     )
     duplicate_market_event_count = _duplicate_market_event_count(scenario.market_events)
     projected_market_event_count = len(scenario.market_events) - duplicate_market_event_count
+    slippage_estimate_count = sum(len(result.slippage_estimates) for result in order_results)
     settlement_estimate_count = sum(
         1 for result in order_results if result.settlement_result is not None
     )
@@ -1899,6 +1981,10 @@ def _scenario_run_metrics(
     total_rebate_amount = _sum_fee_estimate_field(
         order_results,
         field_name="rebate_amount",
+    )
+    total_slippage_amount = _sum_slippage_estimate_field(
+        order_results,
+        field_name="total_slippage",
     )
     return (
         SimulationMetric(
@@ -1973,6 +2059,11 @@ def _scenario_run_metrics(
             unit="count",
         ),
         SimulationMetric(
+            name="slippage_estimate_count",
+            value=Decimal(slippage_estimate_count),
+            unit="count",
+        ),
+        SimulationMetric(
             name="total_fee_amount",
             value=parse_decimal(total_fee_amount, field_name="total_fee_amount metric"),
             unit=fee_currency,
@@ -1991,6 +2082,14 @@ def _scenario_run_metrics(
             name="total_rebate_amount",
             value=parse_decimal(total_rebate_amount, field_name="total_rebate_amount metric"),
             unit=fee_currency,
+        ),
+        SimulationMetric(
+            name="total_slippage_amount",
+            value=parse_decimal(
+                total_slippage_amount,
+                field_name="total_slippage_amount metric",
+            ),
+            unit="price_units",
         ),
         SimulationMetric(
             name="market_event_count",
@@ -2066,6 +2165,18 @@ def _fee_model_for_scenario(
         scenario.configuration,
         exchange=scenario.initial_book.exchange,
     )
+
+
+def _slippage_model_for_scenario(
+    scenario: SimulationScenario,
+    *,
+    slippage_model: SlippageModel | None,
+) -> SlippageModel:
+    if slippage_model is not None:
+        return slippage_model
+    if scenario.configuration.slippage_model == NO_SLIPPAGE_MODEL_NAME:
+        return NoSlippageModel.from_configuration(scenario.configuration)
+    return BpsSlippageModel.from_configuration(scenario.configuration)
 
 
 def _settlement_model_for_scenario(
@@ -2328,6 +2439,22 @@ def _estimate_fees(
     )
 
 
+def _estimate_slippage(
+    *,
+    slippage_model: SlippageModel,
+    fill_estimate: FillEstimate,
+) -> tuple[SlippageEstimate, ...]:
+    return tuple(
+        slippage_model.estimate(
+            side=fill_estimate.side,
+            price=component.price,
+            quantity=component.quantity,
+            liquidity_role=component.liquidity_role,
+        )
+        for component in fill_estimate.components
+    )
+
+
 def _fee_metric_currency(
     *,
     scenario: SimulationScenario,
@@ -2380,6 +2507,24 @@ def _sum_fee_estimate_field(
     raise ValueError(msg)
 
 
+def _sum_slippage_estimate_field(
+    order_results: tuple[SimulatedScenarioOrderResult, ...],
+    *,
+    field_name: str,
+) -> Decimal:
+    if field_name == "total_slippage":
+        return sum(
+            (
+                estimate.total_slippage
+                for result in order_results
+                for estimate in result.slippage_estimates
+            ),
+            _ZERO,
+        )
+    msg = f"unsupported slippage estimate field: {field_name}"
+    raise ValueError(msg)
+
+
 def _fee_estimate_payload(estimate: FeeEstimate) -> Mapping[str, object]:
     return {
         "currency": estimate.currency,
@@ -2389,6 +2534,19 @@ def _fee_estimate_payload(estimate: FeeEstimate) -> Mapping[str, object]:
         "net_fee_amount": estimate.net_fee_amount,
         "notional": estimate.notional,
         "rebate_amount": estimate.rebate_amount,
+    }
+
+
+def _slippage_estimate_payload(estimate: SlippageEstimate) -> Mapping[str, object]:
+    return {
+        "adjusted_price": estimate.adjusted_price,
+        "input_price": estimate.input_price,
+        "liquidity_role": estimate.liquidity_role,
+        "quantity": estimate.quantity,
+        "side": estimate.side,
+        "slippage_amount_per_unit": estimate.slippage_amount_per_unit,
+        "slippage_bps": estimate.slippage_bps,
+        "total_slippage": estimate.total_slippage,
     }
 
 
