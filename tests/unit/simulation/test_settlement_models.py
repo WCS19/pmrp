@@ -73,6 +73,17 @@ def test_no_settlement_model_returns_unresolved_zero_payout() -> None:
     assert estimate.is_winning_outcome is False
 
 
+def test_no_settlement_model_rejects_winning_outcomes() -> None:
+    with pytest.raises(SimulationInputError) as error:
+        NoSettlementModel().estimate(
+            outcome_id=_WINNER,
+            quantity=Decimal("3"),
+            winning_outcome_ids=(_WINNER,),
+        )
+
+    assert error.value.reason_code == "simulation_no_settlement_winning_outcomes_invalid"
+
+
 def test_settlement_models_load_from_simulation_configuration() -> None:
     binary_model = BinarySettlementModel.from_configuration(
         _configuration(

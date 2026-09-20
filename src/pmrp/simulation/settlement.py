@@ -81,6 +81,11 @@ class NoSettlementModel:
             winning_outcome_ids,
             allow_empty=True,
         )
+        if winning_outcome_ids:
+            raise SimulationInputError(
+                "No-settlement model cannot contain winning outcomes",
+                reason_code="simulation_no_settlement_winning_outcomes_invalid",
+            )
         return SettlementEstimate(
             outcome_id=outcome_id,
             quantity=quantity,
