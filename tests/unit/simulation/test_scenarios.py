@@ -555,6 +555,178 @@ def test_deterministic_scenario_runner_records_passive_no_fill() -> None:
     assert metrics["total_fee_amount"] == Decimal("0")
 
 
+def test_deterministic_scenario_runner_records_passive_partial_fill() -> None:
+    scenario = _scenario(
+        scenario_id="SIM-003",
+        name="passive order partial fill",
+        market_events=(
+            ScheduledMarketEvent(
+                sequence=1,
+                scheduled_at=NOW + timedelta(milliseconds=150),
+                event=_trade(
+                    price="0.42",
+                    quantity="4",
+                    aggressor_side=Side.SELL,
+                ),
+            ),
+        ),
+        order_actions=(
+            ScheduledOrderAction(
+                sequence=2,
+                scheduled_at=NOW,
+                action=_intent(quantity="10", limit_price="0.42"),
+            ),
+        ),
+    )
+
+    run = DeterministicScenarioRunner.from_configuration(scenario.configuration).run(scenario)
+    order_result = run.order_results[0]
+    fill_estimate = order_result.fill_estimate
+    metrics = {metric.name: metric.value for metric in run.result.metrics}
+
+    assert fill_estimate is not None
+    assert fill_estimate.filled_quantity == Decimal("4")
+    assert fill_estimate.remaining_quantity == Decimal("6")
+    assert fill_estimate.average_fill_price == Decimal("0.42")
+    assert fill_estimate.liquidity_role is LiquidityRole.MAKER
+    assert fill_estimate.components[0].liquidity_role is LiquidityRole.MAKER
+    assert fill_estimate.reason_code == "simulation_resting_trade_partial_fill"
+    assert len(order_result.fee_estimates) == 1
+    assert order_result.fee_estimates[0].liquidity_role is LiquidityRole.MAKER
+    assert metrics["filled_order_count"] == Decimal("1")
+    assert metrics["partial_fill_count"] == Decimal("1")
+    assert metrics["filled_quantity"] == Decimal("4")
+    assert metrics["total_filled_notional"] == Decimal("1.68")
+
+
+def test_deterministic_scenario_runner_skips_duplicate_resting_trade_fills() -> None:
+    duplicate_trade = _trade(
+        price="0.42",
+        quantity="4",
+        aggressor_side=Side.SELL,
+    )
+    scenario = _scenario(
+        scenario_id="SIM-017-RESTING-TRADE",
+        name="duplicate resting trade event",
+        market_events=(
+            ScheduledMarketEvent(
+                sequence=1,
+                scheduled_at=NOW + timedelta(milliseconds=150),
+                event=duplicate_trade,
+            ),
+            ScheduledMarketEvent(
+                sequence=2,
+                scheduled_at=NOW + timedelta(milliseconds=175),
+                event=duplicate_trade,
+            ),
+        ),
+        order_actions=(
+            ScheduledOrderAction(
+                sequence=3,
+                scheduled_at=NOW,
+                action=_intent(quantity="10", limit_price="0.42"),
+            ),
+        ),
+    )
+
+    run = DeterministicScenarioRunner.from_configuration(scenario.configuration).run(scenario)
+    fill_estimate = run.order_results[0].fill_estimate
+    metrics = {metric.name: metric.value for metric in run.result.metrics}
+
+    assert fill_estimate is not None
+    assert fill_estimate.filled_quantity == Decimal("4")
+    assert fill_estimate.remaining_quantity == Decimal("6")
+    assert metrics["duplicate_market_event_count"] == Decimal("1")
+    assert metrics["projected_market_event_count"] == Decimal("1")
+
+
+def test_deterministic_scenario_runner_records_passive_full_fill() -> None:
+    scenario = _scenario(
+        scenario_id="SIM-004",
+        name="passive order full fill",
+        market_events=(
+            ScheduledMarketEvent(
+                sequence=1,
+                scheduled_at=NOW + timedelta(milliseconds=150),
+                event=_trade(
+                    price="0.42",
+                    quantity="10",
+                    aggressor_side=Side.SELL,
+                ),
+            ),
+        ),
+        order_actions=(
+            ScheduledOrderAction(
+                sequence=2,
+                scheduled_at=NOW,
+                action=_intent(quantity="10", limit_price="0.42"),
+            ),
+        ),
+    )
+
+    run = DeterministicScenarioRunner.from_configuration(scenario.configuration).run(scenario)
+    fill_estimate = run.order_results[0].fill_estimate
+    metrics = {metric.name: metric.value for metric in run.result.metrics}
+
+    assert fill_estimate is not None
+    assert fill_estimate.filled_quantity == Decimal("10")
+    assert fill_estimate.remaining_quantity == Decimal("0")
+    assert fill_estimate.is_full
+    assert fill_estimate.liquidity_role is LiquidityRole.MAKER
+    assert fill_estimate.reason_code == "simulation_resting_trade_full_fill"
+    assert metrics["filled_order_count"] == Decimal("1")
+    assert metrics["partial_fill_count"] == Decimal("0")
+    assert metrics["filled_quantity"] == Decimal("10")
+
+
+def test_deterministic_scenario_runner_records_maker_fees_from_configuration() -> None:
+    scenario = _scenario(
+        scenario_id="SIM-011",
+        name="maker fee calculation",
+        configuration=_configuration(
+            parameters={
+                "fee.currency": "USD",
+                "fee.maker.rate_bps": "5",
+                "fee.maker.fixed": "0.01",
+            }
+        ),
+        market_events=(
+            ScheduledMarketEvent(
+                sequence=1,
+                scheduled_at=NOW + timedelta(milliseconds=150),
+                event=_trade(
+                    price="0.42",
+                    quantity="10",
+                    aggressor_side=Side.SELL,
+                ),
+            ),
+        ),
+        order_actions=(
+            ScheduledOrderAction(
+                sequence=2,
+                scheduled_at=NOW,
+                action=_intent(quantity="10", limit_price="0.42"),
+            ),
+        ),
+    )
+
+    run = DeterministicScenarioRunner.from_configuration(scenario.configuration).run(scenario)
+    order_result = run.order_results[0]
+    fee_estimate = order_result.fee_estimates[0]
+    metrics = {metric.name: metric.value for metric in run.result.metrics}
+
+    assert order_result.fill_estimate is not None
+    assert order_result.fill_estimate.liquidity_role is LiquidityRole.MAKER
+    assert fee_estimate.liquidity_role is LiquidityRole.MAKER
+    assert fee_estimate.notional == Decimal("4.20")
+    assert fee_estimate.fee_amount == Decimal("0.01210")
+    assert fee_estimate.rebate_amount == Decimal("0")
+    assert fee_estimate.net_fee_amount == Decimal("0.01210")
+    assert metrics["total_filled_notional"] == Decimal("4.20")
+    assert metrics["total_fee_amount"] == Decimal("0.01210")
+    assert metrics["total_net_fee_amount"] == Decimal("0.01210")
+
+
 def test_deterministic_scenario_runner_records_rejections_without_fill_outputs() -> None:
     scenario = _scenario(
         scenario_id="SIM-008",
@@ -1198,19 +1370,25 @@ def _trade(
     contract_id: str = "ctr_scenario_contract",
     exchange: str = "kalshi",
     sequence: int | None = 3,
+    trade_id: str = "trade_scenario_001",
+    outcome_id: str = "out_yes",
+    price: str = "0.42",
+    quantity: str = "4",
+    aggressor_side: Side | None = Side.BUY,
+    liquidity_role: LiquidityRole = LiquidityRole.TAKER,
 ) -> Trade:
     return Trade.model_validate(
         {
-            "trade_id": "trade_scenario_001",
+            "trade_id": trade_id,
             "exchange": exchange,
-            "exchange_trade_id": "exchange-trade-scenario-001",
+            "exchange_trade_id": f"exchange-{trade_id}",
             "market_id": market_id,
             "contract_id": contract_id,
-            "outcome_id": "out_yes",
-            "price": "0.42",
-            "quantity": "4",
-            "aggressor_side": Side.BUY,
-            "liquidity_role": LiquidityRole.TAKER,
+            "outcome_id": outcome_id,
+            "price": price,
+            "quantity": quantity,
+            "aggressor_side": aggressor_side,
+            "liquidity_role": liquidity_role,
             "exchange_occurred_at": NOW + timedelta(seconds=2),
             "received_at": NOW + timedelta(seconds=2),
             "sequence": sequence,
