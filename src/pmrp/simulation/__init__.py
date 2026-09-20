@@ -5,6 +5,15 @@ from pmrp.simulation.errors import (
     SimulationError,
     SimulationInputError,
 )
+from pmrp.simulation.fill_models import (
+    TOUCH_FILL_MODEL_NAME,
+    TRADE_THROUGH_FILL_MODEL_NAME,
+    FillEstimate,
+    FillModel,
+    SimulatedFillComponent,
+    TouchFillModel,
+    TradeThroughFillModel,
+)
 from pmrp.simulation.latency_models import (
     FIXED_LATENCY_MODEL_NAME,
     FixedLatencyModel,
@@ -22,14 +31,21 @@ from pmrp.simulation.queue_models import (
 __all__ = [
     "FIXED_LATENCY_MODEL_NAME",
     "IMMEDIATE_TOUCH_QUEUE_MODEL_NAME",
+    "TOUCH_FILL_MODEL_NAME",
+    "TRADE_THROUGH_FILL_MODEL_NAME",
     "VOLUME_AHEAD_QUEUE_MODEL_NAME",
+    "FillEstimate",
+    "FillModel",
     "FixedLatencyModel",
     "ImmediateTouchQueueModel",
     "LatencyModel",
     "QueueEstimate",
     "QueueModel",
+    "SimulatedFillComponent",
     "SimulationConfigurationError",
     "SimulationError",
     "SimulationInputError",
+    "TouchFillModel",
+    "TradeThroughFillModel",
     "VolumeAheadQueueModel",
 ]
