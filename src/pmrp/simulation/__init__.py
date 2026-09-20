@@ -80,6 +80,7 @@ from pmrp.simulation.scenarios import (
     ScheduledOrderAction,
     SimulatedScenarioCancelResult,
     SimulatedScenarioOrderResult,
+    SimulatedScenarioSettlementResult,
     SimulationScenario,
     SimulationScenarioRun,
 )
@@ -155,6 +156,7 @@ __all__ = [
     "SimulatedFillComponent",
     "SimulatedScenarioCancelResult",
     "SimulatedScenarioOrderResult",
+    "SimulatedScenarioSettlementResult",
     "SimulationArtifact",
     "SimulationConfigurationError",
     "SimulationError",

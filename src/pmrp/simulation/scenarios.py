@@ -11,6 +11,7 @@ from types import MappingProxyType
 from typing import Protocol, runtime_checkable
 
 from pmrp.schemas.enums import LiquidityRole, MarketStatus
+from pmrp.schemas.identifiers import OutcomeId
 from pmrp.schemas.market_data import OrderBookDelta, OrderBookSnapshot, Trade
 from pmrp.schemas.numeric import parse_decimal
 from pmrp.schemas.orders import CancelOrderRequest, Fill, OrderIntent
@@ -54,6 +55,14 @@ from pmrp.simulation.results import (
     SimulationResult,
     SimulationSourceType,
 )
+from pmrp.simulation.settlement import (
+    BINARY_SETTLEMENT_MODEL_NAME,
+    NO_SETTLEMENT_MODEL_NAME,
+    BinarySettlementModel,
+    NoSettlementModel,
+    SettlementEstimate,
+    SettlementModel,
+)
 
 SIMULATION_SCENARIO_HASH_VERSION = "simulation_scenario_hash_v1"
 SIMULATION_SCENARIO_RUNNER_MODEL_NAME = "simulation_scenario_runner_v1"
@@ -69,8 +78,9 @@ _FEE_FIXED_PARAMETER = "fee.{role}.fixed"
 _FEE_FIXED_REBATE_PARAMETER = "fee.{role}.fixed_rebate"
 _FEE_RATE_BPS_PARAMETER = "fee.{role}.rate_bps"
 _FEE_REBATE_RATE_BPS_PARAMETER = "fee.{role}.rebate_rate_bps"
+_SETTLEMENT_WINNING_OUTCOME_IDS_PARAMETER = "settlement_winning_outcome_ids"
 _ORDER_RESULT_ARTIFACT_BASE_SEQUENCE = 10
-_ORDER_RESULT_ARTIFACT_STRIDE = 4
+_ORDER_RESULT_ARTIFACT_STRIDE = 5
 _CANCEL_OUTCOME_CODES = frozenset(
     {
         SIMULATION_CANCEL_AFTER_ACTIVATION_NO_FILL,
@@ -329,6 +339,7 @@ class SimulatedScenarioOrderResult:
     fill_estimate: FillEstimate | None
     fee_estimates: tuple[FeeEstimate, ...] = ()
     cancel_result: SimulatedScenarioCancelResult | None = None
+    settlement_result: SimulatedScenarioSettlementResult | None = None
     source_type: SimulationSourceType = SimulationSourceType.SIMULATED_OUTPUT
 
     def __post_init__(self) -> None:
@@ -352,10 +363,20 @@ class SimulatedScenarioOrderResult:
             raise TypeError(msg)
         fee_estimates = _normalize_fee_estimates(self.fee_estimates)
         cancel_result = _validate_cancel_result(self.cancel_result)
+        settlement_result = _validate_settlement_result(
+            self.settlement_result,
+            fill_estimate=self.fill_estimate,
+            order_sequence=self.sequence,
+        )
         if self.admission.rejected:
-            if self.activation_book is not None or self.fill_estimate is not None or fee_estimates:
+            if (
+                self.activation_book is not None
+                or self.fill_estimate is not None
+                or fee_estimates
+                or settlement_result is not None
+            ):
                 raise SimulationConfigurationError(
-                    "Rejected scenario orders must not include activation, fill, or fee outputs",
+                    "Rejected scenario orders must not include simulated order outputs",
                     reason_code="simulation_scenario_rejected_order_output_invalid",
                 )
             if cancel_result is not None:
@@ -364,7 +385,12 @@ class SimulatedScenarioOrderResult:
                     reason_code="simulation_scenario_rejected_order_cancel_invalid",
                 )
         elif cancel_result is not None and cancel_result.before_activation:
-            if self.activation_book is not None or self.fill_estimate is not None or fee_estimates:
+            if (
+                self.activation_book is not None
+                or self.fill_estimate is not None
+                or fee_estimates
+                or settlement_result is not None
+            ):
                 raise SimulationConfigurationError(
                     "Pre-activation cancelled scenario orders must not include fill outputs",
                     reason_code="simulation_scenario_cancelled_order_output_invalid",
@@ -391,6 +417,7 @@ class SimulatedScenarioOrderResult:
             )
         object.__setattr__(self, "fee_estimates", fee_estimates)
         object.__setattr__(self, "cancel_result", cancel_result)
+        object.__setattr__(self, "settlement_result", settlement_result)
 
     @property
     def order_result_hash(self) -> str:
@@ -419,6 +446,8 @@ class SimulatedScenarioOrderResult:
             ]
         if self.cancel_result is not None:
             payload["cancel_result"] = self.cancel_result.canonical_payload()
+        if self.settlement_result is not None:
+            payload["settlement_result"] = self.settlement_result.canonical_payload()
         return payload
 
 
@@ -485,6 +514,50 @@ class SimulatedScenarioCancelResult:
             "effective_at": self.effective_at,
             "outcome_code": self.outcome_code,
             "requested_at": self.requested_at,
+            "runner_model": SIMULATION_SCENARIO_RUNNER_MODEL_NAME,
+            "sequence": self.sequence,
+            "source_type": self.source_type,
+            "target_order_sequence": self.target_order_sequence,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class SimulatedScenarioSettlementResult:
+    """One deterministic settlement estimate produced by a scenario run."""
+
+    sequence: int
+    target_order_sequence: int
+    estimate: SettlementEstimate
+    source_type: SimulationSourceType = SimulationSourceType.SIMULATED_OUTPUT
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "sequence", _validate_sequence(self.sequence))
+        object.__setattr__(
+            self,
+            "target_order_sequence",
+            _validate_sequence(self.target_order_sequence),
+        )
+        if not isinstance(self.estimate, SettlementEstimate):
+            msg = "estimate must be a SettlementEstimate"
+            raise TypeError(msg)
+        if self.source_type is not SimulationSourceType.SIMULATED_OUTPUT:
+            raise SimulationConfigurationError(
+                "Scenario settlement results must be classified as simulated output",
+                reason_code="simulation_scenario_settlement_result_source_invalid",
+                context={"source_type": str(self.source_type)},
+            )
+
+    @property
+    def settlement_result_hash(self) -> str:
+        """Return the deterministic hash of this settlement result."""
+
+        return canonical_sha256(self.canonical_payload())
+
+    def canonical_payload(self) -> Mapping[str, object]:
+        """Return stable JSON-compatible simulated settlement-result data."""
+
+        return {
+            "estimate": _settlement_estimate_payload(self.estimate),
             "runner_model": SIMULATION_SCENARIO_RUNNER_MODEL_NAME,
             "sequence": self.sequence,
             "source_type": self.source_type,
@@ -563,6 +636,7 @@ class DeterministicScenarioRunner:
     exchange: SimulatedExchange
     fill_model: FillModel
     fee_model: FeeModel | None = None
+    settlement_model: SettlementModel | None = None
     market_status: MarketStatus = MarketStatus.OPEN
 
     def __post_init__(self) -> None:
@@ -574,6 +648,12 @@ class DeterministicScenarioRunner:
             raise TypeError(msg)
         if self.fee_model is not None and not isinstance(self.fee_model, FeeModel):
             msg = "fee_model must implement FeeModel"
+            raise TypeError(msg)
+        if self.settlement_model is not None and not isinstance(
+            self.settlement_model,
+            SettlementModel,
+        ):
+            msg = "settlement_model must implement SettlementModel"
             raise TypeError(msg)
         if not isinstance(self.market_status, MarketStatus):
             raise SimulationConfigurationError(
@@ -603,6 +683,7 @@ class DeterministicScenarioRunner:
             ),
             fill_model=fill_model,
             fee_model=None,
+            settlement_model=None,
             market_status=market_status,
         )
 
@@ -612,6 +693,13 @@ class DeterministicScenarioRunner:
         scenario = _validate_scenario(scenario)
         _validate_runner_configuration(scenario.configuration)
         fee_model = _fee_model_for_scenario(scenario, fee_model=self.fee_model)
+        settlement_model = _settlement_model_for_scenario(
+            scenario,
+            settlement_model=self.settlement_model,
+        )
+        winning_outcome_ids = _settlement_winning_outcome_ids_from_configuration(
+            scenario.configuration
+        )
         final_book = _project_book_until(scenario=scenario, through=None)
         used_cancel_sequences: set[int] = set()
         order_results_list: list[SimulatedScenarioOrderResult] = []
@@ -626,6 +714,8 @@ class DeterministicScenarioRunner:
                 action=action,
                 sequence=index,
                 fee_model=fee_model,
+                settlement_model=settlement_model,
+                winning_outcome_ids=winning_outcome_ids,
                 cancel_action=cancel_action,
             )
             if order_result.cancel_result is not None:
@@ -655,6 +745,8 @@ class DeterministicScenarioRunner:
         action: ScheduledOrderAction,
         sequence: int,
         fee_model: FeeModel,
+        settlement_model: SettlementModel,
+        winning_outcome_ids: tuple[OutcomeId, ...],
         cancel_action: ScheduledOrderAction | None,
     ) -> SimulatedScenarioOrderResult:
         if not isinstance(action.action, OrderIntent):
@@ -728,6 +820,13 @@ class DeterministicScenarioRunner:
             if cancel_action is not None
             else None
         )
+        settlement_result = _estimate_settlement(
+            settlement_model=settlement_model,
+            fill_estimate=fill_estimate,
+            intent=intent,
+            sequence=sequence,
+            winning_outcome_ids=winning_outcome_ids,
+        )
         return SimulatedScenarioOrderResult(
             sequence=sequence,
             action=action,
@@ -736,6 +835,7 @@ class DeterministicScenarioRunner:
             fill_estimate=fill_estimate,
             fee_estimates=fee_estimates,
             cancel_result=cancel_result,
+            settlement_result=settlement_result,
         )
 
 
@@ -791,6 +891,43 @@ def _validate_cancel_result(
         msg = "cancel_result must be a SimulatedScenarioCancelResult"
         raise TypeError(msg)
     return cancel_result
+
+
+def _validate_settlement_result(
+    settlement_result: SimulatedScenarioSettlementResult | None,
+    *,
+    fill_estimate: FillEstimate | None,
+    order_sequence: int,
+) -> SimulatedScenarioSettlementResult | None:
+    if settlement_result is None:
+        return None
+    if not isinstance(settlement_result, SimulatedScenarioSettlementResult):
+        msg = "settlement_result must be a SimulatedScenarioSettlementResult"
+        raise TypeError(msg)
+    if fill_estimate is None or not fill_estimate.has_fill:
+        raise SimulationConfigurationError(
+            "Scenario settlement results require a filled order",
+            reason_code="simulation_scenario_settlement_without_fill_invalid",
+        )
+    if settlement_result.target_order_sequence != order_sequence:
+        raise SimulationConfigurationError(
+            "Scenario settlement result must reference its order result sequence",
+            reason_code="simulation_scenario_settlement_order_sequence_mismatch",
+            context={
+                "settlement_order_sequence": str(settlement_result.target_order_sequence),
+                "order_sequence": str(order_sequence),
+            },
+        )
+    if settlement_result.estimate.quantity != fill_estimate.filled_quantity:
+        raise SimulationConfigurationError(
+            "Scenario settlement quantity must match filled quantity",
+            reason_code="simulation_scenario_settlement_quantity_mismatch",
+            context={
+                "settlement_quantity": str(settlement_result.estimate.quantity),
+                "filled_quantity": str(fill_estimate.filled_quantity),
+            },
+        )
+    return settlement_result
 
 
 def _validate_text(value: str, *, field_name: str, max_length: int = _MAX_TEXT_LENGTH) -> str:
@@ -1081,6 +1218,15 @@ def _validate_runner_configuration(configuration: SimulationConfiguration) -> No
             reason_code="simulation_scenario_runner_fee_model_unsupported",
             context={"fee_model": configuration.fee_model},
         )
+    if configuration.settlement_model not in {
+        BINARY_SETTLEMENT_MODEL_NAME,
+        NO_SETTLEMENT_MODEL_NAME,
+    }:
+        raise SimulationConfigurationError(
+            "Scenario runner currently supports binary or no settlement only",
+            reason_code="simulation_scenario_runner_settlement_model_unsupported",
+            context={"settlement_model": configuration.settlement_model},
+        )
 
 
 def _project_book_until(
@@ -1311,6 +1457,16 @@ def _scenario_run_artifacts(
                     source_type=SimulationSourceType.SIMULATED_OUTPUT,
                 )
             )
+        if order_result.settlement_result is not None:
+            artifacts.append(
+                SimulationArtifact(
+                    sequence=sequence_base + 4,
+                    artifact_type="simulation_settlement_result",
+                    artifact_id=f"{scenario.scenario_id}:settlement:{order_result.sequence}",
+                    artifact_hash=order_result.settlement_result.settlement_result_hash,
+                    source_type=SimulationSourceType.SIMULATED_OUTPUT,
+                )
+            )
     return tuple(artifacts)
 
 
@@ -1343,6 +1499,26 @@ def _scenario_run_metrics(
         for result in order_results
         if result.cancel_result is not None
         and result.cancel_result.outcome_code == SIMULATION_CANCEL_FILL_RACE_LOST
+    )
+    settlement_estimate_count = sum(
+        1 for result in order_results if result.settlement_result is not None
+    )
+    settled_winning_quantity = sum(
+        (
+            result.settlement_result.estimate.quantity
+            for result in order_results
+            if result.settlement_result is not None
+            and result.settlement_result.estimate.is_winning_outcome
+        ),
+        _ZERO,
+    )
+    settled_payout_amount = sum(
+        (
+            result.settlement_result.estimate.payout_amount
+            for result in order_results
+            if result.settlement_result is not None
+        ),
+        _ZERO,
     )
     filled_quantity = sum(
         (
@@ -1399,6 +1575,27 @@ def _scenario_run_metrics(
             name="filled_quantity",
             value=parse_decimal(filled_quantity, field_name="filled_quantity metric"),
             unit="contracts",
+        ),
+        SimulationMetric(
+            name="settled_payout_amount",
+            value=parse_decimal(
+                settled_payout_amount,
+                field_name="settled_payout_amount metric",
+            ),
+            unit="payout_units",
+        ),
+        SimulationMetric(
+            name="settled_winning_quantity",
+            value=parse_decimal(
+                settled_winning_quantity,
+                field_name="settled_winning_quantity metric",
+            ),
+            unit="contracts",
+        ),
+        SimulationMetric(
+            name="settlement_estimate_count",
+            value=Decimal(settlement_estimate_count),
+            unit="count",
         ),
         SimulationMetric(
             name="total_fee_amount",
@@ -1477,6 +1674,76 @@ def _fee_model_for_scenario(
     return _fee_table_model_from_configuration(
         scenario.configuration,
         exchange=scenario.initial_book.exchange,
+    )
+
+
+def _settlement_model_for_scenario(
+    scenario: SimulationScenario,
+    *,
+    settlement_model: SettlementModel | None,
+) -> SettlementModel:
+    if settlement_model is not None:
+        return settlement_model
+    try:
+        if scenario.configuration.settlement_model == NO_SETTLEMENT_MODEL_NAME:
+            return NoSettlementModel.from_configuration(scenario.configuration)
+        return BinarySettlementModel.from_configuration(scenario.configuration)
+    except (TypeError, ValueError) as exc:
+        raise SimulationConfigurationError(
+            "Scenario runner settlement configuration is invalid",
+            reason_code="simulation_scenario_runner_settlement_configuration_invalid",
+            context={"settlement_model": scenario.configuration.settlement_model},
+        ) from exc
+
+
+def _settlement_winning_outcome_ids_from_configuration(
+    configuration: SimulationConfiguration,
+) -> tuple[OutcomeId, ...]:
+    raw_winners = configuration.parameters.get(_SETTLEMENT_WINNING_OUTCOME_IDS_PARAMETER)
+    if raw_winners is None:
+        return ()
+    try:
+        winner_tokens = tuple(raw_winners.split(","))
+        if any(token == "" or token.strip() != token for token in winner_tokens):
+            msg = "settlement winning outcome ids must be comma-separated canonical ids"
+            raise ValueError(msg)
+        winners = tuple(OutcomeId(token) for token in winner_tokens)
+        if len(set(winners)) != len(winners):
+            msg = "settlement winning outcome ids must be unique"
+            raise ValueError(msg)
+        if configuration.settlement_model == NO_SETTLEMENT_MODEL_NAME:
+            msg = "no-settlement scenarios cannot configure winning outcomes"
+            raise ValueError(msg)
+        return winners
+    except (TypeError, ValueError) as exc:
+        raise SimulationConfigurationError(
+            "Scenario runner settlement winning outcomes are invalid",
+            reason_code="simulation_scenario_runner_settlement_winners_invalid",
+            context={"settlement_model": configuration.settlement_model},
+        ) from exc
+
+
+def _estimate_settlement(
+    *,
+    settlement_model: SettlementModel,
+    fill_estimate: FillEstimate,
+    intent: OrderIntent,
+    sequence: int,
+    winning_outcome_ids: tuple[OutcomeId, ...],
+) -> SimulatedScenarioSettlementResult | None:
+    if not fill_estimate.has_fill:
+        return None
+    if not winning_outcome_ids and not isinstance(settlement_model, NoSettlementModel):
+        return None
+    estimate = settlement_model.estimate(
+        outcome_id=intent.outcome_id,
+        quantity=fill_estimate.filled_quantity,
+        winning_outcome_ids=winning_outcome_ids,
+    )
+    return SimulatedScenarioSettlementResult(
+        sequence=sequence,
+        target_order_sequence=sequence,
+        estimate=estimate,
     )
 
 
@@ -1632,4 +1899,16 @@ def _fee_estimate_payload(estimate: FeeEstimate) -> Mapping[str, object]:
         "net_fee_amount": estimate.net_fee_amount,
         "notional": estimate.notional,
         "rebate_amount": estimate.rebate_amount,
+    }
+
+
+def _settlement_estimate_payload(estimate: SettlementEstimate) -> Mapping[str, object]:
+    return {
+        "is_winning_outcome": estimate.is_winning_outcome,
+        "outcome_id": estimate.outcome_id,
+        "payout_amount": estimate.payout_amount,
+        "payout_per_unit": estimate.payout_per_unit,
+        "quantity": estimate.quantity,
+        "status": estimate.status,
+        "winning_outcome_ids": list(estimate.winning_outcome_ids),
     }

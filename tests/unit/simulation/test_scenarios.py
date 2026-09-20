@@ -10,9 +10,11 @@ import pytest
 from pmrp.schemas.enums import LiquidityRole, MarketStatus, OrderType, Side, TimeInForce
 from pmrp.schemas.market_data import OrderBookDelta, OrderBookDeltaAction, OrderBookSnapshot, Trade
 from pmrp.schemas.orders import CancelOrderRequest, Fill, OrderIntent
+from pmrp.schemas.portfolio import SettlementStatus
 from pmrp.schemas.serialization import canonical_sha256
 from pmrp.schemas.simulation import SimulationConfiguration
 from pmrp.simulation import (
+    NO_SETTLEMENT_MODEL_NAME,
     SIMULATION_CANCEL_BEFORE_ACTIVATION,
     SIMULATION_CANCEL_FILL_RACE_LOST,
     SIMULATION_SCENARIO_HASH_VERSION,
@@ -382,6 +384,76 @@ def test_deterministic_scenario_runner_records_decimal_fees_from_configuration()
     assert metrics["total_net_fee_amount"] == Decimal("0.01187")
 
 
+def test_deterministic_scenario_runner_records_settlement_payout() -> None:
+    scenario = _scenario(
+        scenario_id="SIM-012",
+        name="settlement payout",
+        configuration=_configuration(
+            parameters={
+                "settlement_winning_outcome_ids": "out_yes",
+                "settlement_payout_per_unit": "1.00",
+            }
+        ),
+        order_actions=(
+            ScheduledOrderAction(
+                sequence=1,
+                scheduled_at=NOW,
+                action=_intent(quantity="10", limit_price="0.43"),
+            ),
+        ),
+    )
+
+    run = DeterministicScenarioRunner.from_configuration(scenario.configuration).run(scenario)
+    order_result = run.order_results[0]
+    settlement_result = order_result.settlement_result
+    metrics = {metric.name: metric.value for metric in run.result.metrics}
+    artifacts = {artifact.artifact_type for artifact in run.result.artifacts}
+
+    assert settlement_result is not None
+    assert settlement_result.target_order_sequence == order_result.sequence
+    assert settlement_result.estimate.status is SettlementStatus.SETTLED
+    assert settlement_result.estimate.outcome_id == "out_yes"
+    assert settlement_result.estimate.quantity == Decimal("10")
+    assert settlement_result.estimate.winning_outcome_ids == ("out_yes",)
+    assert settlement_result.estimate.payout_per_unit == Decimal("1.00")
+    assert settlement_result.estimate.payout_amount == Decimal("10.00")
+    assert settlement_result.estimate.is_winning_outcome is True
+    assert "settlement_result" in order_result.canonical_payload()
+    assert "simulation_settlement_result" in artifacts
+    assert metrics["settlement_estimate_count"] == Decimal("1")
+    assert metrics["settled_winning_quantity"] == Decimal("10")
+    assert metrics["settled_payout_amount"] == Decimal("10.00")
+
+
+def test_deterministic_scenario_runner_records_unresolved_no_settlement_estimate() -> None:
+    scenario = _scenario(
+        scenario_id="SIM-012-NONE",
+        name="unresolved settlement",
+        configuration=_configuration(settlement_model=NO_SETTLEMENT_MODEL_NAME),
+        order_actions=(
+            ScheduledOrderAction(
+                sequence=1,
+                scheduled_at=NOW,
+                action=_intent(quantity="3", limit_price="0.43"),
+            ),
+        ),
+    )
+
+    run = DeterministicScenarioRunner.from_configuration(scenario.configuration).run(scenario)
+    settlement_result = run.order_results[0].settlement_result
+    metrics = {metric.name: metric.value for metric in run.result.metrics}
+
+    assert settlement_result is not None
+    assert settlement_result.estimate.status is SettlementStatus.UNRESOLVED
+    assert settlement_result.estimate.quantity == Decimal("3")
+    assert settlement_result.estimate.winning_outcome_ids == ()
+    assert settlement_result.estimate.payout_amount == Decimal("0")
+    assert settlement_result.estimate.is_winning_outcome is False
+    assert metrics["settlement_estimate_count"] == Decimal("1")
+    assert metrics["settled_winning_quantity"] == Decimal("0")
+    assert metrics["settled_payout_amount"] == Decimal("0")
+
+
 def test_deterministic_scenario_runner_records_passive_no_fill() -> None:
     scenario = _scenario(
         scenario_id="SIM-002",
@@ -404,6 +476,7 @@ def test_deterministic_scenario_runner_records_passive_no_fill() -> None:
     assert fill_estimate.average_fill_price is None
     assert fill_estimate.reason_code == "simulation_touch_no_fill"
     assert run.order_results[0].fee_estimates == ()
+    assert run.order_results[0].settlement_result is None
     assert metrics["accepted_order_count"] == Decimal("1")
     assert metrics["filled_order_count"] == Decimal("0")
     assert metrics["filled_quantity"] == Decimal("0")
@@ -573,6 +646,18 @@ def test_deterministic_scenario_runner_rejects_unsupported_configuration() -> No
 
     assert fee_error.value.reason_code == "simulation_scenario_runner_fee_model_unsupported"
 
+    settlement_scenario = _scenario(
+        configuration=_configuration(settlement_model="unsupported_settlement_v1")
+    )
+
+    with pytest.raises(SimulationConfigurationError) as settlement_error:
+        DeterministicScenarioRunner.from_configuration(settlement_scenario.configuration)
+
+    assert (
+        settlement_error.value.reason_code
+        == "simulation_scenario_runner_settlement_model_unsupported"
+    )
+
 
 def test_deterministic_scenario_runner_validates_fee_configuration_without_fills() -> None:
     scenario = _scenario(
@@ -591,6 +676,69 @@ def test_deterministic_scenario_runner_validates_fee_configuration_without_fills
     assert error.value.reason_code == "simulation_scenario_runner_fee_configuration_invalid"
     assert "not-a-decimal" not in str(error.value)
     assert "usd" not in str(error.value)
+
+
+def test_deterministic_scenario_runner_rejects_invalid_settlement_winners() -> None:
+    scenario = _scenario(
+        configuration=_configuration(
+            parameters={"settlement_winning_outcome_ids": "out_yes, out_no"}
+        ),
+        order_actions=(),
+    )
+
+    with pytest.raises(SimulationConfigurationError) as error:
+        DeterministicScenarioRunner.from_configuration(scenario.configuration).run(scenario)
+
+    assert error.value.reason_code == "simulation_scenario_runner_settlement_winners_invalid"
+    assert "out_yes" not in str(error.value)
+    assert "out_no" not in str(error.value)
+
+    duplicate_scenario = _scenario(
+        configuration=_configuration(
+            parameters={"settlement_winning_outcome_ids": "out_yes,out_yes"}
+        ),
+        order_actions=(),
+    )
+
+    with pytest.raises(SimulationConfigurationError) as duplicate_error:
+        DeterministicScenarioRunner.from_configuration(duplicate_scenario.configuration).run(
+            duplicate_scenario
+        )
+
+    assert (
+        duplicate_error.value.reason_code == "simulation_scenario_runner_settlement_winners_invalid"
+    )
+
+    no_settlement_scenario = _scenario(
+        configuration=_configuration(
+            settlement_model=NO_SETTLEMENT_MODEL_NAME,
+            parameters={"settlement_winning_outcome_ids": "out_yes"},
+        ),
+        order_actions=(),
+    )
+
+    with pytest.raises(SimulationConfigurationError) as no_settlement_error:
+        DeterministicScenarioRunner.from_configuration(no_settlement_scenario.configuration).run(
+            no_settlement_scenario
+        )
+
+    assert (
+        no_settlement_error.value.reason_code
+        == "simulation_scenario_runner_settlement_winners_invalid"
+    )
+
+
+def test_deterministic_scenario_runner_validates_settlement_configuration_without_fills() -> None:
+    scenario = _scenario(
+        configuration=_configuration(parameters={"settlement_payout_per_unit": "not-a-decimal"}),
+        order_actions=(),
+    )
+
+    with pytest.raises(SimulationConfigurationError) as error:
+        DeterministicScenarioRunner.from_configuration(scenario.configuration).run(scenario)
+
+    assert error.value.reason_code == "simulation_scenario_runner_settlement_configuration_invalid"
+    assert "not-a-decimal" not in str(error.value)
 
 
 def _scenario(
