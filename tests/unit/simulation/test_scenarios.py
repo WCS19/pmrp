@@ -21,6 +21,7 @@ from pmrp.simulation import (
     SIMULATION_SCENARIO_RUNNER_MODEL_NAME,
     DeterministicScenarioRunner,
     ExpectedSimulationFill,
+    RejectionReason,
     ScheduledMarketEvent,
     ScheduledOrderAction,
     SimulationArtifact,
@@ -582,6 +583,86 @@ def test_deterministic_scenario_runner_records_rejections_without_fill_outputs()
     assert run.result.source_type_counts[SimulationSourceType.SIMULATED_OUTPUT] == 2
 
 
+def test_deterministic_scenario_runner_rejects_insufficient_simulated_balance() -> None:
+    scenario = _scenario(
+        scenario_id="SIM-009",
+        name="insufficient simulated balance",
+        configuration=_configuration(parameters={"balance.available": "4.29"}),
+        order_actions=(
+            ScheduledOrderAction(
+                sequence=1,
+                scheduled_at=NOW,
+                action=_intent(quantity="10", limit_price="0.43"),
+            ),
+        ),
+    )
+
+    run = DeterministicScenarioRunner.from_configuration(scenario.configuration).run(scenario)
+    order_result = run.order_results[0]
+    metrics = {metric.name: metric.value for metric in run.result.metrics}
+
+    assert order_result.admission.rejected
+    assert order_result.admission.rejection_decision.reason_code is (
+        RejectionReason.INSUFFICIENT_BALANCE
+    )
+    assert order_result.admission.required_balance == Decimal("4.30")
+    assert order_result.admission.available_balance == Decimal("4.29")
+    assert order_result.activation_book is None
+    assert order_result.fill_estimate is None
+    assert order_result.fee_estimates == ()
+    assert order_result.settlement_result is None
+    assert metrics["accepted_order_count"] == Decimal("0")
+    assert metrics["rejected_order_count"] == Decimal("1")
+    assert metrics["filled_quantity"] == Decimal("0")
+
+
+def test_deterministic_scenario_runner_accepts_sufficient_simulated_balance() -> None:
+    scenario = _scenario(
+        scenario_id="SIM-009-SUFFICIENT",
+        name="sufficient simulated balance",
+        configuration=_configuration(parameters={"balance.available": "4.30"}),
+        order_actions=(
+            ScheduledOrderAction(
+                sequence=1,
+                scheduled_at=NOW,
+                action=_intent(quantity="10", limit_price="0.43"),
+            ),
+        ),
+    )
+
+    run = DeterministicScenarioRunner.from_configuration(scenario.configuration).run(scenario)
+    order_result = run.order_results[0]
+
+    assert order_result.admission.accepted
+    assert order_result.admission.required_balance == Decimal("4.30")
+    assert order_result.admission.available_balance == Decimal("4.30")
+    assert order_result.fill_estimate is not None
+    assert order_result.fill_estimate.filled_quantity == Decimal("10")
+
+
+def test_deterministic_scenario_runner_balance_does_not_mask_invalid_price() -> None:
+    scenario = _scenario(
+        scenario_id="SIM-009-INVALID-PRICE",
+        name="balance invalid price precedence",
+        configuration=_configuration(parameters={"balance.available": "10.00"}),
+        order_actions=(
+            ScheduledOrderAction(
+                sequence=1,
+                scheduled_at=NOW,
+                action=_intent(side=Side.SELL, quantity="10", limit_price="1.01"),
+            ),
+        ),
+    )
+
+    run = DeterministicScenarioRunner.from_configuration(scenario.configuration).run(scenario)
+    order_result = run.order_results[0]
+
+    assert order_result.admission.rejected
+    assert order_result.admission.rejection_decision.reason_code is RejectionReason.INVALID_PRICE
+    assert order_result.admission.required_balance is None
+    assert order_result.admission.available_balance == Decimal("10.00")
+
+
 def test_deterministic_scenario_runner_cancels_before_activation() -> None:
     scenario = _scenario(
         scenario_id="SIM-005",
@@ -831,6 +912,34 @@ def test_deterministic_scenario_runner_validates_fee_configuration_without_fills
     assert error.value.reason_code == "simulation_scenario_runner_fee_configuration_invalid"
     assert "not-a-decimal" not in str(error.value)
     assert "usd" not in str(error.value)
+
+
+def test_deterministic_scenario_runner_validates_balance_configuration_without_fills() -> None:
+    scenario = _scenario(
+        configuration=_configuration(parameters={"balance.available": "not-a-decimal"}),
+        order_actions=(),
+    )
+
+    with pytest.raises(SimulationConfigurationError) as error:
+        DeterministicScenarioRunner.from_configuration(scenario.configuration).run(scenario)
+
+    assert error.value.reason_code == "simulation_scenario_runner_balance_configuration_invalid"
+    assert "not-a-decimal" not in str(error.value)
+
+    negative_scenario = _scenario(
+        configuration=_configuration(parameters={"balance.available": "-0.01"}),
+        order_actions=(),
+    )
+
+    with pytest.raises(SimulationConfigurationError) as negative_error:
+        DeterministicScenarioRunner.from_configuration(negative_scenario.configuration).run(
+            negative_scenario
+        )
+
+    assert (
+        negative_error.value.reason_code
+        == "simulation_scenario_runner_balance_configuration_invalid"
+    )
 
 
 def test_deterministic_scenario_runner_rejects_invalid_settlement_winners() -> None:

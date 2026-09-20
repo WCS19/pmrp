@@ -10,7 +10,7 @@ from decimal import Decimal
 from types import MappingProxyType
 from typing import Protocol, runtime_checkable
 
-from pmrp.schemas.enums import LiquidityRole, MarketStatus
+from pmrp.schemas.enums import LiquidityRole, MarketStatus, Side
 from pmrp.schemas.identifiers import OutcomeId
 from pmrp.schemas.market_data import OrderBookDelta, OrderBookSnapshot, Trade
 from pmrp.schemas.numeric import parse_decimal
@@ -71,7 +71,9 @@ SIMULATION_CANCEL_BEFORE_ACTIVATION = "simulation_cancel_before_activation"
 SIMULATION_CANCEL_FILL_RACE_LOST = "simulation_cancel_fill_race_lost"
 
 _MAX_TEXT_LENGTH = 128
+_ONE = Decimal("1")
 _ZERO = Decimal("0")
+_AVAILABLE_BALANCE_PARAMETER = "balance.available"
 _DEFAULT_FEE_CURRENCY = "USD"
 _FEE_CURRENCY_PARAMETER = "fee.currency"
 _FEE_FIXED_PARAMETER = "fee.{role}.fixed"
@@ -700,6 +702,7 @@ class DeterministicScenarioRunner:
         winning_outcome_ids = _settlement_winning_outcome_ids_from_configuration(
             scenario.configuration
         )
+        available_balance = _available_balance_from_configuration(scenario.configuration)
         final_book = _project_book_until(scenario=scenario, through=None)
         used_cancel_sequences: set[int] = set()
         order_results_list: list[SimulatedScenarioOrderResult] = []
@@ -716,6 +719,7 @@ class DeterministicScenarioRunner:
                 fee_model=fee_model,
                 settlement_model=settlement_model,
                 winning_outcome_ids=winning_outcome_ids,
+                available_balance=available_balance,
                 cancel_action=cancel_action,
             )
             if order_result.cancel_result is not None:
@@ -747,6 +751,7 @@ class DeterministicScenarioRunner:
         fee_model: FeeModel,
         settlement_model: SettlementModel,
         winning_outcome_ids: tuple[OutcomeId, ...],
+        available_balance: Decimal | None,
         cancel_action: ScheduledOrderAction | None,
     ) -> SimulatedScenarioOrderResult:
         if not isinstance(action.action, OrderIntent):
@@ -760,6 +765,10 @@ class DeterministicScenarioRunner:
             intent=intent,
             market_status=self.market_status,
             submitted_at=action.scheduled_at,
+            required_balance=_required_balance_for_intent(intent)
+            if available_balance is not None
+            else None,
+            available_balance=available_balance,
         )
         if admission.rejected:
             return SimulatedScenarioOrderResult(
@@ -1777,6 +1786,42 @@ def _estimate_settlement(
         sequence=sequence,
         target_order_sequence=sequence,
         estimate=estimate,
+    )
+
+
+def _available_balance_from_configuration(
+    configuration: SimulationConfiguration,
+) -> Decimal | None:
+    configured_balance = configuration.parameters.get(_AVAILABLE_BALANCE_PARAMETER)
+    if configured_balance is None:
+        return None
+    try:
+        available_balance = parse_decimal(
+            configured_balance,
+            field_name="simulation available balance",
+        )
+    except (TypeError, ValueError) as exc:
+        raise SimulationConfigurationError(
+            "Scenario runner balance configuration is invalid",
+            reason_code="simulation_scenario_runner_balance_configuration_invalid",
+        ) from exc
+    if available_balance < _ZERO:
+        raise SimulationConfigurationError(
+            "Scenario runner balance configuration is invalid",
+            reason_code="simulation_scenario_runner_balance_configuration_invalid",
+        )
+    return available_balance
+
+
+def _required_balance_for_intent(intent: OrderIntent) -> Decimal | None:
+    if intent.limit_price is None:
+        return None
+    if intent.limit_price < _ZERO or intent.limit_price > _ONE:
+        return None
+    exposure_price = intent.limit_price if intent.side is Side.BUY else _ONE - intent.limit_price
+    return parse_decimal(
+        exposure_price * intent.quantity,
+        field_name="simulation required balance",
     )
 
 
