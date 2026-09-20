@@ -5,6 +5,12 @@ from pmrp.simulation.errors import (
     SimulationError,
     SimulationInputError,
 )
+from pmrp.simulation.exchange import (
+    SIMULATED_EXCHANGE_ADMISSION_MODEL_NAME,
+    DeterministicSimulatedExchange,
+    SimulatedExchange,
+    SimulatedExchangeOrderAdmission,
+)
 from pmrp.simulation.fee_models import (
     FEE_TABLE_MODEL_NAME,
     FeeEstimate,
@@ -96,6 +102,7 @@ __all__ = [
     "NO_SLIPPAGE_MODEL_NAME",
     "ORDER_BOOK_PROJECTION_MODEL_NAME",
     "ORDER_BOOK_PROJECTION_SNAPSHOT_REASON",
+    "SIMULATED_EXCHANGE_ADMISSION_MODEL_NAME",
     "SIMULATION_RESULT_CHECKSUM_VERSION",
     "SIMULATION_SCENARIO_HASH_VERSION",
     "TOUCH_FILL_MODEL_NAME",
@@ -104,6 +111,7 @@ __all__ = [
     "BinarySettlementModel",
     "BoundedRejectionModel",
     "BpsSlippageModel",
+    "DeterministicSimulatedExchange",
     "ExpectedSimulationFill",
     "FeeEstimate",
     "FeeModel",
@@ -127,6 +135,8 @@ __all__ = [
     "ScheduledOrderAction",
     "SettlementEstimate",
     "SettlementModel",
+    "SimulatedExchange",
+    "SimulatedExchangeOrderAdmission",
     "SimulatedFillComponent",
     "SimulationArtifact",
     "SimulationConfigurationError",
