@@ -44,10 +44,12 @@ from pmrp.simulation.latency_models import (
     FIXED_LATENCY_MODEL_NAME,
     FixedLatencyModel,
 )
-from pmrp.simulation.order_book import apply_order_book_delta
+from pmrp.simulation.order_book import apply_order_book_delta, best_ask, best_bid
 from pmrp.simulation.rejection_models import (
     BOUNDED_REJECTION_MODEL_NAME,
     BoundedRejectionModel,
+    RejectionDecision,
+    RejectionReason,
 )
 from pmrp.simulation.results import (
     SimulationArtifact,
@@ -805,6 +807,14 @@ class DeterministicScenarioRunner:
             scenario=scenario,
             through=admission.activates_at,
         )
+        if _post_only_would_cross(intent=intent, snapshot=activation_book):
+            return SimulatedScenarioOrderResult(
+                sequence=sequence,
+                action=action,
+                admission=_post_only_rejection_admission(admission),
+                activation_book=None,
+                fill_estimate=None,
+            )
         fill_estimate = self.fill_model.evaluate(
             snapshot=activation_book,
             side=intent.side,
@@ -1822,6 +1832,39 @@ def _required_balance_for_intent(intent: OrderIntent) -> Decimal | None:
     return parse_decimal(
         exposure_price * intent.quantity,
         field_name="simulation required balance",
+    )
+
+
+def _post_only_would_cross(
+    *,
+    intent: OrderIntent,
+    snapshot: OrderBookSnapshot,
+) -> bool:
+    if not intent.post_only or intent.limit_price is None:
+        return False
+    if intent.side is Side.BUY:
+        ask = best_ask(snapshot)
+        return ask is not None and ask.price <= intent.limit_price
+    bid = best_bid(snapshot)
+    return bid is not None and bid.price >= intent.limit_price
+
+
+def _post_only_rejection_admission(
+    admission: SimulatedExchangeOrderAdmission,
+) -> SimulatedExchangeOrderAdmission:
+    return SimulatedExchangeOrderAdmission(
+        intent=admission.intent,
+        market_status=admission.market_status,
+        rejection_decision=RejectionDecision(
+            accepted=False,
+            reason_code=RejectionReason.POST_ONLY_WOULD_CROSS,
+            reason_text="post-only order would cross at activation",
+        ),
+        submitted_at=admission.submitted_at,
+        accepted_at=None,
+        activates_at=None,
+        required_balance=admission.required_balance,
+        available_balance=admission.available_balance,
     )
 
 
