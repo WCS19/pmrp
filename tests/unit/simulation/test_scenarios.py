@@ -63,8 +63,12 @@ def test_simulation_scenario_builds_deterministic_contract() -> None:
     assert scenario.order_actions[1].action_type == "cancel_order_request"
     assert scenario.source_type_counts[SimulationSourceType.OBSERVED_FACT] == 2
     assert scenario.source_type_counts[SimulationSourceType.INFERRED_BEHAVIOR] == 2
-    assert scenario.source_type_counts[SimulationSourceType.SIMULATED_OUTPUT] == 1
+    assert scenario.source_type_counts[SimulationSourceType.SIMULATED_OUTPUT] == 2
     assert scenario.canonical_payload()["hash_version"] == SIMULATION_SCENARIO_HASH_VERSION
+    assert (
+        scenario.canonical_payload()["expected_final_book_source_type"]
+        == SimulationSourceType.SIMULATED_OUTPUT
+    )
 
     artifact = scenario.as_result_artifact(sequence=3)
 
@@ -154,6 +158,24 @@ def test_simulation_scenario_rejects_invalid_configuration_inputs() -> None:
         _scenario(tags=("dup", "dup"))
 
     assert tag_error.value.reason_code == "simulation_scenario_tag_duplicate"
+
+    with pytest.raises(SimulationConfigurationError) as source_error:
+        _scenario(
+            expected_final_book=_snapshot(),
+            expected_final_book_source_type=SimulationSourceType.OBSERVED_FACT,
+        )
+
+    assert (
+        source_error.value.reason_code == "simulation_scenario_expected_final_book_source_invalid"
+    )
+
+    with pytest.raises(SimulationConfigurationError) as orphan_source_error:
+        _scenario(expected_final_book_source_type=SimulationSourceType.SIMULATED_OUTPUT)
+
+    assert (
+        orphan_source_error.value.reason_code
+        == "simulation_scenario_expected_final_book_source_invalid"
+    )
 
 
 def test_scheduled_items_reject_invalid_inputs() -> None:
@@ -269,6 +291,7 @@ def _scenario(
     order_actions: tuple[ScheduledOrderAction, ...] = (),
     expected_fills: tuple[ExpectedSimulationFill, ...] = (),
     expected_final_book: OrderBookSnapshot | None = None,
+    expected_final_book_source_type: SimulationSourceType | None = None,
     tags: tuple[str, ...] = (),
     metadata: dict[str, str] | None = None,
 ) -> SimulationScenario:
@@ -281,6 +304,7 @@ def _scenario(
         order_actions=order_actions,
         expected_fills=expected_fills,
         expected_final_book=expected_final_book,
+        expected_final_book_source_type=expected_final_book_source_type,
         tags=tags,
         metadata=metadata or {},
     )

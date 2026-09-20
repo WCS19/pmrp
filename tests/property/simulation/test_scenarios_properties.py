@@ -57,6 +57,7 @@ def test_simulation_scenario_hash_is_deterministic(seed: int) -> None:
             order_actions=scenario.order_actions,
             expected_fills=scenario.expected_fills,
             expected_final_book=scenario.expected_final_book,
+            expected_final_book_source_type=scenario.expected_final_book_source_type,
             tags=scenario.tags,
             metadata=dict(scenario.metadata),
         ).scenario_hash

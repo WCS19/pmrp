@@ -144,6 +144,7 @@ class SimulationScenario:
     order_actions: tuple[ScheduledOrderAction, ...] = ()
     expected_fills: tuple[ExpectedSimulationFill, ...] = ()
     expected_final_book: OrderBookSnapshot | None = None
+    expected_final_book_source_type: SimulationSourceType | None = None
     tags: tuple[str, ...] = ()
     metadata: Mapping[str, str] = field(default_factory=dict)
 
@@ -168,6 +169,10 @@ class SimulationScenario:
             self.expected_final_book,
             initial_book=self.initial_book,
         )
+        expected_final_book_source_type = _validate_expected_final_book_source_type(
+            self.expected_final_book_source_type,
+            expected_final_book=expected_final_book,
+        )
 
         _validate_market_event_lineage(market_events, initial_book=self.initial_book)
         _validate_order_action_lineage(order_actions, initial_book=self.initial_book)
@@ -177,6 +182,11 @@ class SimulationScenario:
         object.__setattr__(self, "order_actions", order_actions)
         object.__setattr__(self, "expected_fills", expected_fills)
         object.__setattr__(self, "expected_final_book", expected_final_book)
+        object.__setattr__(
+            self,
+            "expected_final_book_source_type",
+            expected_final_book_source_type,
+        )
         object.__setattr__(self, "tags", _normalize_tags(self.tags))
         object.__setattr__(self, "metadata", _freeze_metadata(self.metadata))
 
@@ -200,6 +210,11 @@ class SimulationScenario:
         counts.update(event.source_type for event in self.market_events)
         counts.update(action.source_type for action in self.order_actions)
         counts.update(fill.source_type for fill in self.expected_fills)
+        if (
+            self.expected_final_book is not None
+            and self.expected_final_book_source_type is not None
+        ):
+            counts.update((self.expected_final_book_source_type,))
         return MappingProxyType(dict(counts))
 
     def as_result_artifact(self, *, sequence: int) -> SimulationArtifact:
@@ -231,6 +246,7 @@ class SimulationScenario:
         }
         if self.expected_final_book is not None:
             payload["expected_final_book"] = to_canonical_data(self.expected_final_book)
+            payload["expected_final_book_source_type"] = self.expected_final_book_source_type
         return payload
 
 
@@ -315,6 +331,30 @@ def _validate_expected_final_book(
         reason_code="simulation_scenario_expected_final_book_mismatch",
     )
     return expected_final_book
+
+
+def _validate_expected_final_book_source_type(
+    source_type: SimulationSourceType | None,
+    *,
+    expected_final_book: OrderBookSnapshot | None,
+) -> SimulationSourceType | None:
+    if expected_final_book is None:
+        if source_type is not None:
+            raise SimulationConfigurationError(
+                "Expected final book source type requires expected_final_book",
+                reason_code="simulation_scenario_expected_final_book_source_invalid",
+                context={"source_type": str(source_type)},
+            )
+        return None
+    if source_type is None:
+        return SimulationSourceType.SIMULATED_OUTPUT
+    if source_type is not SimulationSourceType.SIMULATED_OUTPUT:
+        raise SimulationConfigurationError(
+            "Expected final book must be classified as simulated output",
+            reason_code="simulation_scenario_expected_final_book_source_invalid",
+            context={"source_type": str(source_type)},
+        )
+    return source_type
 
 
 def _normalize_market_events(
