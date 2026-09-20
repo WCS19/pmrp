@@ -10,7 +10,7 @@ from decimal import Decimal
 from types import MappingProxyType
 from typing import Protocol, runtime_checkable
 
-from pmrp.schemas.enums import MarketStatus
+from pmrp.schemas.enums import LiquidityRole, MarketStatus
 from pmrp.schemas.market_data import OrderBookDelta, OrderBookSnapshot, Trade
 from pmrp.schemas.numeric import parse_decimal
 from pmrp.schemas.orders import CancelOrderRequest, Fill, OrderIntent
@@ -22,6 +22,13 @@ from pmrp.simulation.exchange import (
     DeterministicSimulatedExchange,
     SimulatedExchange,
     SimulatedExchangeOrderAdmission,
+)
+from pmrp.simulation.fee_models import (
+    FEE_TABLE_MODEL_NAME,
+    FeeEstimate,
+    FeeModel,
+    FeeRule,
+    FeeTableModel,
 )
 from pmrp.simulation.fill_models import (
     TOUCH_FILL_MODEL_NAME,
@@ -53,6 +60,12 @@ SIMULATION_SCENARIO_RUNNER_MODEL_NAME = "simulation_scenario_runner_v1"
 
 _MAX_TEXT_LENGTH = 128
 _ZERO = Decimal("0")
+_DEFAULT_FEE_CURRENCY = "USD"
+_FEE_CURRENCY_PARAMETER = "fee.currency"
+_FEE_FIXED_PARAMETER = "fee.{role}.fixed"
+_FEE_FIXED_REBATE_PARAMETER = "fee.{role}.fixed_rebate"
+_FEE_RATE_BPS_PARAMETER = "fee.{role}.rate_bps"
+_FEE_REBATE_RATE_BPS_PARAMETER = "fee.{role}.rebate_rate_bps"
 
 type ScenarioMarketEventPayload = OrderBookSnapshot | OrderBookDelta | Trade
 type ScenarioOrderActionPayload = OrderIntent | CancelOrderRequest
@@ -302,6 +315,7 @@ class SimulatedScenarioOrderResult:
     admission: SimulatedExchangeOrderAdmission
     activation_book: OrderBookSnapshot | None
     fill_estimate: FillEstimate | None
+    fee_estimates: tuple[FeeEstimate, ...] = ()
     source_type: SimulationSourceType = SimulationSourceType.SIMULATED_OUTPUT
 
     def __post_init__(self) -> None:
@@ -323,10 +337,11 @@ class SimulatedScenarioOrderResult:
         if self.fill_estimate is not None and not isinstance(self.fill_estimate, FillEstimate):
             msg = "fill_estimate must be a FillEstimate"
             raise TypeError(msg)
+        fee_estimates = _normalize_fee_estimates(self.fee_estimates)
         if self.admission.rejected:
-            if self.activation_book is not None or self.fill_estimate is not None:
+            if self.activation_book is not None or self.fill_estimate is not None or fee_estimates:
                 raise SimulationConfigurationError(
-                    "Rejected scenario orders must not include activation or fill outputs",
+                    "Rejected scenario orders must not include activation, fill, or fee outputs",
                     reason_code="simulation_scenario_rejected_order_output_invalid",
                 )
         elif self.activation_book is None or self.fill_estimate is None:
@@ -334,12 +349,22 @@ class SimulatedScenarioOrderResult:
                 "Accepted scenario orders require activation book and fill estimate outputs",
                 reason_code="simulation_scenario_accepted_order_output_missing",
             )
+        elif len(fee_estimates) != len(self.fill_estimate.components):
+            raise SimulationConfigurationError(
+                "Scenario order fee estimates must match fill components",
+                reason_code="simulation_scenario_fee_component_count_mismatch",
+                context={
+                    "fee_estimate_count": str(len(fee_estimates)),
+                    "fill_component_count": str(len(self.fill_estimate.components)),
+                },
+            )
         if self.source_type is not SimulationSourceType.SIMULATED_OUTPUT:
             raise SimulationConfigurationError(
                 "Scenario order results must be classified as simulated output",
                 reason_code="simulation_scenario_order_result_source_invalid",
                 context={"source_type": str(self.source_type)},
             )
+        object.__setattr__(self, "fee_estimates", fee_estimates)
 
     @property
     def order_result_hash(self) -> str:
@@ -362,6 +387,10 @@ class SimulatedScenarioOrderResult:
             payload["activation_book_sequence"] = self.activation_book.sequence
         if self.fill_estimate is not None:
             payload["fill_estimate"] = _fill_estimate_payload(self.fill_estimate)
+        if self.fee_estimates:
+            payload["fee_estimates"] = [
+                _fee_estimate_payload(estimate) for estimate in self.fee_estimates
+            ]
         return payload
 
 
@@ -435,6 +464,7 @@ class DeterministicScenarioRunner:
 
     exchange: SimulatedExchange
     fill_model: FillModel
+    fee_model: FeeModel | None = None
     market_status: MarketStatus = MarketStatus.OPEN
 
     def __post_init__(self) -> None:
@@ -443,6 +473,9 @@ class DeterministicScenarioRunner:
             raise TypeError(msg)
         if not isinstance(self.fill_model, FillModel):
             msg = "fill_model must implement FillModel"
+            raise TypeError(msg)
+        if self.fee_model is not None and not isinstance(self.fee_model, FeeModel):
+            msg = "fee_model must implement FeeModel"
             raise TypeError(msg)
         if not isinstance(self.market_status, MarketStatus):
             raise SimulationConfigurationError(
@@ -471,6 +504,7 @@ class DeterministicScenarioRunner:
                 latency_model=FixedLatencyModel.from_configuration(configuration),
             ),
             fill_model=fill_model,
+            fee_model=None,
             market_status=market_status,
         )
 
@@ -543,12 +577,18 @@ class DeterministicScenarioRunner:
             limit_price=intent.limit_price,
             quantity=intent.quantity,
         )
+        fee_estimates = _estimate_fees(
+            fee_model=_fee_model_for_scenario(scenario, fee_model=self.fee_model),
+            exchange=scenario.initial_book.exchange,
+            fill_estimate=fill_estimate,
+        )
         return SimulatedScenarioOrderResult(
             sequence=sequence,
             action=action,
             admission=admission,
             activation_book=activation_book,
             fill_estimate=fill_estimate,
+            fee_estimates=fee_estimates,
         )
 
 
@@ -864,6 +904,12 @@ def _validate_runner_configuration(configuration: SimulationConfiguration) -> No
             reason_code="simulation_scenario_runner_rejection_model_unsupported",
             context={"rejection_model": configuration.rejection_model},
         )
+    if configuration.fee_model != FEE_TABLE_MODEL_NAME:
+        raise SimulationConfigurationError(
+            "Scenario runner currently supports fee table fees only",
+            reason_code="simulation_scenario_runner_fee_model_unsupported",
+            context={"fee_model": configuration.fee_model},
+        )
 
 
 def _project_book_until(
@@ -910,6 +956,18 @@ def _normalize_order_results(
     return sorted_results
 
 
+def _normalize_fee_estimates(
+    fee_estimates: tuple[FeeEstimate, ...],
+) -> tuple[FeeEstimate, ...]:
+    if not isinstance(fee_estimates, tuple):
+        msg = "fee_estimates must be a tuple"
+        raise TypeError(msg)
+    if any(not isinstance(estimate, FeeEstimate) for estimate in fee_estimates):
+        msg = "fee_estimates must contain only FeeEstimate values"
+        raise TypeError(msg)
+    return fee_estimates
+
+
 def _build_scenario_run_result(
     *,
     scenario: SimulationScenario,
@@ -950,7 +1008,7 @@ def _scenario_run_artifacts(
     for index, order_result in enumerate(order_results):
         artifacts.append(
             SimulationArtifact(
-                sequence=10 + index * 2,
+                sequence=10 + index * 3,
                 artifact_type="simulation_order_result",
                 artifact_id=f"{scenario.scenario_id}:order:{order_result.sequence}",
                 artifact_hash=order_result.order_result_hash,
@@ -960,11 +1018,23 @@ def _scenario_run_artifacts(
         if order_result.fill_estimate is not None:
             artifacts.append(
                 SimulationArtifact(
-                    sequence=11 + index * 2,
+                    sequence=11 + index * 3,
                     artifact_type="simulation_fill_estimate",
                     artifact_id=f"{scenario.scenario_id}:fill:{order_result.sequence}",
                     artifact_hash=canonical_sha256(
                         _fill_estimate_payload(order_result.fill_estimate)
+                    ),
+                    source_type=SimulationSourceType.SIMULATED_OUTPUT,
+                )
+            )
+        if order_result.fee_estimates:
+            artifacts.append(
+                SimulationArtifact(
+                    sequence=12 + index * 3,
+                    artifact_type="simulation_fee_estimates",
+                    artifact_id=f"{scenario.scenario_id}:fees:{order_result.sequence}",
+                    artifact_hash=canonical_sha256(
+                        [_fee_estimate_payload(estimate) for estimate in order_result.fee_estimates]
                     ),
                     source_type=SimulationSourceType.SIMULATED_OUTPUT,
                 )
@@ -997,6 +1067,23 @@ def _scenario_run_metrics(
         ),
         _ZERO,
     )
+    fee_currency = _fee_metric_currency(scenario=scenario, order_results=order_results)
+    total_fee_amount = _sum_fee_estimate_field(
+        order_results,
+        field_name="fee_amount",
+    )
+    total_filled_notional = _sum_fee_estimate_field(
+        order_results,
+        field_name="notional",
+    )
+    total_net_fee_amount = _sum_fee_estimate_field(
+        order_results,
+        field_name="net_fee_amount",
+    )
+    total_rebate_amount = _sum_fee_estimate_field(
+        order_results,
+        field_name="rebate_amount",
+    )
     return (
         SimulationMetric(
             name="accepted_order_count",
@@ -1012,6 +1099,26 @@ def _scenario_run_metrics(
             name="filled_quantity",
             value=parse_decimal(filled_quantity, field_name="filled_quantity metric"),
             unit="contracts",
+        ),
+        SimulationMetric(
+            name="total_fee_amount",
+            value=parse_decimal(total_fee_amount, field_name="total_fee_amount metric"),
+            unit=fee_currency,
+        ),
+        SimulationMetric(
+            name="total_filled_notional",
+            value=parse_decimal(total_filled_notional, field_name="total_filled_notional metric"),
+            unit=fee_currency,
+        ),
+        SimulationMetric(
+            name="total_net_fee_amount",
+            value=parse_decimal(total_net_fee_amount, field_name="total_net_fee_amount metric"),
+            unit=fee_currency,
+        ),
+        SimulationMetric(
+            name="total_rebate_amount",
+            value=parse_decimal(total_rebate_amount, field_name="total_rebate_amount metric"),
+            unit=fee_currency,
         ),
         SimulationMetric(
             name="market_event_count",
@@ -1057,4 +1164,164 @@ def _fill_component_payload(component: SimulatedFillComponent) -> Mapping[str, o
         "liquidity_role": component.liquidity_role,
         "price": component.price,
         "quantity": component.quantity,
+    }
+
+
+def _fee_model_for_scenario(
+    scenario: SimulationScenario,
+    *,
+    fee_model: FeeModel | None,
+) -> FeeModel:
+    if fee_model is not None:
+        return fee_model
+    return _fee_table_model_from_configuration(
+        scenario.configuration,
+        exchange=scenario.initial_book.exchange,
+    )
+
+
+def _fee_table_model_from_configuration(
+    configuration: SimulationConfiguration,
+    *,
+    exchange: str,
+) -> FeeTableModel:
+    parameters = configuration.parameters
+    currency = parameters.get(_FEE_CURRENCY_PARAMETER, _DEFAULT_FEE_CURRENCY)
+    return FeeTableModel.from_rules(
+        _fee_rule_from_parameters(
+            exchange=exchange,
+            liquidity_role=LiquidityRole.TAKER,
+            currency=currency,
+            parameters=parameters,
+        ),
+        _fee_rule_from_parameters(
+            exchange=exchange,
+            liquidity_role=LiquidityRole.MAKER,
+            currency=currency,
+            parameters=parameters,
+        ),
+        _fee_rule_from_parameters(
+            exchange=exchange,
+            liquidity_role=LiquidityRole.UNKNOWN,
+            currency=currency,
+            parameters=parameters,
+        ),
+    )
+
+
+def _fee_rule_from_parameters(
+    *,
+    exchange: str,
+    liquidity_role: LiquidityRole,
+    currency: str,
+    parameters: Mapping[str, str],
+) -> FeeRule:
+    role = liquidity_role.value
+    return FeeRule(
+        exchange=exchange,
+        liquidity_role=liquidity_role,
+        currency=currency,
+        fee_rate_bps=_fee_parameter_decimal(
+            parameters,
+            _FEE_RATE_BPS_PARAMETER.format(role=role),
+        ),
+        fixed_fee=_fee_parameter_decimal(
+            parameters,
+            _FEE_FIXED_PARAMETER.format(role=role),
+        ),
+        rebate_rate_bps=_fee_parameter_decimal(
+            parameters,
+            _FEE_REBATE_RATE_BPS_PARAMETER.format(role=role),
+        ),
+        fixed_rebate=_fee_parameter_decimal(
+            parameters,
+            _FEE_FIXED_REBATE_PARAMETER.format(role=role),
+        ),
+    )
+
+
+def _fee_parameter_decimal(parameters: Mapping[str, str], key: str) -> Decimal:
+    return parse_decimal(
+        parameters.get(key, "0"),
+        field_name=f"simulation fee parameter {key}",
+    )
+
+
+def _estimate_fees(
+    *,
+    fee_model: FeeModel,
+    exchange: str,
+    fill_estimate: FillEstimate,
+) -> tuple[FeeEstimate, ...]:
+    return tuple(
+        fee_model.estimate(
+            exchange=exchange,
+            price=component.price,
+            quantity=component.quantity,
+            liquidity_role=component.liquidity_role,
+        )
+        for component in fill_estimate.components
+    )
+
+
+def _fee_metric_currency(
+    *,
+    scenario: SimulationScenario,
+    order_results: tuple[SimulatedScenarioOrderResult, ...],
+) -> str:
+    for result in order_results:
+        for estimate in result.fee_estimates:
+            return estimate.currency
+    return scenario.configuration.parameters.get(
+        _FEE_CURRENCY_PARAMETER,
+        _DEFAULT_FEE_CURRENCY,
+    )
+
+
+def _sum_fee_estimate_field(
+    order_results: tuple[SimulatedScenarioOrderResult, ...],
+    *,
+    field_name: str,
+) -> Decimal:
+    if field_name == "fee_amount":
+        return sum(
+            (estimate.fee_amount for result in order_results for estimate in result.fee_estimates),
+            _ZERO,
+        )
+    if field_name == "net_fee_amount":
+        return sum(
+            (
+                estimate.net_fee_amount
+                for result in order_results
+                for estimate in result.fee_estimates
+            ),
+            _ZERO,
+        )
+    if field_name == "notional":
+        return sum(
+            (estimate.notional for result in order_results for estimate in result.fee_estimates),
+            _ZERO,
+        )
+    if field_name == "rebate_amount":
+        return sum(
+            (
+                estimate.rebate_amount
+                for result in order_results
+                for estimate in result.fee_estimates
+            ),
+            _ZERO,
+        )
+    msg = f"unsupported fee estimate field: {field_name}"
+    raise ValueError(msg)
+
+
+def _fee_estimate_payload(estimate: FeeEstimate) -> Mapping[str, object]:
+    return {
+        "currency": estimate.currency,
+        "exchange": estimate.exchange,
+        "fee_amount": estimate.fee_amount,
+        "liquidity_role": estimate.liquidity_role,
+        "net_fee_amount": estimate.net_fee_amount,
+        "notional": estimate.notional,
+        "rebate_amount": estimate.rebate_amount,
     }
