@@ -169,6 +169,58 @@ class RiskMarketPositionState:
 
 
 @dataclass(frozen=True, slots=True)
+class RiskPortfolioGrossExposureState:
+    """One timestamped portfolio gross-exposure input for deterministic risk rules."""
+
+    current_gross_exposure: Decimal
+    max_gross_exposure: Decimal
+    observed_at: datetime
+    open_order_gross_exposure: Decimal = Decimal("0")
+    reserved_gross_exposure: Decimal = Decimal("0")
+
+    def __post_init__(self) -> None:
+        current_gross_exposure = parse_decimal(
+            self.current_gross_exposure,
+            field_name="risk portfolio gross current_gross_exposure",
+        )
+        max_gross_exposure = parse_decimal(
+            self.max_gross_exposure,
+            field_name="risk portfolio gross max_gross_exposure",
+        )
+        open_order_gross_exposure = parse_decimal(
+            self.open_order_gross_exposure,
+            field_name="risk portfolio gross open_order_gross_exposure",
+        )
+        reserved_gross_exposure = parse_decimal(
+            self.reserved_gross_exposure,
+            field_name="risk portfolio gross reserved_gross_exposure",
+        )
+        if current_gross_exposure < Decimal("0"):
+            raise RiskConfigurationError("current_gross_exposure must be nonnegative")
+        if open_order_gross_exposure < Decimal("0"):
+            raise RiskConfigurationError("open_order_gross_exposure must be nonnegative")
+        if reserved_gross_exposure < Decimal("0"):
+            raise RiskConfigurationError("reserved_gross_exposure must be nonnegative")
+        if max_gross_exposure <= Decimal("0"):
+            raise RiskConfigurationError("max_gross_exposure must be positive")
+        object.__setattr__(self, "current_gross_exposure", current_gross_exposure)
+        object.__setattr__(self, "max_gross_exposure", max_gross_exposure)
+        object.__setattr__(self, "open_order_gross_exposure", open_order_gross_exposure)
+        object.__setattr__(self, "reserved_gross_exposure", reserved_gross_exposure)
+        object.__setattr__(self, "observed_at", parse_utc_datetime(self.observed_at))
+
+    @property
+    def effective_gross_exposure(self) -> Decimal:
+        """Return current gross exposure plus known pending exposure."""
+
+        return (
+            self.current_gross_exposure
+            + self.open_order_gross_exposure
+            + self.reserved_gross_exposure
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class RiskContext:
     """Immutable state snapshot supplied to risk rule evaluation."""
 
@@ -181,6 +233,7 @@ class RiskContext:
     quantity_limits: Mapping[ContractId, RiskQuantityLimitsState] = field(default_factory=dict)
     notional_limits: Mapping[ContractId, RiskNotionalLimitState] = field(default_factory=dict)
     market_positions: Mapping[MarketId, RiskMarketPositionState] = field(default_factory=dict)
+    portfolio_gross_exposure: RiskPortfolioGrossExposureState | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "evaluated_at", parse_utc_datetime(self.evaluated_at))
@@ -224,6 +277,13 @@ class RiskContext:
             "market_positions",
             _freeze_market_positions(self.market_positions),
         )
+        if self.portfolio_gross_exposure is not None and not isinstance(
+            self.portfolio_gross_exposure,
+            RiskPortfolioGrossExposureState,
+        ):
+            raise RiskConfigurationError(
+                "portfolio_gross_exposure must be a RiskPortfolioGrossExposureState instance"
+            )
 
     def strategy_enabled_state(self, strategy_id: StrategyId) -> RiskBooleanState | None:
         """Return the enabled state for a strategy, if present in this snapshot."""
@@ -264,6 +324,11 @@ class RiskContext:
         """Return the market-position state for a market, if present in this snapshot."""
 
         return self.market_positions.get(market_id)
+
+    def portfolio_gross_exposure_state(self) -> RiskPortfolioGrossExposureState | None:
+        """Return the portfolio gross-exposure state, if present in this snapshot."""
+
+        return self.portfolio_gross_exposure
 
 
 def _freeze_strategy_enabled(
