@@ -1,6 +1,7 @@
 """Runtime risk engine primitives."""
 
 from pmrp.risk.context import (
+    RiskArbitrageLegState,
     RiskAvailableBalanceState,
     RiskBooleanState,
     RiskContext,
@@ -21,6 +22,15 @@ from pmrp.risk.context import (
 )
 from pmrp.risk.errors import RiskConfigurationError, RiskError, RiskInputError
 from pmrp.risk.rules import (
+    RISK_ARBITRAGE_HEDGE_DEADLINE_MISSING_REASON,
+    RISK_ARBITRAGE_HEDGE_TIMEOUT_EXPIRED_REASON,
+    RISK_ARBITRAGE_LEG_EXPOSURE_ABOVE_MAX_REASON,
+    RISK_ARBITRAGE_LEG_RULE_ID,
+    RISK_ARBITRAGE_LEG_RULE_VERSION,
+    RISK_ARBITRAGE_LEG_STATE_FUTURE_REASON,
+    RISK_ARBITRAGE_LEG_STATE_MISSING_REASON,
+    RISK_ARBITRAGE_LEG_STATE_STALE_REASON,
+    RISK_ARBITRAGE_LEG_VALID_REASON,
     RISK_AVAILABLE_BALANCE_INSUFFICIENT_REASON,
     RISK_AVAILABLE_BALANCE_PRICE_MISSING_REASON,
     RISK_AVAILABLE_BALANCE_RULE_ID,
@@ -164,6 +174,7 @@ from pmrp.risk.rules import (
     RISK_STRATEGY_STATE_FUTURE_REASON,
     RISK_STRATEGY_STATE_MISSING_REASON,
     RISK_STRATEGY_STATE_STALE_REASON,
+    ArbitrageLegRiskRule,
     AvailableBalanceRule,
     DailyLossLimitRule,
     DuplicateOrderGuardRule,
@@ -186,6 +197,15 @@ from pmrp.risk.rules import (
 )
 
 __all__ = [
+    "RISK_ARBITRAGE_HEDGE_DEADLINE_MISSING_REASON",
+    "RISK_ARBITRAGE_HEDGE_TIMEOUT_EXPIRED_REASON",
+    "RISK_ARBITRAGE_LEG_EXPOSURE_ABOVE_MAX_REASON",
+    "RISK_ARBITRAGE_LEG_RULE_ID",
+    "RISK_ARBITRAGE_LEG_RULE_VERSION",
+    "RISK_ARBITRAGE_LEG_STATE_FUTURE_REASON",
+    "RISK_ARBITRAGE_LEG_STATE_MISSING_REASON",
+    "RISK_ARBITRAGE_LEG_STATE_STALE_REASON",
+    "RISK_ARBITRAGE_LEG_VALID_REASON",
     "RISK_AVAILABLE_BALANCE_INSUFFICIENT_REASON",
     "RISK_AVAILABLE_BALANCE_PRICE_MISSING_REASON",
     "RISK_AVAILABLE_BALANCE_RULE_ID",
@@ -329,6 +349,7 @@ __all__ = [
     "RISK_STRATEGY_STATE_FUTURE_REASON",
     "RISK_STRATEGY_STATE_MISSING_REASON",
     "RISK_STRATEGY_STATE_STALE_REASON",
+    "ArbitrageLegRiskRule",
     "AvailableBalanceRule",
     "DailyLossLimitRule",
     "DuplicateOrderGuardRule",
@@ -345,6 +366,7 @@ __all__ = [
     "PortfolioGrossLimitRule",
     "PortfolioNetLimitRule",
     "ReconciliationHealthRule",
+    "RiskArbitrageLegState",
     "RiskAvailableBalanceState",
     "RiskBooleanState",
     "RiskConfigurationError",

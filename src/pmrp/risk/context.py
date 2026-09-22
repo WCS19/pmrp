@@ -544,6 +544,51 @@ class RiskKillSwitchClearState:
 
 
 @dataclass(frozen=True, slots=True)
+class RiskArbitrageLegState:
+    """One timestamped arbitrage-leg risk snapshot for deterministic risk rules."""
+
+    current_unhedged_quantity: Decimal
+    max_unhedged_quantity: Decimal
+    observed_at: datetime
+    hedge_deadline_at: datetime | None = None
+    submitted_legs: int = 0
+    accepted_legs: int = 0
+    filled_legs: int = 0
+
+    def __post_init__(self) -> None:
+        current_unhedged_quantity = parse_decimal(
+            self.current_unhedged_quantity,
+            field_name="risk arbitrage leg current_unhedged_quantity",
+        )
+        max_unhedged_quantity = parse_decimal(
+            self.max_unhedged_quantity,
+            field_name="risk arbitrage leg max_unhedged_quantity",
+        )
+        if current_unhedged_quantity < Decimal("0"):
+            raise RiskConfigurationError("current_unhedged_quantity must be nonnegative")
+        if max_unhedged_quantity < Decimal("0"):
+            raise RiskConfigurationError("max_unhedged_quantity must be nonnegative")
+        _validate_nonnegative_int(self.submitted_legs, field_name="submitted_legs")
+        _validate_nonnegative_int(self.accepted_legs, field_name="accepted_legs")
+        _validate_nonnegative_int(self.filled_legs, field_name="filled_legs")
+        if self.accepted_legs > self.submitted_legs:
+            raise RiskConfigurationError("accepted_legs must not exceed submitted_legs")
+        if self.filled_legs > self.accepted_legs:
+            raise RiskConfigurationError("filled_legs must not exceed accepted_legs")
+        hedge_deadline_at = (
+            None if self.hedge_deadline_at is None else parse_utc_datetime(self.hedge_deadline_at)
+        )
+        object.__setattr__(
+            self,
+            "current_unhedged_quantity",
+            current_unhedged_quantity,
+        )
+        object.__setattr__(self, "max_unhedged_quantity", max_unhedged_quantity)
+        object.__setattr__(self, "hedge_deadline_at", hedge_deadline_at)
+        object.__setattr__(self, "observed_at", parse_utc_datetime(self.observed_at))
+
+
+@dataclass(frozen=True, slots=True)
 class RiskContext:
     """Immutable state snapshot supplied to risk rule evaluation."""
 
@@ -567,6 +612,7 @@ class RiskContext:
     available_balance: RiskAvailableBalanceState | None = None
     reconciliation_health: RiskReconciliationHealthState | None = None
     kill_switch_clear: RiskKillSwitchClearState | None = None
+    arbitrage_leg: RiskArbitrageLegState | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "evaluated_at", parse_utc_datetime(self.evaluated_at))
@@ -679,6 +725,11 @@ class RiskContext:
             raise RiskConfigurationError(
                 "kill_switch_clear must be a RiskKillSwitchClearState instance"
             )
+        if self.arbitrage_leg is not None and not isinstance(
+            self.arbitrage_leg,
+            RiskArbitrageLegState,
+        ):
+            raise RiskConfigurationError("arbitrage_leg must be a RiskArbitrageLegState instance")
 
     def strategy_enabled_state(self, strategy_id: StrategyId) -> RiskBooleanState | None:
         """Return the enabled state for a strategy, if present in this snapshot."""
@@ -774,6 +825,11 @@ class RiskContext:
         """Return the kill-switch clear state, if present in this snapshot."""
 
         return self.kill_switch_clear
+
+    def arbitrage_leg_state(self) -> RiskArbitrageLegState | None:
+        """Return the arbitrage-leg risk state, if present in this snapshot."""
+
+        return self.arbitrage_leg
 
 
 def _validate_nonnegative_int(value: int, *, field_name: str) -> None:
