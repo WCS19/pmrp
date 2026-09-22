@@ -1,15 +1,22 @@
 """Runtime risk engine primitives."""
 
-from pmrp.risk.context import RiskBooleanState, RiskContext
+from pmrp.risk.context import RiskBooleanState, RiskContext, RiskMarketStatusState
 from pmrp.risk.errors import RiskConfigurationError, RiskError, RiskInputError
 from pmrp.risk.rules import (
     RISK_MARKET_DISABLED_REASON,
     RISK_MARKET_ENABLED_REASON,
     RISK_MARKET_ENABLED_RULE_ID,
     RISK_MARKET_ENABLED_RULE_VERSION,
+    RISK_MARKET_NOT_OPEN_REASON,
+    RISK_MARKET_OPEN_REASON,
+    RISK_MARKET_OPEN_RULE_ID,
+    RISK_MARKET_OPEN_RULE_VERSION,
     RISK_MARKET_STATE_FUTURE_REASON,
     RISK_MARKET_STATE_MISSING_REASON,
     RISK_MARKET_STATE_STALE_REASON,
+    RISK_MARKET_STATUS_FUTURE_REASON,
+    RISK_MARKET_STATUS_MISSING_REASON,
+    RISK_MARKET_STATUS_STALE_REASON,
     RISK_STRATEGY_DISABLED_REASON,
     RISK_STRATEGY_ENABLED_REASON,
     RISK_STRATEGY_ENABLED_RULE_ID,
@@ -18,6 +25,7 @@ from pmrp.risk.rules import (
     RISK_STRATEGY_STATE_MISSING_REASON,
     RISK_STRATEGY_STATE_STALE_REASON,
     MarketEnabledRule,
+    MarketOpenRule,
     RiskRule,
     StrategyEnabledRule,
 )
@@ -27,9 +35,16 @@ __all__ = [
     "RISK_MARKET_ENABLED_REASON",
     "RISK_MARKET_ENABLED_RULE_ID",
     "RISK_MARKET_ENABLED_RULE_VERSION",
+    "RISK_MARKET_NOT_OPEN_REASON",
+    "RISK_MARKET_OPEN_REASON",
+    "RISK_MARKET_OPEN_RULE_ID",
+    "RISK_MARKET_OPEN_RULE_VERSION",
     "RISK_MARKET_STATE_FUTURE_REASON",
     "RISK_MARKET_STATE_MISSING_REASON",
     "RISK_MARKET_STATE_STALE_REASON",
+    "RISK_MARKET_STATUS_FUTURE_REASON",
+    "RISK_MARKET_STATUS_MISSING_REASON",
+    "RISK_MARKET_STATUS_STALE_REASON",
     "RISK_STRATEGY_DISABLED_REASON",
     "RISK_STRATEGY_ENABLED_REASON",
     "RISK_STRATEGY_ENABLED_RULE_ID",
@@ -38,11 +53,13 @@ __all__ = [
     "RISK_STRATEGY_STATE_MISSING_REASON",
     "RISK_STRATEGY_STATE_STALE_REASON",
     "MarketEnabledRule",
+    "MarketOpenRule",
     "RiskBooleanState",
     "RiskConfigurationError",
     "RiskContext",
     "RiskError",
     "RiskInputError",
+    "RiskMarketStatusState",
     "RiskRule",
     "StrategyEnabledRule",
 ]
