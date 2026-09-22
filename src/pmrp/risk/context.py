@@ -267,6 +267,54 @@ class RiskPortfolioNetExposureState:
 
 
 @dataclass(frozen=True, slots=True)
+class RiskStrategyCapitalState:
+    """One timestamped strategy-capital input used by deterministic risk rules."""
+
+    current_capital_used: Decimal
+    max_strategy_capital: Decimal
+    observed_at: datetime
+    open_order_capital: Decimal = Decimal("0")
+    reserved_capital: Decimal = Decimal("0")
+
+    def __post_init__(self) -> None:
+        current_capital_used = parse_decimal(
+            self.current_capital_used,
+            field_name="risk strategy capital current_capital_used",
+        )
+        max_strategy_capital = parse_decimal(
+            self.max_strategy_capital,
+            field_name="risk strategy capital max_strategy_capital",
+        )
+        open_order_capital = parse_decimal(
+            self.open_order_capital,
+            field_name="risk strategy capital open_order_capital",
+        )
+        reserved_capital = parse_decimal(
+            self.reserved_capital,
+            field_name="risk strategy capital reserved_capital",
+        )
+        if current_capital_used < Decimal("0"):
+            raise RiskConfigurationError("current_capital_used must be nonnegative")
+        if open_order_capital < Decimal("0"):
+            raise RiskConfigurationError("open_order_capital must be nonnegative")
+        if reserved_capital < Decimal("0"):
+            raise RiskConfigurationError("reserved_capital must be nonnegative")
+        if max_strategy_capital <= Decimal("0"):
+            raise RiskConfigurationError("max_strategy_capital must be positive")
+        object.__setattr__(self, "current_capital_used", current_capital_used)
+        object.__setattr__(self, "max_strategy_capital", max_strategy_capital)
+        object.__setattr__(self, "open_order_capital", open_order_capital)
+        object.__setattr__(self, "reserved_capital", reserved_capital)
+        object.__setattr__(self, "observed_at", parse_utc_datetime(self.observed_at))
+
+    @property
+    def effective_capital_used(self) -> Decimal:
+        """Return current strategy capital plus known pending capital."""
+
+        return self.current_capital_used + self.open_order_capital + self.reserved_capital
+
+
+@dataclass(frozen=True, slots=True)
 class RiskContext:
     """Immutable state snapshot supplied to risk rule evaluation."""
 
@@ -281,6 +329,7 @@ class RiskContext:
     market_positions: Mapping[MarketId, RiskMarketPositionState] = field(default_factory=dict)
     portfolio_gross_exposure: RiskPortfolioGrossExposureState | None = None
     portfolio_net_exposure: RiskPortfolioNetExposureState | None = None
+    strategy_capital: Mapping[StrategyId, RiskStrategyCapitalState] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "evaluated_at", parse_utc_datetime(self.evaluated_at))
@@ -338,6 +387,11 @@ class RiskContext:
             raise RiskConfigurationError(
                 "portfolio_net_exposure must be a RiskPortfolioNetExposureState instance"
             )
+        object.__setattr__(
+            self,
+            "strategy_capital",
+            _freeze_strategy_capital(self.strategy_capital),
+        )
 
     def strategy_enabled_state(self, strategy_id: StrategyId) -> RiskBooleanState | None:
         """Return the enabled state for a strategy, if present in this snapshot."""
@@ -389,6 +443,11 @@ class RiskContext:
 
         return self.portfolio_net_exposure
 
+    def strategy_capital_state(self, strategy_id: StrategyId) -> RiskStrategyCapitalState | None:
+        """Return the strategy-capital state for a strategy, if present."""
+
+        return self.strategy_capital.get(strategy_id)
+
 
 def _freeze_strategy_enabled(
     states: Mapping[StrategyId, RiskBooleanState],
@@ -405,6 +464,26 @@ def _freeze_strategy_enabled(
         if not isinstance(state, RiskBooleanState):
             raise RiskConfigurationError(
                 "strategy_enabled values must be RiskBooleanState instances"
+            )
+        frozen[strategy_id] = state
+    return MappingProxyType(frozen)
+
+
+def _freeze_strategy_capital(
+    states: Mapping[StrategyId, RiskStrategyCapitalState],
+) -> Mapping[StrategyId, RiskStrategyCapitalState]:
+    if not isinstance(states, Mapping):
+        msg = "strategy_capital must be a mapping"
+        raise TypeError(msg)
+    frozen: dict[StrategyId, RiskStrategyCapitalState] = {}
+    for strategy_id, state in states.items():
+        if not isinstance(strategy_id, StrategyId):
+            raise RiskConfigurationError(
+                "strategy_capital keys must be canonical StrategyId values"
+            )
+        if not isinstance(state, RiskStrategyCapitalState):
+            raise RiskConfigurationError(
+                "strategy_capital values must be RiskStrategyCapitalState instances"
             )
         frozen[strategy_id] = state
     return MappingProxyType(frozen)

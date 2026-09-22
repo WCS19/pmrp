@@ -10,6 +10,7 @@ from pmrp.risk.context import (
     RiskPortfolioNetExposureState,
     RiskPriceBoundsState,
     RiskQuantityLimitsState,
+    RiskStrategyCapitalState,
 )
 from pmrp.risk.errors import RiskConfigurationError, RiskError, RiskInputError
 from pmrp.risk.rules import (
@@ -84,6 +85,14 @@ from pmrp.risk.rules import (
     RISK_PORTFOLIO_NET_STATE_MISSING_REASON,
     RISK_PORTFOLIO_NET_STATE_STALE_REASON,
     RISK_PORTFOLIO_NET_VALID_REASON,
+    RISK_STRATEGY_CAPITAL_ABOVE_MAX_REASON,
+    RISK_STRATEGY_CAPITAL_LIMIT_RULE_ID,
+    RISK_STRATEGY_CAPITAL_LIMIT_RULE_VERSION,
+    RISK_STRATEGY_CAPITAL_PRICE_MISSING_REASON,
+    RISK_STRATEGY_CAPITAL_STATE_FUTURE_REASON,
+    RISK_STRATEGY_CAPITAL_STATE_MISSING_REASON,
+    RISK_STRATEGY_CAPITAL_STATE_STALE_REASON,
+    RISK_STRATEGY_CAPITAL_VALID_REASON,
     RISK_STRATEGY_DISABLED_REASON,
     RISK_STRATEGY_ENABLED_REASON,
     RISK_STRATEGY_ENABLED_RULE_ID,
@@ -101,6 +110,7 @@ from pmrp.risk.rules import (
     PortfolioGrossLimitRule,
     PortfolioNetLimitRule,
     RiskRule,
+    StrategyCapitalLimitRule,
     StrategyEnabledRule,
 )
 
@@ -176,6 +186,14 @@ __all__ = [
     "RISK_PORTFOLIO_NET_STATE_MISSING_REASON",
     "RISK_PORTFOLIO_NET_STATE_STALE_REASON",
     "RISK_PORTFOLIO_NET_VALID_REASON",
+    "RISK_STRATEGY_CAPITAL_ABOVE_MAX_REASON",
+    "RISK_STRATEGY_CAPITAL_LIMIT_RULE_ID",
+    "RISK_STRATEGY_CAPITAL_LIMIT_RULE_VERSION",
+    "RISK_STRATEGY_CAPITAL_PRICE_MISSING_REASON",
+    "RISK_STRATEGY_CAPITAL_STATE_FUTURE_REASON",
+    "RISK_STRATEGY_CAPITAL_STATE_MISSING_REASON",
+    "RISK_STRATEGY_CAPITAL_STATE_STALE_REASON",
+    "RISK_STRATEGY_CAPITAL_VALID_REASON",
     "RISK_STRATEGY_DISABLED_REASON",
     "RISK_STRATEGY_ENABLED_REASON",
     "RISK_STRATEGY_ENABLED_RULE_ID",
@@ -205,5 +223,7 @@ __all__ = [
     "RiskPriceBoundsState",
     "RiskQuantityLimitsState",
     "RiskRule",
+    "RiskStrategyCapitalState",
+    "StrategyCapitalLimitRule",
     "StrategyEnabledRule",
 ]
