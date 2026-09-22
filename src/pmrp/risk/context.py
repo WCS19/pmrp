@@ -13,6 +13,7 @@ from pmrp.schemas.enums import MarketStatus
 from pmrp.schemas.identifiers import ContractId, ExchangeId, IntentId, MarketId, StrategyId
 from pmrp.schemas.numeric import parse_decimal
 from pmrp.schemas.portfolio import ReconciliationStatus
+from pmrp.schemas.risk import KillSwitchScope
 from pmrp.schemas.time import parse_utc_datetime
 
 
@@ -524,6 +525,25 @@ class RiskReconciliationHealthState:
 
 
 @dataclass(frozen=True, slots=True)
+class RiskKillSwitchClearState:
+    """One timestamped applicable kill-switch snapshot for deterministic risk rules."""
+
+    clear: bool
+    observed_at: datetime
+    active_scopes: Collection[KillSwitchScope] = field(default_factory=frozenset)
+
+    def __post_init__(self) -> None:
+        if type(self.clear) is not bool:
+            msg = "kill switch clear value must be a bool"
+            raise TypeError(msg)
+        active_scopes = _freeze_kill_switch_scopes(self.active_scopes)
+        if self.clear and active_scopes:
+            raise RiskConfigurationError("clear kill switch state cannot contain active scopes")
+        object.__setattr__(self, "active_scopes", active_scopes)
+        object.__setattr__(self, "observed_at", parse_utc_datetime(self.observed_at))
+
+
+@dataclass(frozen=True, slots=True)
 class RiskContext:
     """Immutable state snapshot supplied to risk rule evaluation."""
 
@@ -546,6 +566,7 @@ class RiskContext:
     duplicate_order_guard: RiskDuplicateOrderGuardState | None = None
     available_balance: RiskAvailableBalanceState | None = None
     reconciliation_health: RiskReconciliationHealthState | None = None
+    kill_switch_clear: RiskKillSwitchClearState | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "evaluated_at", parse_utc_datetime(self.evaluated_at))
@@ -651,6 +672,13 @@ class RiskContext:
             raise RiskConfigurationError(
                 "reconciliation_health must be a RiskReconciliationHealthState instance"
             )
+        if self.kill_switch_clear is not None and not isinstance(
+            self.kill_switch_clear,
+            RiskKillSwitchClearState,
+        ):
+            raise RiskConfigurationError(
+                "kill_switch_clear must be a RiskKillSwitchClearState instance"
+            )
 
     def strategy_enabled_state(self, strategy_id: StrategyId) -> RiskBooleanState | None:
         """Return the enabled state for a strategy, if present in this snapshot."""
@@ -742,6 +770,11 @@ class RiskContext:
 
         return self.reconciliation_health
 
+    def kill_switch_clear_state(self) -> RiskKillSwitchClearState | None:
+        """Return the kill-switch clear state, if present in this snapshot."""
+
+        return self.kill_switch_clear
+
 
 def _validate_nonnegative_int(value: int, *, field_name: str) -> None:
     if type(value) is not int:
@@ -789,6 +822,19 @@ def _freeze_known_idempotency_keys(keys: Collection[str]) -> frozenset[str]:
         if len(key) > _MAX_IDEMPOTENCY_KEY_LENGTH:
             raise RiskConfigurationError(
                 "known_idempotency_keys values must be at most 256 characters"
+            )
+    return frozen
+
+
+def _freeze_kill_switch_scopes(scopes: Collection[KillSwitchScope]) -> frozenset[KillSwitchScope]:
+    if isinstance(scopes, (str, bytes)) or not isinstance(scopes, Collection):
+        msg = "active_scopes must be a collection"
+        raise TypeError(msg)
+    frozen = frozenset(scopes)
+    for scope in frozen:
+        if not isinstance(scope, KillSwitchScope):
+            raise RiskConfigurationError(
+                "active_scopes values must be canonical KillSwitchScope values"
             )
     return frozen
 
