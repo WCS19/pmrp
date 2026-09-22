@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields, is_dataclass
 from datetime import datetime, timedelta
+from decimal import Decimal
+from enum import Enum
 from typing import Protocol
 
 from pmrp.risk.context import RiskContext
@@ -23,6 +25,7 @@ RISK_ENGINE_RULE_ID = "RISK-ENGINE"
 RISK_ENGINE_RULE_VERSION = "1.0"
 _MAX_SNAPSHOT_ID_LENGTH = 128
 _HASH_PREFIX_LENGTH = 32
+_SECONDS_PER_DAY = 86_400
 
 
 class RiskDecisionIdGenerator(Protocol):
@@ -79,19 +82,24 @@ class RiskEngine:
     def __post_init__(self) -> None:
         frozen_rules = _freeze_rules(self.rules)
         object.__setattr__(self, "rules", frozen_rules)
+        if self.approval_ttl is not None and not isinstance(self.approval_ttl, timedelta):
+            msg = "approval_ttl must be a timedelta"
+            raise TypeError(msg)
+        if self.approval_ttl is not None and self.approval_ttl <= timedelta(0):
+            raise RiskConfigurationError("approval_ttl must be positive")
+
         if self.configuration_hash is None:
-            object.__setattr__(self, "configuration_hash", _configuration_hash(frozen_rules))
+            object.__setattr__(
+                self,
+                "configuration_hash",
+                _configuration_hash(frozen_rules, approval_ttl=self.approval_ttl),
+            )
         elif type(self.configuration_hash) is not str:
             msg = "configuration_hash must be a string"
             raise TypeError(msg)
         elif self.configuration_hash == "":
             raise RiskConfigurationError("configuration_hash must not be empty")
 
-        if self.approval_ttl is not None and not isinstance(self.approval_ttl, timedelta):
-            msg = "approval_ttl must be a timedelta"
-            raise TypeError(msg)
-        if self.approval_ttl is not None and self.approval_ttl <= timedelta(0):
-            raise RiskConfigurationError("approval_ttl must be positive")
         if not hasattr(self.decision_id_generator, "risk_decision_id"):
             raise RiskConfigurationError("decision_id_generator must implement risk_decision_id")
 
@@ -221,16 +229,73 @@ def _rule_identity(rule: RiskRule) -> tuple[str, str]:
     return rule_id, rule_version
 
 
-def _configuration_hash(rules: tuple[RiskRule, ...]) -> str:
+def _configuration_hash(
+    rules: tuple[RiskRule, ...],
+    *,
+    approval_ttl: timedelta | None,
+) -> str:
     return canonical_sha256(
-        tuple(
-            {
-                "rule_id": rule_id,
-                "rule_version": rule_version,
-            }
-            for rule_id, rule_version in (_rule_identity(rule) for rule in rules)
-        )
+        {
+            "approval_ttl": _canonical_config_value(approval_ttl),
+            "rules": tuple(_rule_configuration(rule) for rule in rules),
+        }
     )
+
+
+def _rule_configuration(rule: RiskRule) -> dict[str, object]:
+    rule_id, rule_version = _rule_identity(rule)
+    return {
+        "parameters": _rule_parameters(rule),
+        "rule_class": f"{type(rule).__module__}.{type(rule).__qualname__}",
+        "rule_id": rule_id,
+        "rule_version": rule_version,
+    }
+
+
+def _rule_parameters(rule: RiskRule) -> dict[str, object]:
+    if not is_dataclass(rule):
+        return {}
+    parameters: dict[str, object] = {}
+    for rule_field in fields(rule):
+        parameters[rule_field.name] = _canonical_config_value(getattr(rule, rule_field.name))
+    return parameters
+
+
+def _canonical_config_value(value: object) -> object:
+    if isinstance(value, timedelta):
+        return {"microseconds": _timedelta_microseconds(value)}
+    if isinstance(value, Decimal | datetime | Enum) or type(value) in {bool, int, str}:
+        return value
+    if value is None:
+        return None
+    if isinstance(value, float):
+        msg = "risk configuration values must not be floats"
+        raise TypeError(msg)
+    if isinstance(value, set | frozenset):
+        raise RiskConfigurationError("risk configuration values must not be unordered")
+    if isinstance(value, Sequence) and not isinstance(value, str | bytes | bytearray):
+        return tuple(_canonical_config_value(item) for item in value)
+    if isinstance(value, dict):
+        return _canonical_mapping(value)
+    if is_dataclass(value):
+        return {
+            item.name: _canonical_config_value(getattr(value, item.name)) for item in fields(value)
+        }
+    return value
+
+
+def _canonical_mapping(mapping: dict[object, object]) -> dict[str, object]:
+    canonical: dict[str, object] = {}
+    for key, item in mapping.items():
+        if type(key) is not str:
+            msg = "risk configuration mapping keys must be strings"
+            raise TypeError(msg)
+        canonical[key] = _canonical_config_value(item)
+    return canonical
+
+
+def _timedelta_microseconds(value: timedelta) -> int:
+    return (value.days * _SECONDS_PER_DAY + value.seconds) * 1_000_000 + value.microseconds
 
 
 def _validate_input_snapshot_id(input_snapshot_id: str) -> None:

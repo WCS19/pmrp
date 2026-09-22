@@ -62,10 +62,13 @@ async def test_risk_engine_returns_approved_decision_when_all_rules_pass() -> No
     assert decision.approved_limit_price == Decimal("0.50")
     assert decision.approval_expires_at == NOW + timedelta(seconds=2)
     assert decision.configuration_hash == canonical_sha256(
-        (
-            {"rule_id": "RISK-TEST-001", "rule_version": "1.0"},
-            {"rule_id": "RISK-TEST-002", "rule_version": "1.0"},
-        )
+        {
+            "approval_ttl": {"microseconds": 2_000_000},
+            "rules": (
+                _expected_rule_config(_StaticRule("RISK-TEST-001", passed=True)),
+                _expected_rule_config(_StaticRule("RISK-TEST-002", passed=True)),
+            ),
+        }
     )
     assert str(decision.risk_decision_id).startswith("risk_")
 
@@ -159,6 +162,46 @@ async def test_risk_engine_generates_stable_decision_ids() -> None:
     assert first.risk_decision_id == second.risk_decision_id
 
 
+async def test_risk_engine_hash_includes_behavioral_configuration() -> None:
+    short_ttl_engine = RiskEngine(
+        rules=(_ConfiguredPassingRule("RISK-TEST-001", max_state_age=timedelta(seconds=1)),),
+        approval_ttl=timedelta(seconds=1),
+    )
+    long_ttl_engine = RiskEngine(
+        rules=(_ConfiguredPassingRule("RISK-TEST-001", max_state_age=timedelta(seconds=1)),),
+        approval_ttl=timedelta(seconds=2),
+    )
+    long_rule_age_engine = RiskEngine(
+        rules=(_ConfiguredPassingRule("RISK-TEST-001", max_state_age=timedelta(seconds=2)),),
+        approval_ttl=timedelta(seconds=1),
+    )
+    intent = _intent()
+    context = RiskContext(evaluated_at=NOW)
+
+    short_ttl_decision = await short_ttl_engine.evaluate(
+        intent,
+        context,
+        input_snapshot_id=INPUT_SNAPSHOT_ID,
+    )
+    long_ttl_decision = await long_ttl_engine.evaluate(
+        intent,
+        context,
+        input_snapshot_id=INPUT_SNAPSHOT_ID,
+    )
+    long_rule_age_decision = await long_rule_age_engine.evaluate(
+        intent,
+        context,
+        input_snapshot_id=INPUT_SNAPSHOT_ID,
+    )
+
+    assert short_ttl_decision.rule_results == long_ttl_decision.rule_results
+    assert short_ttl_decision.rule_results == long_rule_age_decision.rule_results
+    assert short_ttl_decision.configuration_hash != long_ttl_decision.configuration_hash
+    assert short_ttl_decision.configuration_hash != long_rule_age_decision.configuration_hash
+    assert short_ttl_decision.risk_decision_id != long_ttl_decision.risk_decision_id
+    assert short_ttl_decision.risk_decision_id != long_rule_age_decision.risk_decision_id
+
+
 async def test_risk_engine_validates_configuration_and_inputs() -> None:
     with pytest.raises(RiskConfigurationError, match="at least one rule"):
         RiskEngine(rules=())
@@ -242,6 +285,22 @@ class _InvalidResultRule:
         return object()
 
 
+@dataclass(frozen=True, slots=True)
+class _ConfiguredPassingRule:
+    rule_id: str
+    max_state_age: timedelta
+    version: str = "1.0"
+
+    async def evaluate(self, intent: OrderIntent, context: RiskContext) -> RiskRuleResult:
+        del intent
+        return _result(
+            rule_id=self.rule_id,
+            rule_version=self.version,
+            passed=True,
+            evaluated_at=context.evaluated_at,
+        )
+
+
 def _result(
     *,
     rule_id: str,
@@ -260,6 +319,19 @@ def _result(
         unit="flag",
         evaluated_at=evaluated_at,
     )
+
+
+def _expected_rule_config(rule: _StaticRule) -> dict[str, object]:
+    return {
+        "parameters": {
+            "passed": rule.passed,
+            "rule_id": rule.rule_id,
+            "version": rule.version,
+        },
+        "rule_class": f"{type(rule).__module__}.{type(rule).__qualname__}",
+        "rule_id": rule.rule_id,
+        "rule_version": rule.version,
+    }
 
 
 def _intent(
