@@ -10,7 +10,7 @@ from types import MappingProxyType
 
 from pmrp.risk.errors import RiskConfigurationError
 from pmrp.schemas.enums import MarketStatus
-from pmrp.schemas.identifiers import ContractId, MarketId, StrategyId
+from pmrp.schemas.identifiers import ContractId, ExchangeId, MarketId, StrategyId
 from pmrp.schemas.numeric import parse_decimal
 from pmrp.schemas.time import parse_utc_datetime
 
@@ -315,6 +315,54 @@ class RiskStrategyCapitalState:
 
 
 @dataclass(frozen=True, slots=True)
+class RiskExchangeCapitalState:
+    """One timestamped exchange-capital input used by deterministic risk rules."""
+
+    current_capital_used: Decimal
+    max_exchange_capital: Decimal
+    observed_at: datetime
+    open_order_capital: Decimal = Decimal("0")
+    reserved_capital: Decimal = Decimal("0")
+
+    def __post_init__(self) -> None:
+        current_capital_used = parse_decimal(
+            self.current_capital_used,
+            field_name="risk exchange capital current_capital_used",
+        )
+        max_exchange_capital = parse_decimal(
+            self.max_exchange_capital,
+            field_name="risk exchange capital max_exchange_capital",
+        )
+        open_order_capital = parse_decimal(
+            self.open_order_capital,
+            field_name="risk exchange capital open_order_capital",
+        )
+        reserved_capital = parse_decimal(
+            self.reserved_capital,
+            field_name="risk exchange capital reserved_capital",
+        )
+        if current_capital_used < Decimal("0"):
+            raise RiskConfigurationError("current_capital_used must be nonnegative")
+        if open_order_capital < Decimal("0"):
+            raise RiskConfigurationError("open_order_capital must be nonnegative")
+        if reserved_capital < Decimal("0"):
+            raise RiskConfigurationError("reserved_capital must be nonnegative")
+        if max_exchange_capital <= Decimal("0"):
+            raise RiskConfigurationError("max_exchange_capital must be positive")
+        object.__setattr__(self, "current_capital_used", current_capital_used)
+        object.__setattr__(self, "max_exchange_capital", max_exchange_capital)
+        object.__setattr__(self, "open_order_capital", open_order_capital)
+        object.__setattr__(self, "reserved_capital", reserved_capital)
+        object.__setattr__(self, "observed_at", parse_utc_datetime(self.observed_at))
+
+    @property
+    def effective_capital_used(self) -> Decimal:
+        """Return current exchange capital plus known pending capital."""
+
+        return self.current_capital_used + self.open_order_capital + self.reserved_capital
+
+
+@dataclass(frozen=True, slots=True)
 class RiskContext:
     """Immutable state snapshot supplied to risk rule evaluation."""
 
@@ -330,6 +378,8 @@ class RiskContext:
     portfolio_gross_exposure: RiskPortfolioGrossExposureState | None = None
     portfolio_net_exposure: RiskPortfolioNetExposureState | None = None
     strategy_capital: Mapping[StrategyId, RiskStrategyCapitalState] = field(default_factory=dict)
+    market_exchanges: Mapping[MarketId, ExchangeId] = field(default_factory=dict)
+    exchange_capital: Mapping[ExchangeId, RiskExchangeCapitalState] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "evaluated_at", parse_utc_datetime(self.evaluated_at))
@@ -392,6 +442,16 @@ class RiskContext:
             "strategy_capital",
             _freeze_strategy_capital(self.strategy_capital),
         )
+        object.__setattr__(
+            self,
+            "market_exchanges",
+            _freeze_market_exchanges(self.market_exchanges),
+        )
+        object.__setattr__(
+            self,
+            "exchange_capital",
+            _freeze_exchange_capital(self.exchange_capital),
+        )
 
     def strategy_enabled_state(self, strategy_id: StrategyId) -> RiskBooleanState | None:
         """Return the enabled state for a strategy, if present in this snapshot."""
@@ -448,6 +508,16 @@ class RiskContext:
 
         return self.strategy_capital.get(strategy_id)
 
+    def market_exchange_id(self, market_id: MarketId) -> ExchangeId | None:
+        """Return the exchange identifier for a market, if present."""
+
+        return self.market_exchanges.get(market_id)
+
+    def exchange_capital_state(self, exchange_id: ExchangeId) -> RiskExchangeCapitalState | None:
+        """Return the exchange-capital state for an exchange, if present."""
+
+        return self.exchange_capital.get(exchange_id)
+
 
 def _freeze_strategy_enabled(
     states: Mapping[StrategyId, RiskBooleanState],
@@ -486,6 +556,44 @@ def _freeze_strategy_capital(
                 "strategy_capital values must be RiskStrategyCapitalState instances"
             )
         frozen[strategy_id] = state
+    return MappingProxyType(frozen)
+
+
+def _freeze_market_exchanges(
+    exchanges: Mapping[MarketId, ExchangeId],
+) -> Mapping[MarketId, ExchangeId]:
+    if not isinstance(exchanges, Mapping):
+        msg = "market_exchanges must be a mapping"
+        raise TypeError(msg)
+    frozen: dict[MarketId, ExchangeId] = {}
+    for market_id, exchange_id in exchanges.items():
+        if not isinstance(market_id, MarketId):
+            raise RiskConfigurationError("market_exchanges keys must be canonical MarketId values")
+        if not isinstance(exchange_id, ExchangeId):
+            raise RiskConfigurationError(
+                "market_exchanges values must be canonical ExchangeId values"
+            )
+        frozen[market_id] = exchange_id
+    return MappingProxyType(frozen)
+
+
+def _freeze_exchange_capital(
+    states: Mapping[ExchangeId, RiskExchangeCapitalState],
+) -> Mapping[ExchangeId, RiskExchangeCapitalState]:
+    if not isinstance(states, Mapping):
+        msg = "exchange_capital must be a mapping"
+        raise TypeError(msg)
+    frozen: dict[ExchangeId, RiskExchangeCapitalState] = {}
+    for exchange_id, state in states.items():
+        if not isinstance(exchange_id, ExchangeId):
+            raise RiskConfigurationError(
+                "exchange_capital keys must be canonical ExchangeId values"
+            )
+        if not isinstance(state, RiskExchangeCapitalState):
+            raise RiskConfigurationError(
+                "exchange_capital values must be RiskExchangeCapitalState instances"
+            )
+        frozen[exchange_id] = state
     return MappingProxyType(frozen)
 
 
