@@ -31,6 +31,7 @@ from pmrp.risk.engine import (
     RiskEngine,
 )
 from pmrp.risk.errors import RiskConfigurationError, RiskError, RiskInputError
+from pmrp.risk.reservations import CapitalReservation, CapitalReservationStatus
 from pmrp.risk.rules import (
     RISK_ARBITRAGE_HEDGE_DEADLINE_MISSING_REASON,
     RISK_ARBITRAGE_HEDGE_TIMEOUT_EXPIRED_REASON,
@@ -366,6 +367,8 @@ __all__ = [
     "RISK_STRATEGY_STATE_STALE_REASON",
     "ArbitrageLegRiskRule",
     "AvailableBalanceRule",
+    "CapitalReservation",
+    "CapitalReservationStatus",
     "DailyLossLimitRule",
     "DuplicateOrderGuardRule",
     "ExchangeCapitalLimitRule",
