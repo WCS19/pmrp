@@ -18,6 +18,7 @@ from pmrp.simulation import (
     SIMULATION_CANCEL_BEFORE_ACTIVATION,
     SIMULATION_CANCEL_FILL_RACE_LOST,
     SIMULATION_DISCONNECT_OPEN_ORDER,
+    SIMULATION_MULTI_LEG_IMBALANCE,
     SIMULATION_SCENARIO_HASH_VERSION,
     SIMULATION_SCENARIO_RUNNER_MODEL_NAME,
     DeterministicScenarioRunner,
@@ -25,6 +26,7 @@ from pmrp.simulation import (
     RejectionReason,
     ScheduledMarketEvent,
     ScheduledOrderAction,
+    SimulatedScenarioMultiLegImbalanceResult,
     SimulationArtifact,
     SimulationConfigurationError,
     SimulationInputError,
@@ -1123,6 +1125,80 @@ def test_deterministic_scenario_runner_ignores_duplicate_market_events() -> None
     assert metrics["projected_market_event_count"] == Decimal("1")
 
 
+def test_deterministic_scenario_runner_records_multi_leg_imbalance() -> None:
+    scenario = _scenario(
+        scenario_id="SIM-018",
+        name="multi-leg imbalance",
+        configuration=_configuration(
+            parameters={
+                "multi_leg.order_action_sequences": "1,2",
+                "multi_leg.target_filled_quantity": "10",
+            }
+        ),
+        market_events=(
+            ScheduledMarketEvent(
+                sequence=1,
+                scheduled_at=NOW + timedelta(milliseconds=150),
+                event=_trade(
+                    trade_id="trade_scenario_multi_leg_001",
+                    outcome_id="out_no",
+                    price="0.42",
+                    quantity="4",
+                    aggressor_side=Side.SELL,
+                ),
+            ),
+        ),
+        order_actions=(
+            ScheduledOrderAction(
+                sequence=1,
+                scheduled_at=NOW,
+                action=_intent(
+                    intent_id="intent_scenario_leg_001",
+                    outcome_id="out_yes",
+                    quantity="10",
+                    limit_price="0.43",
+                    correlation_id="corr_scenario_leg_001",
+                ),
+            ),
+            ScheduledOrderAction(
+                sequence=2,
+                scheduled_at=NOW,
+                action=_intent(
+                    intent_id="intent_scenario_leg_002",
+                    outcome_id="out_no",
+                    quantity="10",
+                    limit_price="0.42",
+                    correlation_id="corr_scenario_leg_002",
+                ),
+            ),
+        ),
+    )
+
+    run = DeterministicScenarioRunner.from_configuration(scenario.configuration).run(scenario)
+    imbalance_result = run.multi_leg_imbalance_result
+    metrics = {metric.name: metric.value for metric in run.result.metrics}
+    artifact_types = {artifact.artifact_type for artifact in run.result.artifacts}
+
+    assert isinstance(imbalance_result, SimulatedScenarioMultiLegImbalanceResult)
+    assert imbalance_result.has_imbalance is True
+    assert imbalance_result.target_filled_quantity == Decimal("10")
+    assert [leg.order_action_sequence for leg in imbalance_result.leg_fills] == [1, 2]
+    assert [leg.order_result_sequence for leg in imbalance_result.leg_fills] == [0, 1]
+    assert [leg.filled_quantity for leg in imbalance_result.leg_fills] == [
+        Decimal("10"),
+        Decimal("4"),
+    ]
+    assert imbalance_result.imbalanced_quantity == Decimal("6")
+    assert imbalance_result.target_shortfall_quantity == Decimal("6")
+    assert imbalance_result.canonical_payload()["outcome_code"] == SIMULATION_MULTI_LEG_IMBALANCE
+    assert "multi_leg_imbalance_result" in run.canonical_payload()
+    assert "simulation_multi_leg_imbalance_result" in artifact_types
+    assert metrics["multi_leg_leg_count"] == Decimal("2")
+    assert metrics["multi_leg_imbalance_count"] == Decimal("1")
+    assert metrics["multi_leg_imbalance_quantity"] == Decimal("6")
+    assert metrics["multi_leg_target_shortfall_quantity"] == Decimal("6")
+
+
 def test_deterministic_scenario_runner_rejects_conflicting_duplicate_market_sequence() -> None:
     scenario = _scenario(
         scenario_id="SIM-017-CONFLICT",
@@ -1412,6 +1488,87 @@ def test_deterministic_scenario_runner_validates_settlement_configuration_withou
     assert "not-a-decimal" not in str(error.value)
 
 
+def test_deterministic_scenario_runner_validates_multi_leg_configuration() -> None:
+    missing_target = _scenario(
+        configuration=_configuration(
+            parameters={"multi_leg.order_action_sequences": "1,2"},
+        ),
+        order_actions=(
+            ScheduledOrderAction(sequence=1, scheduled_at=NOW, action=_intent()),
+            ScheduledOrderAction(
+                sequence=2,
+                scheduled_at=NOW,
+                action=_intent(
+                    intent_id="intent_scenario_leg_002",
+                    correlation_id="corr_scenario_leg_002",
+                ),
+            ),
+        ),
+    )
+
+    with pytest.raises(SimulationConfigurationError) as missing_target_error:
+        DeterministicScenarioRunner.from_configuration(missing_target.configuration).run(
+            missing_target
+        )
+
+    assert (
+        missing_target_error.value.reason_code
+        == "simulation_scenario_runner_multi_leg_configuration_invalid"
+    )
+
+    invalid_sequences = _scenario(
+        configuration=_configuration(
+            parameters={
+                "multi_leg.order_action_sequences": "1,not-a-sequence",
+                "multi_leg.target_filled_quantity": "10",
+            },
+        ),
+        order_actions=(ScheduledOrderAction(sequence=1, scheduled_at=NOW, action=_intent()),),
+    )
+
+    with pytest.raises(SimulationConfigurationError) as invalid_sequences_error:
+        DeterministicScenarioRunner.from_configuration(invalid_sequences.configuration).run(
+            invalid_sequences
+        )
+
+    assert (
+        invalid_sequences_error.value.reason_code
+        == "simulation_scenario_runner_multi_leg_configuration_invalid"
+    )
+    assert "not-a-sequence" not in str(invalid_sequences_error.value)
+    assert invalid_sequences_error.value.__cause__ is None
+
+    unknown_action = _scenario(
+        configuration=_configuration(
+            parameters={
+                "multi_leg.order_action_sequences": "1,3",
+                "multi_leg.target_filled_quantity": "10",
+            },
+        ),
+        order_actions=(
+            ScheduledOrderAction(sequence=1, scheduled_at=NOW, action=_intent()),
+            ScheduledOrderAction(
+                sequence=2,
+                scheduled_at=NOW,
+                action=_intent(
+                    intent_id="intent_scenario_leg_002",
+                    correlation_id="corr_scenario_leg_002",
+                ),
+            ),
+        ),
+    )
+
+    with pytest.raises(SimulationConfigurationError) as unknown_action_error:
+        DeterministicScenarioRunner.from_configuration(unknown_action.configuration).run(
+            unknown_action
+        )
+
+    assert (
+        unknown_action_error.value.reason_code
+        == "simulation_scenario_runner_multi_leg_configuration_invalid"
+    )
+
+
 def _scenario(
     *,
     scenario_id: str = "SIM-006",
@@ -1561,6 +1718,7 @@ def _intent(
     intent_id: str = "intent_scenario_001",
     market_id: str = "mkt_scenario_market",
     contract_id: str = "ctr_scenario_contract",
+    outcome_id: str = "out_yes",
     side: Side = Side.BUY,
     quantity: str | Decimal = "10",
     limit_price: str | Decimal | None = "0.43",
@@ -1573,7 +1731,7 @@ def _intent(
             "strategy_id": "strat_scenario_v1",
             "market_id": market_id,
             "contract_id": contract_id,
-            "outcome_id": "out_yes",
+            "outcome_id": outcome_id,
             "side": side,
             "quantity": quantity,
             "limit_price": limit_price,

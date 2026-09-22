@@ -80,6 +80,7 @@ SIMULATION_CANCEL_AFTER_ACTIVATION_NO_FILL = "simulation_cancel_after_activation
 SIMULATION_CANCEL_BEFORE_ACTIVATION = "simulation_cancel_before_activation"
 SIMULATION_CANCEL_FILL_RACE_LOST = "simulation_cancel_fill_race_lost"
 SIMULATION_DISCONNECT_OPEN_ORDER = "simulation_disconnect_open_order"
+SIMULATION_MULTI_LEG_IMBALANCE = "simulation_multi_leg_imbalance"
 
 _MAX_TEXT_LENGTH = 128
 _ONE = Decimal("1")
@@ -94,6 +95,8 @@ _FEE_FIXED_REBATE_PARAMETER = "fee.{role}.fixed_rebate"
 _FEE_RATE_BPS_PARAMETER = "fee.{role}.rate_bps"
 _FEE_REBATE_RATE_BPS_PARAMETER = "fee.{role}.rebate_rate_bps"
 _SETTLEMENT_WINNING_OUTCOME_IDS_PARAMETER = "settlement_winning_outcome_ids"
+_MULTI_LEG_ORDER_ACTION_SEQUENCES_PARAMETER = "multi_leg.order_action_sequences"
+_MULTI_LEG_TARGET_FILLED_QUANTITY_PARAMETER = "multi_leg.target_filled_quantity"
 _ORDER_RESULT_ARTIFACT_BASE_SEQUENCE = 10
 _ORDER_RESULT_ARTIFACT_STRIDE = 7
 _CANCEL_OUTCOME_CODES = frozenset(
@@ -673,6 +676,123 @@ class SimulatedScenarioDisconnectResult:
 
 
 @dataclass(frozen=True, slots=True)
+class SimulatedScenarioLegFill:
+    """One simulated fill quantity for a configured multi-leg scenario leg."""
+
+    order_action_sequence: int
+    order_result_sequence: int
+    filled_quantity: Decimal
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "order_action_sequence",
+            _validate_sequence(self.order_action_sequence),
+        )
+        object.__setattr__(
+            self,
+            "order_result_sequence",
+            _validate_sequence(self.order_result_sequence),
+        )
+        filled_quantity = parse_decimal(
+            self.filled_quantity,
+            field_name="scenario multi-leg filled quantity",
+        )
+        if filled_quantity < _ZERO:
+            raise SimulationConfigurationError(
+                "Scenario multi-leg filled quantity must be nonnegative",
+                reason_code="simulation_scenario_multi_leg_filled_quantity_invalid",
+            )
+        object.__setattr__(self, "filled_quantity", filled_quantity)
+
+    def canonical_payload(self) -> Mapping[str, object]:
+        """Return stable JSON-compatible multi-leg fill data."""
+
+        return {
+            "filled_quantity": self.filled_quantity,
+            "order_action_sequence": self.order_action_sequence,
+            "order_result_sequence": self.order_result_sequence,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class SimulatedScenarioMultiLegImbalanceResult:
+    """Deterministic imbalance output for a configured multi-leg scenario."""
+
+    sequence: int
+    target_filled_quantity: Decimal
+    leg_fills: tuple[SimulatedScenarioLegFill, ...]
+    source_type: SimulationSourceType = SimulationSourceType.SIMULATED_OUTPUT
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "sequence", _validate_sequence(self.sequence))
+        target_filled_quantity = parse_decimal(
+            self.target_filled_quantity,
+            field_name="scenario multi-leg target filled quantity",
+        )
+        if target_filled_quantity <= _ZERO:
+            raise SimulationConfigurationError(
+                "Scenario multi-leg target filled quantity must be positive",
+                reason_code="simulation_scenario_multi_leg_target_quantity_invalid",
+            )
+        object.__setattr__(self, "target_filled_quantity", target_filled_quantity)
+        object.__setattr__(self, "leg_fills", _normalize_multi_leg_fills(self.leg_fills))
+        if self.source_type is not SimulationSourceType.SIMULATED_OUTPUT:
+            raise SimulationConfigurationError(
+                "Scenario multi-leg imbalance results must be classified as simulated output",
+                reason_code="simulation_scenario_multi_leg_result_source_invalid",
+                context={"source_type": str(self.source_type)},
+            )
+
+    @property
+    def imbalance_result_hash(self) -> str:
+        """Return the deterministic hash of this multi-leg imbalance result."""
+
+        return canonical_sha256(self.canonical_payload())
+
+    @property
+    def imbalanced_quantity(self) -> Decimal:
+        """Return the quantity gap between the most-filled and least-filled legs."""
+
+        filled_quantities = tuple(leg.filled_quantity for leg in self.leg_fills)
+        return max(filled_quantities) - min(filled_quantities)
+
+    @property
+    def target_shortfall_quantity(self) -> Decimal:
+        """Return the total configured target quantity left unfilled across all legs."""
+
+        return sum(
+            (
+                self.target_filled_quantity - leg.filled_quantity
+                for leg in self.leg_fills
+                if leg.filled_quantity < self.target_filled_quantity
+            ),
+            _ZERO,
+        )
+
+    @property
+    def has_imbalance(self) -> bool:
+        """Return whether the configured legs finished with different fill quantities."""
+
+        return self.imbalanced_quantity > _ZERO
+
+    def canonical_payload(self) -> Mapping[str, object]:
+        """Return stable JSON-compatible multi-leg imbalance data."""
+
+        return {
+            "has_imbalance": self.has_imbalance,
+            "imbalanced_quantity": self.imbalanced_quantity,
+            "leg_fills": [leg.canonical_payload() for leg in self.leg_fills],
+            "outcome_code": SIMULATION_MULTI_LEG_IMBALANCE,
+            "runner_model": SIMULATION_SCENARIO_RUNNER_MODEL_NAME,
+            "sequence": self.sequence,
+            "source_type": self.source_type,
+            "target_filled_quantity": self.target_filled_quantity,
+            "target_shortfall_quantity": self.target_shortfall_quantity,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class SimulationScenarioRun:
     """Deterministic output of a complete simulation scenario run."""
 
@@ -680,6 +800,7 @@ class SimulationScenarioRun:
     final_book: OrderBookSnapshot
     order_results: tuple[SimulatedScenarioOrderResult, ...]
     result: SimulationResult
+    multi_leg_imbalance_result: SimulatedScenarioMultiLegImbalanceResult | None = None
     source_type: SimulationSourceType = SimulationSourceType.SIMULATED_OUTPUT
 
     def __post_init__(self) -> None:
@@ -688,10 +809,14 @@ class SimulationScenarioRun:
             raise TypeError(msg)
         _validate_expected_final_book(self.final_book, initial_book=self.scenario.initial_book)
         order_results = _normalize_order_results(self.order_results)
+        multi_leg_imbalance_result = _validate_multi_leg_imbalance_result(
+            self.multi_leg_imbalance_result
+        )
         expected_result = _build_scenario_run_result(
             scenario=self.scenario,
             final_book=self.final_book,
             order_results=order_results,
+            multi_leg_imbalance_result=multi_leg_imbalance_result,
         )
         if self.result != expected_result:
             raise SimulationConfigurationError(
@@ -709,6 +834,11 @@ class SimulationScenarioRun:
                 context={"source_type": str(self.source_type)},
             )
         object.__setattr__(self, "order_results", order_results)
+        object.__setattr__(
+            self,
+            "multi_leg_imbalance_result",
+            multi_leg_imbalance_result,
+        )
 
     @property
     def run_hash(self) -> str:
@@ -725,7 +855,7 @@ class SimulationScenarioRun:
     def canonical_payload(self) -> Mapping[str, object]:
         """Return stable JSON-compatible scenario-run data."""
 
-        return {
+        payload: dict[str, object] = {
             "final_book": to_canonical_data(self.final_book),
             "order_results": [result.canonical_payload() for result in self.order_results],
             "result": self.result.canonical_payload(),
@@ -734,6 +864,11 @@ class SimulationScenarioRun:
             "scenario_id": self.scenario.scenario_id,
             "source_type": self.source_type,
         }
+        if self.multi_leg_imbalance_result is not None:
+            payload["multi_leg_imbalance_result"] = (
+                self.multi_leg_imbalance_result.canonical_payload()
+            )
+        return payload
 
 
 @dataclass(frozen=True, slots=True)
@@ -850,16 +985,22 @@ class DeterministicScenarioRunner:
             used_cancel_sequences=used_cancel_sequences,
         )
         order_results = tuple(order_results_list)
+        multi_leg_imbalance_result = _multi_leg_imbalance_result_from_configuration(
+            scenario.configuration,
+            order_results=order_results,
+        )
         result = _build_scenario_run_result(
             scenario=scenario,
             final_book=final_book,
             order_results=order_results,
+            multi_leg_imbalance_result=multi_leg_imbalance_result,
         )
         return SimulationScenarioRun(
             scenario=scenario,
             final_book=final_book,
             order_results=order_results,
             result=result,
+            multi_leg_imbalance_result=multi_leg_imbalance_result,
         )
 
     def _run_order_action(
@@ -1088,6 +1229,17 @@ def _validate_disconnect_result(
             },
         )
     return disconnect_result
+
+
+def _validate_multi_leg_imbalance_result(
+    multi_leg_imbalance_result: SimulatedScenarioMultiLegImbalanceResult | None,
+) -> SimulatedScenarioMultiLegImbalanceResult | None:
+    if multi_leg_imbalance_result is None:
+        return None
+    if not isinstance(multi_leg_imbalance_result, SimulatedScenarioMultiLegImbalanceResult):
+        msg = "multi_leg_imbalance_result must be a SimulatedScenarioMultiLegImbalanceResult"
+        raise TypeError(msg)
+    return multi_leg_imbalance_result
 
 
 def _validate_settlement_result(
@@ -1762,6 +1914,36 @@ def _normalize_slippage_estimates(
     return slippage_estimates
 
 
+def _normalize_multi_leg_fills(
+    leg_fills: tuple[SimulatedScenarioLegFill, ...],
+) -> tuple[SimulatedScenarioLegFill, ...]:
+    if not isinstance(leg_fills, tuple):
+        msg = "leg_fills must be a tuple"
+        raise TypeError(msg)
+    if any(not isinstance(leg_fill, SimulatedScenarioLegFill) for leg_fill in leg_fills):
+        msg = "leg_fills must contain only SimulatedScenarioLegFill values"
+        raise TypeError(msg)
+    if len(leg_fills) < 2:
+        raise SimulationConfigurationError(
+            "Scenario multi-leg imbalance requires at least two legs",
+            reason_code="simulation_scenario_multi_leg_leg_count_invalid",
+        )
+    sorted_fills = tuple(sorted(leg_fills, key=lambda leg_fill: leg_fill.order_action_sequence))
+    action_sequences = [leg_fill.order_action_sequence for leg_fill in sorted_fills]
+    result_sequences = [leg_fill.order_result_sequence for leg_fill in sorted_fills]
+    if len(set(action_sequences)) != len(action_sequences):
+        raise SimulationConfigurationError(
+            "Scenario multi-leg imbalance requires unique order action sequences",
+            reason_code="simulation_scenario_multi_leg_action_sequence_duplicate",
+        )
+    if len(set(result_sequences)) != len(result_sequences):
+        raise SimulationConfigurationError(
+            "Scenario multi-leg imbalance requires unique order result sequences",
+            reason_code="simulation_scenario_multi_leg_result_sequence_duplicate",
+        )
+    return sorted_fills
+
+
 def _cancel_result(
     *,
     action: ScheduledOrderAction,
@@ -1783,6 +1965,7 @@ def _build_scenario_run_result(
     scenario: SimulationScenario,
     final_book: OrderBookSnapshot,
     order_results: tuple[SimulatedScenarioOrderResult, ...],
+    multi_leg_imbalance_result: SimulatedScenarioMultiLegImbalanceResult | None,
 ) -> SimulationResult:
     order_results = _normalize_order_results(order_results)
     return SimulationResult.build(
@@ -1791,10 +1974,12 @@ def _build_scenario_run_result(
             scenario=scenario,
             final_book=final_book,
             order_results=order_results,
+            multi_leg_imbalance_result=multi_leg_imbalance_result,
         ),
         metrics=_scenario_run_metrics(
             scenario=scenario,
             order_results=order_results,
+            multi_leg_imbalance_result=multi_leg_imbalance_result,
         ),
     )
 
@@ -1804,6 +1989,7 @@ def _scenario_run_artifacts(
     scenario: SimulationScenario,
     final_book: OrderBookSnapshot,
     order_results: tuple[SimulatedScenarioOrderResult, ...],
+    multi_leg_imbalance_result: SimulatedScenarioMultiLegImbalanceResult | None,
 ) -> tuple[SimulationArtifact, ...]:
     artifacts: list[SimulationArtifact] = [
         scenario.as_result_artifact(sequence=0),
@@ -1895,6 +2081,17 @@ def _scenario_run_artifacts(
                     source_type=SimulationSourceType.SIMULATED_OUTPUT,
                 )
             )
+    if multi_leg_imbalance_result is not None:
+        artifacts.append(
+            SimulationArtifact(
+                sequence=_ORDER_RESULT_ARTIFACT_BASE_SEQUENCE
+                + len(order_results) * _ORDER_RESULT_ARTIFACT_STRIDE,
+                artifact_type="simulation_multi_leg_imbalance_result",
+                artifact_id=f"{scenario.scenario_id}:multi_leg_imbalance",
+                artifact_hash=multi_leg_imbalance_result.imbalance_result_hash,
+                source_type=SimulationSourceType.SIMULATED_OUTPUT,
+            )
+        )
     return tuple(artifacts)
 
 
@@ -1902,6 +2099,7 @@ def _scenario_run_metrics(
     *,
     scenario: SimulationScenario,
     order_results: tuple[SimulatedScenarioOrderResult, ...],
+    multi_leg_imbalance_result: SimulatedScenarioMultiLegImbalanceResult | None,
 ) -> tuple[SimulationMetric, ...]:
     accepted_count = sum(1 for result in order_results if result.admission.accepted)
     rejected_count = sum(1 for result in order_results if result.admission.rejected)
@@ -1985,6 +2183,24 @@ def _scenario_run_metrics(
     total_slippage_amount = _sum_slippage_estimate_field(
         order_results,
         field_name="total_slippage",
+    )
+    multi_leg_leg_count = (
+        len(multi_leg_imbalance_result.leg_fills) if multi_leg_imbalance_result is not None else 0
+    )
+    multi_leg_imbalance_count = (
+        1
+        if multi_leg_imbalance_result is not None and multi_leg_imbalance_result.has_imbalance
+        else 0
+    )
+    multi_leg_imbalance_quantity = (
+        multi_leg_imbalance_result.imbalanced_quantity
+        if multi_leg_imbalance_result is not None
+        else _ZERO
+    )
+    multi_leg_target_shortfall_quantity = (
+        multi_leg_imbalance_result.target_shortfall_quantity
+        if multi_leg_imbalance_result is not None
+        else _ZERO
     )
     return (
         SimulationMetric(
@@ -2095,6 +2311,32 @@ def _scenario_run_metrics(
             name="market_event_count",
             value=Decimal(len(scenario.market_events)),
             unit="count",
+        ),
+        SimulationMetric(
+            name="multi_leg_imbalance_count",
+            value=Decimal(multi_leg_imbalance_count),
+            unit="count",
+        ),
+        SimulationMetric(
+            name="multi_leg_imbalance_quantity",
+            value=parse_decimal(
+                multi_leg_imbalance_quantity,
+                field_name="multi_leg_imbalance_quantity metric",
+            ),
+            unit="contracts",
+        ),
+        SimulationMetric(
+            name="multi_leg_leg_count",
+            value=Decimal(multi_leg_leg_count),
+            unit="count",
+        ),
+        SimulationMetric(
+            name="multi_leg_target_shortfall_quantity",
+            value=parse_decimal(
+                multi_leg_target_shortfall_quantity,
+                field_name="multi_leg_target_shortfall_quantity metric",
+            ),
+            unit="contracts",
         ),
         SimulationMetric(
             name="order_action_count",
@@ -2271,6 +2513,100 @@ def _available_balance_from_configuration(
             reason_code="simulation_scenario_runner_balance_configuration_invalid",
         )
     return available_balance
+
+
+def _multi_leg_imbalance_result_from_configuration(
+    configuration: SimulationConfiguration,
+    *,
+    order_results: tuple[SimulatedScenarioOrderResult, ...],
+) -> SimulatedScenarioMultiLegImbalanceResult | None:
+    order_action_sequences = _multi_leg_order_action_sequences_from_configuration(configuration)
+    target_filled_quantity = _multi_leg_target_filled_quantity_from_configuration(configuration)
+    if order_action_sequences is None and target_filled_quantity is None:
+        return None
+    if order_action_sequences is None or target_filled_quantity is None:
+        raise SimulationConfigurationError(
+            "Scenario runner multi-leg configuration is invalid",
+            reason_code="simulation_scenario_runner_multi_leg_configuration_invalid",
+        )
+
+    results_by_action_sequence = {
+        result.action.sequence: result for result in _normalize_order_results(order_results)
+    }
+    leg_fills: list[SimulatedScenarioLegFill] = []
+    for order_action_sequence in order_action_sequences:
+        result = results_by_action_sequence.get(order_action_sequence)
+        if result is None:
+            raise SimulationConfigurationError(
+                "Scenario runner multi-leg configuration references an unknown order action",
+                reason_code="simulation_scenario_runner_multi_leg_configuration_invalid",
+            )
+        leg_fills.append(
+            SimulatedScenarioLegFill(
+                order_action_sequence=order_action_sequence,
+                order_result_sequence=result.sequence,
+                filled_quantity=(
+                    result.fill_estimate.filled_quantity
+                    if result.fill_estimate is not None
+                    else _ZERO
+                ),
+            )
+        )
+    return SimulatedScenarioMultiLegImbalanceResult(
+        sequence=0,
+        target_filled_quantity=target_filled_quantity,
+        leg_fills=tuple(leg_fills),
+    )
+
+
+def _multi_leg_order_action_sequences_from_configuration(
+    configuration: SimulationConfiguration,
+) -> tuple[int, ...] | None:
+    raw_sequences = configuration.parameters.get(_MULTI_LEG_ORDER_ACTION_SEQUENCES_PARAMETER)
+    if raw_sequences is None:
+        return None
+    try:
+        tokens = tuple(raw_sequences.split(","))
+        if len(tokens) < 2:
+            msg = "multi-leg scenarios require at least two order action sequences"
+            raise ValueError(msg)
+        if any(token == "" or token.strip() != token for token in tokens):
+            msg = "multi-leg order action sequences must be comma-separated integers"
+            raise ValueError(msg)
+        sequences = tuple(_validate_sequence(int(token)) for token in tokens)
+        if len(set(sequences)) != len(sequences):
+            msg = "multi-leg order action sequences must be unique"
+            raise ValueError(msg)
+        return sequences
+    except (TypeError, ValueError):
+        raise SimulationConfigurationError(
+            "Scenario runner multi-leg configuration is invalid",
+            reason_code="simulation_scenario_runner_multi_leg_configuration_invalid",
+        ) from None
+
+
+def _multi_leg_target_filled_quantity_from_configuration(
+    configuration: SimulationConfiguration,
+) -> Decimal | None:
+    raw_target = configuration.parameters.get(_MULTI_LEG_TARGET_FILLED_QUANTITY_PARAMETER)
+    if raw_target is None:
+        return None
+    try:
+        target_filled_quantity = parse_decimal(
+            raw_target,
+            field_name="simulation multi-leg target filled quantity",
+        )
+    except (TypeError, ValueError):
+        raise SimulationConfigurationError(
+            "Scenario runner multi-leg configuration is invalid",
+            reason_code="simulation_scenario_runner_multi_leg_configuration_invalid",
+        ) from None
+    if target_filled_quantity <= _ZERO:
+        raise SimulationConfigurationError(
+            "Scenario runner multi-leg configuration is invalid",
+            reason_code="simulation_scenario_runner_multi_leg_configuration_invalid",
+        )
+    return target_filled_quantity
 
 
 def _disconnect_window_from_configuration(
