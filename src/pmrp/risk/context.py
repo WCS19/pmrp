@@ -49,6 +49,7 @@ class RiskContext:
     strategy_enabled: Mapping[StrategyId, RiskBooleanState] = field(default_factory=dict)
     market_enabled: Mapping[MarketId, RiskBooleanState] = field(default_factory=dict)
     market_status: Mapping[MarketId, RiskMarketStatusState] = field(default_factory=dict)
+    market_data_fresh: Mapping[MarketId, RiskBooleanState] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "evaluated_at", parse_utc_datetime(self.evaluated_at))
@@ -61,6 +62,11 @@ class RiskContext:
             self,
             "market_enabled",
             _freeze_market_enabled(self.market_enabled),
+        )
+        object.__setattr__(
+            self,
+            "market_data_fresh",
+            _freeze_market_data_fresh(self.market_data_fresh),
         )
         object.__setattr__(
             self,
@@ -77,6 +83,11 @@ class RiskContext:
         """Return the enabled state for a market, if present in this snapshot."""
 
         return self.market_enabled.get(market_id)
+
+    def market_data_fresh_state(self, market_id: MarketId) -> RiskBooleanState | None:
+        """Return the market-data freshness state for a market, if present."""
+
+        return self.market_data_fresh.get(market_id)
 
     def market_status_state(self, market_id: MarketId) -> RiskMarketStatusState | None:
         """Return the market status state for a market, if present in this snapshot."""
@@ -116,6 +127,24 @@ def _freeze_market_enabled(
             raise RiskConfigurationError("market_enabled keys must be canonical MarketId values")
         if not isinstance(state, RiskBooleanState):
             raise RiskConfigurationError("market_enabled values must be RiskBooleanState instances")
+        frozen[market_id] = state
+    return MappingProxyType(frozen)
+
+
+def _freeze_market_data_fresh(
+    states: Mapping[MarketId, RiskBooleanState],
+) -> Mapping[MarketId, RiskBooleanState]:
+    if not isinstance(states, Mapping):
+        msg = "market_data_fresh must be a mapping"
+        raise TypeError(msg)
+    frozen: dict[MarketId, RiskBooleanState] = {}
+    for market_id, state in states.items():
+        if not isinstance(market_id, MarketId):
+            raise RiskConfigurationError("market_data_fresh keys must be canonical MarketId values")
+        if not isinstance(state, RiskBooleanState):
+            raise RiskConfigurationError(
+                "market_data_fresh values must be RiskBooleanState instances"
+            )
         frozen[market_id] = state
     return MappingProxyType(frozen)
 
