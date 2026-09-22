@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
@@ -10,7 +10,7 @@ from types import MappingProxyType
 
 from pmrp.risk.errors import RiskConfigurationError
 from pmrp.schemas.enums import MarketStatus
-from pmrp.schemas.identifiers import ContractId, ExchangeId, MarketId, StrategyId
+from pmrp.schemas.identifiers import ContractId, ExchangeId, IntentId, MarketId, StrategyId
 from pmrp.schemas.numeric import parse_decimal
 from pmrp.schemas.time import parse_utc_datetime
 
@@ -432,6 +432,28 @@ class RiskOpenOrderLimitState:
 
 
 @dataclass(frozen=True, slots=True)
+class RiskDuplicateOrderGuardState:
+    """One timestamped duplicate-order snapshot used by deterministic risk rules."""
+
+    observed_at: datetime
+    known_intent_ids: Collection[IntentId] = field(default_factory=frozenset)
+    known_idempotency_keys: Collection[str] = field(default_factory=frozenset)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "observed_at", parse_utc_datetime(self.observed_at))
+        object.__setattr__(
+            self,
+            "known_intent_ids",
+            _freeze_known_intent_ids(self.known_intent_ids),
+        )
+        object.__setattr__(
+            self,
+            "known_idempotency_keys",
+            _freeze_known_idempotency_keys(self.known_idempotency_keys),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class RiskContext:
     """Immutable state snapshot supplied to risk rule evaluation."""
 
@@ -451,6 +473,7 @@ class RiskContext:
     exchange_capital: Mapping[ExchangeId, RiskExchangeCapitalState] = field(default_factory=dict)
     daily_loss: RiskDailyLossState | None = None
     open_order_limit: RiskOpenOrderLimitState | None = None
+    duplicate_order_guard: RiskDuplicateOrderGuardState | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "evaluated_at", parse_utc_datetime(self.evaluated_at))
@@ -535,6 +558,13 @@ class RiskContext:
             raise RiskConfigurationError(
                 "open_order_limit must be a RiskOpenOrderLimitState instance"
             )
+        if self.duplicate_order_guard is not None and not isinstance(
+            self.duplicate_order_guard,
+            RiskDuplicateOrderGuardState,
+        ):
+            raise RiskConfigurationError(
+                "duplicate_order_guard must be a RiskDuplicateOrderGuardState instance"
+            )
 
     def strategy_enabled_state(self, strategy_id: StrategyId) -> RiskBooleanState | None:
         """Return the enabled state for a strategy, if present in this snapshot."""
@@ -611,6 +641,11 @@ class RiskContext:
 
         return self.open_order_limit
 
+    def duplicate_order_guard_state(self) -> RiskDuplicateOrderGuardState | None:
+        """Return the duplicate-order guard state, if present in this snapshot."""
+
+        return self.duplicate_order_guard
+
 
 def _validate_nonnegative_int(value: int, *, field_name: str) -> None:
     if type(value) is not int:
@@ -626,6 +661,40 @@ def _validate_positive_int(value: int, *, field_name: str) -> None:
         raise TypeError(msg)
     if value <= 0:
         raise RiskConfigurationError(f"{field_name} must be positive")
+
+
+def _freeze_known_intent_ids(intent_ids: Collection[IntentId]) -> frozenset[IntentId]:
+    if isinstance(intent_ids, (str, bytes)) or not isinstance(intent_ids, Collection):
+        msg = "known_intent_ids must be a collection"
+        raise TypeError(msg)
+    frozen = frozenset(intent_ids)
+    for intent_id in frozen:
+        if not isinstance(intent_id, IntentId):
+            raise RiskConfigurationError(
+                "known_intent_ids values must be canonical IntentId values"
+            )
+    return frozen
+
+
+_MAX_IDEMPOTENCY_KEY_LENGTH = 256
+
+
+def _freeze_known_idempotency_keys(keys: Collection[str]) -> frozenset[str]:
+    if isinstance(keys, (str, bytes)) or not isinstance(keys, Collection):
+        msg = "known_idempotency_keys must be a collection"
+        raise TypeError(msg)
+    frozen = frozenset(keys)
+    for key in frozen:
+        if type(key) is not str:
+            msg = "known_idempotency_keys values must be strings"
+            raise TypeError(msg)
+        if key == "":
+            raise RiskConfigurationError("known_idempotency_keys values must not be empty")
+        if len(key) > _MAX_IDEMPOTENCY_KEY_LENGTH:
+            raise RiskConfigurationError(
+                "known_idempotency_keys values must be at most 256 characters"
+            )
+    return frozen
 
 
 def _freeze_strategy_enabled(
