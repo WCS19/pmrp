@@ -220,6 +220,7 @@ from pmrp.risk.rules import (
     StrategyEnabledRule,
 )
 from pmrp.risk.service import (
+    RiskBreachStore,
     RiskDecisionEvaluator,
     RiskDecisionStore,
     RiskEvaluationService,
@@ -415,6 +416,7 @@ __all__ = [
     "RiskBreachFactory",
     "RiskBreachIdGenerator",
     "RiskBreachPolicy",
+    "RiskBreachStore",
     "RiskConfigurationError",
     "RiskContext",
     "RiskDailyLossState",
