@@ -363,6 +363,51 @@ class RiskExchangeCapitalState:
 
 
 @dataclass(frozen=True, slots=True)
+class RiskDailyLossState:
+    """One timestamped daily-PnL input used by deterministic risk rules."""
+
+    daily_realized_pnl: Decimal
+    daily_unrealized_pnl: Decimal
+    max_daily_loss: Decimal
+    observed_at: datetime
+
+    def __post_init__(self) -> None:
+        daily_realized_pnl = parse_decimal(
+            self.daily_realized_pnl,
+            field_name="risk daily loss daily_realized_pnl",
+        )
+        daily_unrealized_pnl = parse_decimal(
+            self.daily_unrealized_pnl,
+            field_name="risk daily loss daily_unrealized_pnl",
+        )
+        max_daily_loss = parse_decimal(
+            self.max_daily_loss,
+            field_name="risk daily loss max_daily_loss",
+        )
+        if max_daily_loss <= Decimal("0"):
+            raise RiskConfigurationError("max_daily_loss must be positive")
+        object.__setattr__(self, "daily_realized_pnl", daily_realized_pnl)
+        object.__setattr__(self, "daily_unrealized_pnl", daily_unrealized_pnl)
+        object.__setattr__(self, "max_daily_loss", max_daily_loss)
+        object.__setattr__(self, "observed_at", parse_utc_datetime(self.observed_at))
+
+    @property
+    def total_daily_pnl(self) -> Decimal:
+        """Return realized plus unrealized daily PnL."""
+
+        return self.daily_realized_pnl + self.daily_unrealized_pnl
+
+    @property
+    def current_daily_loss(self) -> Decimal:
+        """Return nonnegative daily loss implied by signed daily PnL."""
+
+        total = self.total_daily_pnl
+        if total >= Decimal("0"):
+            return Decimal("0")
+        return -total
+
+
+@dataclass(frozen=True, slots=True)
 class RiskContext:
     """Immutable state snapshot supplied to risk rule evaluation."""
 
@@ -380,6 +425,7 @@ class RiskContext:
     strategy_capital: Mapping[StrategyId, RiskStrategyCapitalState] = field(default_factory=dict)
     market_exchanges: Mapping[MarketId, ExchangeId] = field(default_factory=dict)
     exchange_capital: Mapping[ExchangeId, RiskExchangeCapitalState] = field(default_factory=dict)
+    daily_loss: RiskDailyLossState | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "evaluated_at", parse_utc_datetime(self.evaluated_at))
@@ -452,6 +498,11 @@ class RiskContext:
             "exchange_capital",
             _freeze_exchange_capital(self.exchange_capital),
         )
+        if self.daily_loss is not None and not isinstance(
+            self.daily_loss,
+            RiskDailyLossState,
+        ):
+            raise RiskConfigurationError("daily_loss must be a RiskDailyLossState instance")
 
     def strategy_enabled_state(self, strategy_id: StrategyId) -> RiskBooleanState | None:
         """Return the enabled state for a strategy, if present in this snapshot."""
@@ -517,6 +568,11 @@ class RiskContext:
         """Return the exchange-capital state for an exchange, if present."""
 
         return self.exchange_capital.get(exchange_id)
+
+    def daily_loss_state(self) -> RiskDailyLossState | None:
+        """Return the daily-loss state, if present in this snapshot."""
+
+        return self.daily_loss
 
 
 def _freeze_strategy_enabled(
