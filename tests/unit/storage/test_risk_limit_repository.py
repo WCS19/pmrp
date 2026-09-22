@@ -120,6 +120,20 @@ async def test_repository_list_active_uses_documented_scope_filters() -> None:
 
 
 @pytest.mark.asyncio
+async def test_repository_list_active_accepts_schema_valid_scope_id_length() -> None:
+    scope_id = "scope_" + ("a" * 250)
+    row = risk_limit_to_row(_limit(scope_id=scope_id))
+    session = _FakeSession(results=((row,),))
+    repository = RiskLimitRepository(session)  # type: ignore[arg-type]
+
+    result = await repository.list_active(as_of=NOW, scope_id=scope_id)
+
+    assert result == (_limit(scope_id=scope_id),)
+    sql = _compile(session.statements[0])
+    assert f"risk_limits.scope_id = '{scope_id}'" in sql
+
+
+@pytest.mark.asyncio
 async def test_repository_list_active_rejects_invalid_inputs_before_querying() -> None:
     session = _FakeSession()
     repository = RiskLimitRepository(session)  # type: ignore[arg-type]

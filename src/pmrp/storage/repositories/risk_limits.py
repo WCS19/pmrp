@@ -15,6 +15,7 @@ from pmrp.storage.models import RiskLimitRow
 
 _RISK_LIMIT_ID_MAX_LENGTH = 128
 _TEXT_FILTER_MAX_LENGTH = 128
+_SCOPE_ID_MAX_LENGTH = 256
 _DEFAULT_ACTIVE_LIMIT = 500
 _MAX_ACTIVE_LIMIT = 5_000
 
@@ -69,7 +70,11 @@ class RiskLimitRepository:
         if scope is not None:
             statement = statement.where(RiskLimitRow.scope == RiskLimitScope(scope).value)
         if scope_id is not None:
-            scope_id = _validate_filter_text(scope_id, field_name="risk limit scope_id")
+            scope_id = _validate_filter_text(
+                scope_id,
+                field_name="risk limit scope_id",
+                max_length=_SCOPE_ID_MAX_LENGTH,
+            )
             statement = statement.where(RiskLimitRow.scope_id == scope_id)
         if rule_id is not None:
             rule_id = _validate_filter_text(rule_id, field_name="risk limit rule_id")
@@ -152,14 +157,19 @@ def _validate_risk_limit_id(risk_limit_id: str) -> None:
         raise ValueError("risk limit ID must be at most 128 characters")
 
 
-def _validate_filter_text(value: str, *, field_name: str) -> str:
+def _validate_filter_text(
+    value: str,
+    *,
+    field_name: str,
+    max_length: int = _TEXT_FILTER_MAX_LENGTH,
+) -> str:
     if type(value) is not str:
         msg = f"{field_name} must be a string"
         raise TypeError(msg)
     if value == "":
         raise ValueError(f"{field_name} must not be empty")
-    if len(value) > _TEXT_FILTER_MAX_LENGTH:
-        raise ValueError(f"{field_name} must be at most 128 characters")
+    if len(value) > max_length:
+        raise ValueError(f"{field_name} must be at most {max_length} characters")
     return value
 
 
