@@ -12,6 +12,7 @@ from pmrp.risk.errors import RiskConfigurationError
 from pmrp.schemas.enums import MarketStatus
 from pmrp.schemas.identifiers import ContractId, ExchangeId, IntentId, MarketId, StrategyId
 from pmrp.schemas.numeric import parse_decimal
+from pmrp.schemas.portfolio import ReconciliationStatus
 from pmrp.schemas.time import parse_utc_datetime
 
 
@@ -484,6 +485,45 @@ class RiskAvailableBalanceState:
 
 
 @dataclass(frozen=True, slots=True)
+class RiskReconciliationHealthState:
+    """One timestamped reconciliation-health input used by deterministic risk rules."""
+
+    status: ReconciliationStatus
+    trading_gate_released: bool
+    observed_at: datetime
+    unresolved_mismatch_count: int = 0
+    manual_review_count: int = 0
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.status, ReconciliationStatus):
+            msg = "risk reconciliation health state requires a ReconciliationStatus"
+            raise TypeError(msg)
+        if type(self.trading_gate_released) is not bool:
+            msg = "trading_gate_released must be a bool"
+            raise TypeError(msg)
+        _validate_nonnegative_int(
+            self.unresolved_mismatch_count,
+            field_name="unresolved_mismatch_count",
+        )
+        _validate_nonnegative_int(
+            self.manual_review_count,
+            field_name="manual_review_count",
+        )
+        object.__setattr__(self, "observed_at", parse_utc_datetime(self.observed_at))
+
+    @property
+    def is_healthy(self) -> bool:
+        """Return whether reconciliation state releases new trading activity."""
+
+        return (
+            self.status is ReconciliationStatus.HEALTHY
+            and self.trading_gate_released
+            and self.unresolved_mismatch_count == 0
+            and self.manual_review_count == 0
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class RiskContext:
     """Immutable state snapshot supplied to risk rule evaluation."""
 
@@ -505,6 +545,7 @@ class RiskContext:
     open_order_limit: RiskOpenOrderLimitState | None = None
     duplicate_order_guard: RiskDuplicateOrderGuardState | None = None
     available_balance: RiskAvailableBalanceState | None = None
+    reconciliation_health: RiskReconciliationHealthState | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "evaluated_at", parse_utc_datetime(self.evaluated_at))
@@ -603,6 +644,13 @@ class RiskContext:
             raise RiskConfigurationError(
                 "available_balance must be a RiskAvailableBalanceState instance"
             )
+        if self.reconciliation_health is not None and not isinstance(
+            self.reconciliation_health,
+            RiskReconciliationHealthState,
+        ):
+            raise RiskConfigurationError(
+                "reconciliation_health must be a RiskReconciliationHealthState instance"
+            )
 
     def strategy_enabled_state(self, strategy_id: StrategyId) -> RiskBooleanState | None:
         """Return the enabled state for a strategy, if present in this snapshot."""
@@ -688,6 +736,11 @@ class RiskContext:
         """Return the available-balance state, if present in this snapshot."""
 
         return self.available_balance
+
+    def reconciliation_health_state(self) -> RiskReconciliationHealthState | None:
+        """Return the reconciliation-health state, if present in this snapshot."""
+
+        return self.reconciliation_health
 
 
 def _validate_nonnegative_int(value: int, *, field_name: str) -> None:
