@@ -18,6 +18,7 @@ from pmrp.storage.migrations import (
     alembic_engine_options,
     database_config_from_environment,
 )
+from pmrp.storage.repositories import SqlAlchemyRiskUnitOfWork
 from pmrp.storage.session import AsyncSessionFactory, create_session_factory, session_scope
 from pmrp.storage.transactions import SqlAlchemyUnitOfWork
 
@@ -30,6 +31,7 @@ __all__ = [
     "InvariantViolationError",
     "PersistenceTimeoutError",
     "PersistenceUnavailableError",
+    "SqlAlchemyRiskUnitOfWork",
     "SqlAlchemyUnitOfWork",
     "StorageError",
     "StorageIntegrityError",

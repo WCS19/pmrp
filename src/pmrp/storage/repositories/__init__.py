@@ -11,11 +11,13 @@ from pmrp.storage.repositories.risk_decisions import (
     risk_decision_from_row,
     risk_decision_to_row,
 )
+from pmrp.storage.repositories.risk_unit_of_work import SqlAlchemyRiskUnitOfWork
 
 __all__ = [
     "CapitalReservationRepository",
     "Repository",
     "RiskDecisionRepository",
+    "SqlAlchemyRiskUnitOfWork",
     "VersionedRepository",
     "capital_reservation_from_row",
     "capital_reservation_to_row",
