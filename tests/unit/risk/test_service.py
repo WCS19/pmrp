@@ -10,10 +10,11 @@ from typing import Literal
 import pytest
 
 from pmrp.risk import RiskContext, RiskEvaluationService
+from pmrp.risk.breaches import RiskBreachFactory, RiskBreachPolicy
 from pmrp.schemas.enums import OrderType, RiskDecisionStatus, Side, TimeInForce
 from pmrp.schemas.identifiers import ContractId, MarketId, StrategyId
 from pmrp.schemas.orders import OrderIntent
-from pmrp.schemas.risk import RiskDecision, RiskRuleResult
+from pmrp.schemas.risk import RiskBreach, RiskDecision, RiskLimitScope, RiskRuleResult
 
 pytestmark = pytest.mark.unit
 
@@ -70,6 +71,90 @@ async def test_risk_evaluation_service_persists_rejections() -> None:
     assert result.status is RiskDecisionStatus.REJECTED
     assert unit_of_work.store.added == [decision]
     assert unit_of_work.committed == 1
+
+
+async def test_risk_evaluation_service_persists_configured_breaches() -> None:
+    decision = _decision(
+        status=RiskDecisionStatus.REJECTED,
+        rule_results=(_result(passed=False, reason_code="RISK_STRATEGY_CAPITAL_ABOVE_MAX"),),
+        approved_quantity=None,
+        approved_limit_price=None,
+        approval_expires_at=None,
+    )
+    unit_of_work = _FakeUnitOfWork()
+    service = RiskEvaluationService(
+        engine=_FakeEvaluator(decision=decision),
+        unit_of_work_factory=lambda: unit_of_work,
+        breach_factory=RiskBreachFactory(
+            policies=(
+                RiskBreachPolicy(
+                    rule_id="RISK-TEST",
+                    reason_code="RISK_STRATEGY_CAPITAL_ABOVE_MAX",
+                    scope=RiskLimitScope.STRATEGY,
+                    scope_id="strat_risk_service",
+                    severity="critical",
+                    action_taken="reject_order",
+                ),
+            )
+        ),
+    )
+
+    result = await service.evaluate_and_persist(
+        _intent(),
+        RiskContext(evaluated_at=NOW),
+        input_snapshot_id=INPUT_SNAPSHOT_ID,
+    )
+
+    assert result == decision
+    assert unit_of_work.store.added == [decision]
+    assert len(unit_of_work.breach_store.added) == 1
+    breach = unit_of_work.breach_store.added[0]
+    assert breach.rule_id == "RISK-TEST"
+    assert breach.scope is RiskLimitScope.STRATEGY
+    assert breach.scope_id == "strat_risk_service"
+    assert breach.severity == "critical"
+    assert breach.action_taken == "reject_order"
+    assert breach.correlation_id == decision.correlation_id
+    assert unit_of_work.committed == 1
+
+
+async def test_risk_evaluation_service_rolls_back_when_breach_persist_fails() -> None:
+    decision = _decision(
+        status=RiskDecisionStatus.REJECTED,
+        rule_results=(_result(passed=False, reason_code="RISK_BREACH_TEST"),),
+        approved_quantity=None,
+        approved_limit_price=None,
+        approval_expires_at=None,
+    )
+    unit_of_work = _FakeUnitOfWork(breach_store_error=RuntimeError("breach persist failed"))
+    service = RiskEvaluationService(
+        engine=_FakeEvaluator(decision=decision),
+        unit_of_work_factory=lambda: unit_of_work,
+        breach_factory=RiskBreachFactory(
+            policies=(
+                RiskBreachPolicy(
+                    rule_id="RISK-TEST",
+                    reason_code="RISK_BREACH_TEST",
+                    scope=RiskLimitScope.GLOBAL,
+                    severity="critical",
+                    action_taken="reject_order",
+                ),
+            )
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="breach persist failed"):
+        await service.evaluate_and_persist(
+            _intent(),
+            RiskContext(evaluated_at=NOW),
+            input_snapshot_id=INPUT_SNAPSHOT_ID,
+        )
+
+    assert unit_of_work.store.added == [decision]
+    assert unit_of_work.breach_store.added == []
+    assert unit_of_work.committed == 0
+    assert unit_of_work.rolled_back == 1
+    assert unit_of_work.exit_error_type is RuntimeError
 
 
 async def test_risk_evaluation_service_rolls_back_when_evaluation_fails() -> None:
@@ -232,14 +317,27 @@ class _FakeDecisionStore:
         self.added.append(decision)
 
 
+class _FakeBreachStore:
+    def __init__(self, *, error: Exception | None = None) -> None:
+        self._error = error
+        self.added: list[RiskBreach] = []
+
+    async def add(self, breach: RiskBreach) -> None:
+        if self._error is not None:
+            raise self._error
+        self.added.append(breach)
+
+
 class _FakeUnitOfWork:
     def __init__(
         self,
         *,
         store_error: Exception | None = None,
+        breach_store_error: Exception | None = None,
         commit_error: Exception | None = None,
     ) -> None:
         self.store = _FakeDecisionStore(error=store_error)
+        self.breach_store = _FakeBreachStore(error=breach_store_error)
         self._commit_error = commit_error
         self.entered = 0
         self.exited = 0
@@ -267,6 +365,10 @@ class _FakeUnitOfWork:
     @property
     def risk_decisions(self) -> _FakeDecisionStore:
         return self.store
+
+    @property
+    def risk_breaches(self) -> _FakeBreachStore:
+        return self.breach_store
 
     async def commit(self) -> None:
         if self._commit_error is not None:
