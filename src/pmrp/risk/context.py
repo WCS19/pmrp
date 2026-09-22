@@ -127,6 +127,48 @@ class RiskNotionalLimitState:
 
 
 @dataclass(frozen=True, slots=True)
+class RiskMarketPositionState:
+    """One timestamped market-position input used by deterministic risk rules."""
+
+    current_position: Decimal
+    max_position: Decimal
+    observed_at: datetime
+    open_order_position_delta: Decimal = Decimal("0")
+    reserved_position_delta: Decimal = Decimal("0")
+
+    def __post_init__(self) -> None:
+        current_position = parse_decimal(
+            self.current_position,
+            field_name="risk market position current_position",
+        )
+        max_position = parse_decimal(
+            self.max_position,
+            field_name="risk market position max_position",
+        )
+        open_order_position_delta = parse_decimal(
+            self.open_order_position_delta,
+            field_name="risk market position open_order_position_delta",
+        )
+        reserved_position_delta = parse_decimal(
+            self.reserved_position_delta,
+            field_name="risk market position reserved_position_delta",
+        )
+        if max_position <= Decimal("0"):
+            raise RiskConfigurationError("max_position must be positive")
+        object.__setattr__(self, "current_position", current_position)
+        object.__setattr__(self, "max_position", max_position)
+        object.__setattr__(self, "open_order_position_delta", open_order_position_delta)
+        object.__setattr__(self, "reserved_position_delta", reserved_position_delta)
+        object.__setattr__(self, "observed_at", parse_utc_datetime(self.observed_at))
+
+    @property
+    def effective_position(self) -> Decimal:
+        """Return position after known open-order and reservation deltas."""
+
+        return self.current_position + self.open_order_position_delta + self.reserved_position_delta
+
+
+@dataclass(frozen=True, slots=True)
 class RiskContext:
     """Immutable state snapshot supplied to risk rule evaluation."""
 
@@ -138,6 +180,7 @@ class RiskContext:
     price_bounds: Mapping[MarketId, RiskPriceBoundsState] = field(default_factory=dict)
     quantity_limits: Mapping[ContractId, RiskQuantityLimitsState] = field(default_factory=dict)
     notional_limits: Mapping[ContractId, RiskNotionalLimitState] = field(default_factory=dict)
+    market_positions: Mapping[MarketId, RiskMarketPositionState] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "evaluated_at", parse_utc_datetime(self.evaluated_at))
@@ -176,6 +219,11 @@ class RiskContext:
             "notional_limits",
             _freeze_notional_limits(self.notional_limits),
         )
+        object.__setattr__(
+            self,
+            "market_positions",
+            _freeze_market_positions(self.market_positions),
+        )
 
     def strategy_enabled_state(self, strategy_id: StrategyId) -> RiskBooleanState | None:
         """Return the enabled state for a strategy, if present in this snapshot."""
@@ -211,6 +259,11 @@ class RiskContext:
         """Return the notional-limit state for a contract, if present in this snapshot."""
 
         return self.notional_limits.get(contract_id)
+
+    def market_position_state(self, market_id: MarketId) -> RiskMarketPositionState | None:
+        """Return the market-position state for a market, if present in this snapshot."""
+
+        return self.market_positions.get(market_id)
 
 
 def _freeze_strategy_enabled(
@@ -336,4 +389,22 @@ def _freeze_notional_limits(
                 "notional_limits values must be RiskNotionalLimitState instances"
             )
         frozen[contract_id] = state
+    return MappingProxyType(frozen)
+
+
+def _freeze_market_positions(
+    states: Mapping[MarketId, RiskMarketPositionState],
+) -> Mapping[MarketId, RiskMarketPositionState]:
+    if not isinstance(states, Mapping):
+        msg = "market_positions must be a mapping"
+        raise TypeError(msg)
+    frozen: dict[MarketId, RiskMarketPositionState] = {}
+    for market_id, state in states.items():
+        if not isinstance(market_id, MarketId):
+            raise RiskConfigurationError("market_positions keys must be canonical MarketId values")
+        if not isinstance(state, RiskMarketPositionState):
+            raise RiskConfigurationError(
+                "market_positions values must be RiskMarketPositionState instances"
+            )
+        frozen[market_id] = state
     return MappingProxyType(frozen)
