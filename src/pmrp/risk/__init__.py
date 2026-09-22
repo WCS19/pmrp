@@ -3,6 +3,7 @@
 from pmrp.risk.context import (
     RiskBooleanState,
     RiskContext,
+    RiskDailyLossState,
     RiskExchangeCapitalState,
     RiskMarketPositionState,
     RiskMarketStatusState,
@@ -15,6 +16,13 @@ from pmrp.risk.context import (
 )
 from pmrp.risk.errors import RiskConfigurationError, RiskError, RiskInputError
 from pmrp.risk.rules import (
+    RISK_DAILY_LOSS_ABOVE_MAX_REASON,
+    RISK_DAILY_LOSS_LIMIT_RULE_ID,
+    RISK_DAILY_LOSS_LIMIT_RULE_VERSION,
+    RISK_DAILY_LOSS_STATE_FUTURE_REASON,
+    RISK_DAILY_LOSS_STATE_MISSING_REASON,
+    RISK_DAILY_LOSS_STATE_STALE_REASON,
+    RISK_DAILY_LOSS_VALID_REASON,
     RISK_EXCHANGE_CAPITAL_ABOVE_MAX_REASON,
     RISK_EXCHANGE_CAPITAL_EXCHANGE_MISSING_REASON,
     RISK_EXCHANGE_CAPITAL_LIMIT_RULE_ID,
@@ -110,6 +118,7 @@ from pmrp.risk.rules import (
     RISK_STRATEGY_STATE_FUTURE_REASON,
     RISK_STRATEGY_STATE_MISSING_REASON,
     RISK_STRATEGY_STATE_STALE_REASON,
+    DailyLossLimitRule,
     ExchangeCapitalLimitRule,
     MarketDataFreshnessRule,
     MarketEnabledRule,
@@ -126,6 +135,13 @@ from pmrp.risk.rules import (
 )
 
 __all__ = [
+    "RISK_DAILY_LOSS_ABOVE_MAX_REASON",
+    "RISK_DAILY_LOSS_LIMIT_RULE_ID",
+    "RISK_DAILY_LOSS_LIMIT_RULE_VERSION",
+    "RISK_DAILY_LOSS_STATE_FUTURE_REASON",
+    "RISK_DAILY_LOSS_STATE_MISSING_REASON",
+    "RISK_DAILY_LOSS_STATE_STALE_REASON",
+    "RISK_DAILY_LOSS_VALID_REASON",
     "RISK_EXCHANGE_CAPITAL_ABOVE_MAX_REASON",
     "RISK_EXCHANGE_CAPITAL_EXCHANGE_MISSING_REASON",
     "RISK_EXCHANGE_CAPITAL_LIMIT_RULE_ID",
@@ -221,6 +237,7 @@ __all__ = [
     "RISK_STRATEGY_STATE_FUTURE_REASON",
     "RISK_STRATEGY_STATE_MISSING_REASON",
     "RISK_STRATEGY_STATE_STALE_REASON",
+    "DailyLossLimitRule",
     "ExchangeCapitalLimitRule",
     "MarketDataFreshnessRule",
     "MarketEnabledRule",
@@ -234,6 +251,7 @@ __all__ = [
     "RiskBooleanState",
     "RiskConfigurationError",
     "RiskContext",
+    "RiskDailyLossState",
     "RiskError",
     "RiskExchangeCapitalState",
     "RiskInputError",
