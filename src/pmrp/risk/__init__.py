@@ -1,5 +1,12 @@
 """Runtime risk engine primitives."""
 
+from pmrp.risk.approvals import (
+    ApprovedOrderFactory,
+    ApprovedOrderReferenceGenerator,
+    ApprovedOrderReferences,
+    HashingApprovedOrderReferenceGenerator,
+    build_approved_order,
+)
 from pmrp.risk.context import (
     RiskArbitrageLegState,
     RiskAvailableBalanceState,
@@ -371,6 +378,9 @@ __all__ = [
     "RISK_STRATEGY_STATE_FUTURE_REASON",
     "RISK_STRATEGY_STATE_MISSING_REASON",
     "RISK_STRATEGY_STATE_STALE_REASON",
+    "ApprovedOrderFactory",
+    "ApprovedOrderReferenceGenerator",
+    "ApprovedOrderReferences",
     "ArbitrageLegRiskRule",
     "AvailableBalanceRule",
     "CapitalReservation",
@@ -378,6 +388,7 @@ __all__ = [
     "DailyLossLimitRule",
     "DuplicateOrderGuardRule",
     "ExchangeCapitalLimitRule",
+    "HashingApprovedOrderReferenceGenerator",
     "HashingRiskDecisionIdGenerator",
     "KillSwitchClearRule",
     "MarketDataFreshnessRule",
@@ -421,4 +432,5 @@ __all__ = [
     "RiskStrategyCapitalState",
     "StrategyCapitalLimitRule",
     "StrategyEnabledRule",
+    "build_approved_order",
 ]
