@@ -221,6 +221,52 @@ class RiskPortfolioGrossExposureState:
 
 
 @dataclass(frozen=True, slots=True)
+class RiskPortfolioNetExposureState:
+    """One timestamped portfolio net-exposure input for deterministic risk rules."""
+
+    current_net_exposure: Decimal
+    max_net_exposure: Decimal
+    observed_at: datetime
+    open_order_net_exposure_delta: Decimal = Decimal("0")
+    reserved_net_exposure_delta: Decimal = Decimal("0")
+
+    def __post_init__(self) -> None:
+        current_net_exposure = parse_decimal(
+            self.current_net_exposure,
+            field_name="risk portfolio net current_net_exposure",
+        )
+        max_net_exposure = parse_decimal(
+            self.max_net_exposure,
+            field_name="risk portfolio net max_net_exposure",
+        )
+        open_order_net_exposure_delta = parse_decimal(
+            self.open_order_net_exposure_delta,
+            field_name="risk portfolio net open_order_net_exposure_delta",
+        )
+        reserved_net_exposure_delta = parse_decimal(
+            self.reserved_net_exposure_delta,
+            field_name="risk portfolio net reserved_net_exposure_delta",
+        )
+        if max_net_exposure <= Decimal("0"):
+            raise RiskConfigurationError("max_net_exposure must be positive")
+        object.__setattr__(self, "current_net_exposure", current_net_exposure)
+        object.__setattr__(self, "max_net_exposure", max_net_exposure)
+        object.__setattr__(self, "open_order_net_exposure_delta", open_order_net_exposure_delta)
+        object.__setattr__(self, "reserved_net_exposure_delta", reserved_net_exposure_delta)
+        object.__setattr__(self, "observed_at", parse_utc_datetime(self.observed_at))
+
+    @property
+    def effective_net_exposure(self) -> Decimal:
+        """Return current signed net exposure plus known pending net exposure."""
+
+        return (
+            self.current_net_exposure
+            + self.open_order_net_exposure_delta
+            + self.reserved_net_exposure_delta
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class RiskContext:
     """Immutable state snapshot supplied to risk rule evaluation."""
 
@@ -234,6 +280,7 @@ class RiskContext:
     notional_limits: Mapping[ContractId, RiskNotionalLimitState] = field(default_factory=dict)
     market_positions: Mapping[MarketId, RiskMarketPositionState] = field(default_factory=dict)
     portfolio_gross_exposure: RiskPortfolioGrossExposureState | None = None
+    portfolio_net_exposure: RiskPortfolioNetExposureState | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "evaluated_at", parse_utc_datetime(self.evaluated_at))
@@ -284,6 +331,13 @@ class RiskContext:
             raise RiskConfigurationError(
                 "portfolio_gross_exposure must be a RiskPortfolioGrossExposureState instance"
             )
+        if self.portfolio_net_exposure is not None and not isinstance(
+            self.portfolio_net_exposure,
+            RiskPortfolioNetExposureState,
+        ):
+            raise RiskConfigurationError(
+                "portfolio_net_exposure must be a RiskPortfolioNetExposureState instance"
+            )
 
     def strategy_enabled_state(self, strategy_id: StrategyId) -> RiskBooleanState | None:
         """Return the enabled state for a strategy, if present in this snapshot."""
@@ -329,6 +383,11 @@ class RiskContext:
         """Return the portfolio gross-exposure state, if present in this snapshot."""
 
         return self.portfolio_gross_exposure
+
+    def portfolio_net_exposure_state(self) -> RiskPortfolioNetExposureState | None:
+        """Return the portfolio net-exposure state, if present in this snapshot."""
+
+        return self.portfolio_net_exposure
 
 
 def _freeze_strategy_enabled(
