@@ -7,6 +7,12 @@ from pmrp.risk.approvals import (
     HashingApprovedOrderReferenceGenerator,
     build_approved_order,
 )
+from pmrp.risk.breaches import (
+    HashingRiskBreachIdGenerator,
+    RiskBreachFactory,
+    RiskBreachIdGenerator,
+    RiskBreachPolicy,
+)
 from pmrp.risk.context import (
     RiskArbitrageLegState,
     RiskAvailableBalanceState,
@@ -389,6 +395,7 @@ __all__ = [
     "DuplicateOrderGuardRule",
     "ExchangeCapitalLimitRule",
     "HashingApprovedOrderReferenceGenerator",
+    "HashingRiskBreachIdGenerator",
     "HashingRiskDecisionIdGenerator",
     "KillSwitchClearRule",
     "MarketDataFreshnessRule",
@@ -405,6 +412,9 @@ __all__ = [
     "RiskArbitrageLegState",
     "RiskAvailableBalanceState",
     "RiskBooleanState",
+    "RiskBreachFactory",
+    "RiskBreachIdGenerator",
+    "RiskBreachPolicy",
     "RiskConfigurationError",
     "RiskContext",
     "RiskDailyLossState",
