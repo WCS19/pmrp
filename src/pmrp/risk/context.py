@@ -5,11 +5,13 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
+from decimal import Decimal
 from types import MappingProxyType
 
 from pmrp.risk.errors import RiskConfigurationError
 from pmrp.schemas.enums import MarketStatus
 from pmrp.schemas.identifiers import MarketId, StrategyId
+from pmrp.schemas.numeric import parse_decimal
 from pmrp.schemas.time import parse_utc_datetime
 
 
@@ -42,6 +44,35 @@ class RiskMarketStatusState:
 
 
 @dataclass(frozen=True, slots=True)
+class RiskPriceBoundsState:
+    """One timestamped price-bounds input used by deterministic risk rules."""
+
+    min_price: Decimal
+    max_price: Decimal
+    observed_at: datetime
+    tick_size: Decimal | None = None
+
+    def __post_init__(self) -> None:
+        min_price = parse_decimal(self.min_price, field_name="risk price min_price")
+        max_price = parse_decimal(self.max_price, field_name="risk price max_price")
+        tick_size = (
+            None
+            if self.tick_size is None
+            else parse_decimal(self.tick_size, field_name="risk price tick_size")
+        )
+        if min_price < Decimal("0"):
+            raise RiskConfigurationError("min_price must be nonnegative")
+        if max_price < min_price:
+            raise RiskConfigurationError("max_price must be greater than or equal to min_price")
+        if tick_size is not None and tick_size <= Decimal("0"):
+            raise RiskConfigurationError("tick_size must be positive")
+        object.__setattr__(self, "min_price", min_price)
+        object.__setattr__(self, "max_price", max_price)
+        object.__setattr__(self, "tick_size", tick_size)
+        object.__setattr__(self, "observed_at", parse_utc_datetime(self.observed_at))
+
+
+@dataclass(frozen=True, slots=True)
 class RiskContext:
     """Immutable state snapshot supplied to risk rule evaluation."""
 
@@ -50,6 +81,7 @@ class RiskContext:
     market_enabled: Mapping[MarketId, RiskBooleanState] = field(default_factory=dict)
     market_status: Mapping[MarketId, RiskMarketStatusState] = field(default_factory=dict)
     market_data_fresh: Mapping[MarketId, RiskBooleanState] = field(default_factory=dict)
+    price_bounds: Mapping[MarketId, RiskPriceBoundsState] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "evaluated_at", parse_utc_datetime(self.evaluated_at))
@@ -73,6 +105,11 @@ class RiskContext:
             "market_status",
             _freeze_market_status(self.market_status),
         )
+        object.__setattr__(
+            self,
+            "price_bounds",
+            _freeze_price_bounds(self.price_bounds),
+        )
 
     def strategy_enabled_state(self, strategy_id: StrategyId) -> RiskBooleanState | None:
         """Return the enabled state for a strategy, if present in this snapshot."""
@@ -93,6 +130,11 @@ class RiskContext:
         """Return the market status state for a market, if present in this snapshot."""
 
         return self.market_status.get(market_id)
+
+    def price_bounds_state(self, market_id: MarketId) -> RiskPriceBoundsState | None:
+        """Return the price-bounds state for a market, if present in this snapshot."""
+
+        return self.price_bounds.get(market_id)
 
 
 def _freeze_strategy_enabled(
@@ -162,6 +204,24 @@ def _freeze_market_status(
         if not isinstance(state, RiskMarketStatusState):
             raise RiskConfigurationError(
                 "market_status values must be RiskMarketStatusState instances"
+            )
+        frozen[market_id] = state
+    return MappingProxyType(frozen)
+
+
+def _freeze_price_bounds(
+    states: Mapping[MarketId, RiskPriceBoundsState],
+) -> Mapping[MarketId, RiskPriceBoundsState]:
+    if not isinstance(states, Mapping):
+        msg = "price_bounds must be a mapping"
+        raise TypeError(msg)
+    frozen: dict[MarketId, RiskPriceBoundsState] = {}
+    for market_id, state in states.items():
+        if not isinstance(market_id, MarketId):
+            raise RiskConfigurationError("price_bounds keys must be canonical MarketId values")
+        if not isinstance(state, RiskPriceBoundsState):
+            raise RiskConfigurationError(
+                "price_bounds values must be RiskPriceBoundsState instances"
             )
         frozen[market_id] = state
     return MappingProxyType(frozen)
