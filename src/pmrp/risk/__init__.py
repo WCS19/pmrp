@@ -206,6 +206,12 @@ from pmrp.risk.rules import (
     StrategyCapitalLimitRule,
     StrategyEnabledRule,
 )
+from pmrp.risk.service import (
+    RiskDecisionEvaluator,
+    RiskDecisionStore,
+    RiskEvaluationService,
+    RiskEvaluationUnitOfWork,
+)
 
 __all__ = [
     "RISK_ARBITRAGE_HEDGE_DEADLINE_MISSING_REASON",
@@ -391,10 +397,14 @@ __all__ = [
     "RiskConfigurationError",
     "RiskContext",
     "RiskDailyLossState",
+    "RiskDecisionEvaluator",
     "RiskDecisionIdGenerator",
+    "RiskDecisionStore",
     "RiskDuplicateOrderGuardState",
     "RiskEngine",
     "RiskError",
+    "RiskEvaluationService",
+    "RiskEvaluationUnitOfWork",
     "RiskExchangeCapitalState",
     "RiskInputError",
     "RiskKillSwitchClearState",
