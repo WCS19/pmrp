@@ -1536,6 +1536,7 @@ def test_deterministic_scenario_runner_validates_multi_leg_configuration() -> No
         == "simulation_scenario_runner_multi_leg_configuration_invalid"
     )
     assert "not-a-sequence" not in str(invalid_sequences_error.value)
+    assert invalid_sequences_error.value.__cause__ is None
 
     unknown_action = _scenario(
         configuration=_configuration(

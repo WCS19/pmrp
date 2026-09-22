@@ -2578,11 +2578,11 @@ def _multi_leg_order_action_sequences_from_configuration(
             msg = "multi-leg order action sequences must be unique"
             raise ValueError(msg)
         return sequences
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError):
         raise SimulationConfigurationError(
             "Scenario runner multi-leg configuration is invalid",
             reason_code="simulation_scenario_runner_multi_leg_configuration_invalid",
-        ) from exc
+        ) from None
 
 
 def _multi_leg_target_filled_quantity_from_configuration(
@@ -2596,11 +2596,11 @@ def _multi_leg_target_filled_quantity_from_configuration(
             raw_target,
             field_name="simulation multi-leg target filled quantity",
         )
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError):
         raise SimulationConfigurationError(
             "Scenario runner multi-leg configuration is invalid",
             reason_code="simulation_scenario_runner_multi_leg_configuration_invalid",
-        ) from exc
+        ) from None
     if target_filled_quantity <= _ZERO:
         raise SimulationConfigurationError(
             "Scenario runner multi-leg configuration is invalid",
