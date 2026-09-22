@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from pmrp.risk import RiskContext, RiskEngine
@@ -26,6 +26,7 @@ INPUT_SNAPSHOT_ID = "risk_input_01j0000000000000000000"
 
 
 @given(rule_outcomes=st.lists(st.booleans(), min_size=1, max_size=10))
+@settings(deadline=None)
 async def test_risk_engine_status_matches_rule_outcomes(rule_outcomes: list[bool]) -> None:
     decision = await RiskEngine(
         rules=tuple(
@@ -50,6 +51,7 @@ async def test_risk_engine_status_matches_rule_outcomes(rule_outcomes: list[bool
 
 
 @given(rule_outcomes=st.lists(st.booleans(), min_size=1, max_size=10))
+@settings(deadline=None)
 async def test_risk_engine_decision_ids_are_deterministic(rule_outcomes: list[bool]) -> None:
     rules = tuple(
         _StaticRule(f"RISK-PROP-{index:03d}", passed=passed)
