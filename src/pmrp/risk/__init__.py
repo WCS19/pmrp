@@ -1,6 +1,7 @@
 """Runtime risk engine primitives."""
 
 from pmrp.risk.context import (
+    RiskAvailableBalanceState,
     RiskBooleanState,
     RiskContext,
     RiskDailyLossState,
@@ -18,6 +19,14 @@ from pmrp.risk.context import (
 )
 from pmrp.risk.errors import RiskConfigurationError, RiskError, RiskInputError
 from pmrp.risk.rules import (
+    RISK_AVAILABLE_BALANCE_INSUFFICIENT_REASON,
+    RISK_AVAILABLE_BALANCE_PRICE_MISSING_REASON,
+    RISK_AVAILABLE_BALANCE_RULE_ID,
+    RISK_AVAILABLE_BALANCE_RULE_VERSION,
+    RISK_AVAILABLE_BALANCE_STATE_FUTURE_REASON,
+    RISK_AVAILABLE_BALANCE_STATE_MISSING_REASON,
+    RISK_AVAILABLE_BALANCE_STATE_STALE_REASON,
+    RISK_AVAILABLE_BALANCE_VALID_REASON,
     RISK_DAILY_LOSS_ABOVE_MAX_REASON,
     RISK_DAILY_LOSS_LIMIT_RULE_ID,
     RISK_DAILY_LOSS_LIMIT_RULE_VERSION,
@@ -135,6 +144,7 @@ from pmrp.risk.rules import (
     RISK_STRATEGY_STATE_FUTURE_REASON,
     RISK_STRATEGY_STATE_MISSING_REASON,
     RISK_STRATEGY_STATE_STALE_REASON,
+    AvailableBalanceRule,
     DailyLossLimitRule,
     DuplicateOrderGuardRule,
     ExchangeCapitalLimitRule,
@@ -154,6 +164,14 @@ from pmrp.risk.rules import (
 )
 
 __all__ = [
+    "RISK_AVAILABLE_BALANCE_INSUFFICIENT_REASON",
+    "RISK_AVAILABLE_BALANCE_PRICE_MISSING_REASON",
+    "RISK_AVAILABLE_BALANCE_RULE_ID",
+    "RISK_AVAILABLE_BALANCE_RULE_VERSION",
+    "RISK_AVAILABLE_BALANCE_STATE_FUTURE_REASON",
+    "RISK_AVAILABLE_BALANCE_STATE_MISSING_REASON",
+    "RISK_AVAILABLE_BALANCE_STATE_STALE_REASON",
+    "RISK_AVAILABLE_BALANCE_VALID_REASON",
     "RISK_DAILY_LOSS_ABOVE_MAX_REASON",
     "RISK_DAILY_LOSS_LIMIT_RULE_ID",
     "RISK_DAILY_LOSS_LIMIT_RULE_VERSION",
@@ -271,6 +289,7 @@ __all__ = [
     "RISK_STRATEGY_STATE_FUTURE_REASON",
     "RISK_STRATEGY_STATE_MISSING_REASON",
     "RISK_STRATEGY_STATE_STALE_REASON",
+    "AvailableBalanceRule",
     "DailyLossLimitRule",
     "DuplicateOrderGuardRule",
     "ExchangeCapitalLimitRule",
@@ -284,6 +303,7 @@ __all__ = [
     "OrderQuantityLimitRule",
     "PortfolioGrossLimitRule",
     "PortfolioNetLimitRule",
+    "RiskAvailableBalanceState",
     "RiskBooleanState",
     "RiskConfigurationError",
     "RiskContext",

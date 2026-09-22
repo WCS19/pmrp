@@ -454,6 +454,36 @@ class RiskDuplicateOrderGuardState:
 
 
 @dataclass(frozen=True, slots=True)
+class RiskAvailableBalanceState:
+    """One timestamped available-balance input used by deterministic risk rules."""
+
+    available_balance: Decimal
+    observed_at: datetime
+    reserved_balance: Decimal = Decimal("0")
+
+    def __post_init__(self) -> None:
+        available_balance = parse_decimal(
+            self.available_balance,
+            field_name="risk available balance available_balance",
+        )
+        reserved_balance = parse_decimal(
+            self.reserved_balance,
+            field_name="risk available balance reserved_balance",
+        )
+        if reserved_balance < Decimal("0"):
+            raise RiskConfigurationError("reserved_balance must be nonnegative")
+        object.__setattr__(self, "available_balance", available_balance)
+        object.__setattr__(self, "reserved_balance", reserved_balance)
+        object.__setattr__(self, "observed_at", parse_utc_datetime(self.observed_at))
+
+    @property
+    def effective_available_balance(self) -> Decimal:
+        """Return available balance after known risk reservations."""
+
+        return self.available_balance - self.reserved_balance
+
+
+@dataclass(frozen=True, slots=True)
 class RiskContext:
     """Immutable state snapshot supplied to risk rule evaluation."""
 
@@ -474,6 +504,7 @@ class RiskContext:
     daily_loss: RiskDailyLossState | None = None
     open_order_limit: RiskOpenOrderLimitState | None = None
     duplicate_order_guard: RiskDuplicateOrderGuardState | None = None
+    available_balance: RiskAvailableBalanceState | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "evaluated_at", parse_utc_datetime(self.evaluated_at))
@@ -565,6 +596,13 @@ class RiskContext:
             raise RiskConfigurationError(
                 "duplicate_order_guard must be a RiskDuplicateOrderGuardState instance"
             )
+        if self.available_balance is not None and not isinstance(
+            self.available_balance,
+            RiskAvailableBalanceState,
+        ):
+            raise RiskConfigurationError(
+                "available_balance must be a RiskAvailableBalanceState instance"
+            )
 
     def strategy_enabled_state(self, strategy_id: StrategyId) -> RiskBooleanState | None:
         """Return the enabled state for a strategy, if present in this snapshot."""
@@ -645,6 +683,11 @@ class RiskContext:
         """Return the duplicate-order guard state, if present in this snapshot."""
 
         return self.duplicate_order_guard
+
+    def available_balance_state(self) -> RiskAvailableBalanceState | None:
+        """Return the available-balance state, if present in this snapshot."""
+
+        return self.available_balance
 
 
 def _validate_nonnegative_int(value: int, *, field_name: str) -> None:
