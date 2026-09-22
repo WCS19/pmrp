@@ -10,18 +10,55 @@ import pytest
 from pmrp.schemas.enums import RiskDecisionStatus
 from pmrp.schemas.risk import RiskDecision, RiskRuleResult
 from pmrp.storage import SqlAlchemyRiskUnitOfWork, UnitOfWorkStateError
-from pmrp.storage.models import RiskDecisionRow
+from pmrp.storage.models import (
+    CapitalReservationRow,
+    KillSwitchRow,
+    RiskBreachRow,
+    RiskDecisionRow,
+    RiskLimitRow,
+)
+from pmrp.storage.repositories import (
+    CapitalReservationRepository,
+    KillSwitchRepository,
+    RiskBreachRepository,
+    RiskDecisionRepository,
+    RiskLimitRepository,
+)
 
 pytestmark = pytest.mark.unit
 
 NOW = datetime(2026, 9, 22, 12, 0, tzinfo=UTC)
 
 
-def test_risk_unit_of_work_rejects_inactive_repository_access() -> None:
+@pytest.mark.parametrize(
+    "repository_attribute",
+    [
+        "capital_reservations",
+        "kill_switches",
+        "risk_breaches",
+        "risk_decisions",
+        "risk_limits",
+    ],
+)
+def test_risk_unit_of_work_rejects_inactive_repository_access(
+    repository_attribute: str,
+) -> None:
     unit_of_work = SqlAlchemyRiskUnitOfWork(session_factory=_SessionFactory(_FakeSession()))
 
     with pytest.raises(UnitOfWorkStateError, match="not active"):
-        _ = unit_of_work.risk_decisions
+        _ = getattr(unit_of_work, repository_attribute)
+
+
+@pytest.mark.asyncio
+async def test_risk_unit_of_work_exposes_repositories_during_active_transaction() -> None:
+    async with SqlAlchemyRiskUnitOfWork(
+        session_factory=_SessionFactory(_FakeSession()),
+    ) as unit_of_work:
+        assert isinstance(unit_of_work.capital_reservations, CapitalReservationRepository)
+        assert isinstance(unit_of_work.kill_switches, KillSwitchRepository)
+        assert isinstance(unit_of_work.risk_breaches, RiskBreachRepository)
+        assert isinstance(unit_of_work.risk_decisions, RiskDecisionRepository)
+        assert isinstance(unit_of_work.risk_limits, RiskLimitRepository)
 
 
 @pytest.mark.asyncio
@@ -33,8 +70,7 @@ async def test_risk_unit_of_work_persists_decision_and_commits() -> None:
     ) as unit_of_work:
         await unit_of_work.risk_decisions.add(_decision())
         await unit_of_work.commit()
-        with pytest.raises(UnitOfWorkStateError, match="already finished"):
-            _ = unit_of_work.risk_decisions
+        _assert_repositories_reject_after_finished(unit_of_work)
 
     assert len(session.added) == 1
     assert isinstance(session.added[0], RiskDecisionRow)
@@ -67,8 +103,7 @@ async def test_risk_unit_of_work_explicit_rollback_finishes_transaction() -> Non
         session_factory=_SessionFactory(session),
     ) as unit_of_work:
         await unit_of_work.rollback()
-        with pytest.raises(UnitOfWorkStateError, match="already finished"):
-            _ = unit_of_work.risk_decisions
+        _assert_repositories_reject_after_finished(unit_of_work)
 
     assert session.committed == 0
     assert session.rolled_back == 1
@@ -103,6 +138,20 @@ def _decision() -> RiskDecision:
     )
 
 
+def _assert_repositories_reject_after_finished(
+    unit_of_work: SqlAlchemyRiskUnitOfWork,
+) -> None:
+    for repository_attribute in (
+        "capital_reservations",
+        "kill_switches",
+        "risk_breaches",
+        "risk_decisions",
+        "risk_limits",
+    ):
+        with pytest.raises(UnitOfWorkStateError, match="already finished"):
+            _ = getattr(unit_of_work, repository_attribute)
+
+
 class _SessionFactory:
     def __init__(self, session: _FakeSession) -> None:
         self._session = session
@@ -113,13 +162,18 @@ class _SessionFactory:
 
 class _FakeSession:
     def __init__(self) -> None:
-        self.added: list[RiskDecisionRow] = []
+        self.added: list[
+            CapitalReservationRow | KillSwitchRow | RiskBreachRow | RiskDecisionRow | RiskLimitRow
+        ] = []
         self.flushed = 0
         self.committed = 0
         self.rolled_back = 0
         self.closed = 0
 
-    def add(self, row: RiskDecisionRow) -> None:
+    def add(
+        self,
+        row: CapitalReservationRow | KillSwitchRow | RiskBreachRow | RiskDecisionRow | RiskLimitRow,
+    ) -> None:
         self.added.append(row)
 
     async def flush(self) -> None:
