@@ -408,6 +408,30 @@ class RiskDailyLossState:
 
 
 @dataclass(frozen=True, slots=True)
+class RiskOpenOrderLimitState:
+    """One timestamped open-order count input used by deterministic risk rules."""
+
+    current_open_orders: int
+    max_open_orders: int
+    observed_at: datetime
+    pending_cancel_orders: int = 0
+    reserved_open_orders: int = 0
+
+    def __post_init__(self) -> None:
+        _validate_nonnegative_int(self.current_open_orders, field_name="current_open_orders")
+        _validate_positive_int(self.max_open_orders, field_name="max_open_orders")
+        _validate_nonnegative_int(self.pending_cancel_orders, field_name="pending_cancel_orders")
+        _validate_nonnegative_int(self.reserved_open_orders, field_name="reserved_open_orders")
+        object.__setattr__(self, "observed_at", parse_utc_datetime(self.observed_at))
+
+    @property
+    def effective_open_order_count(self) -> int:
+        """Return current open orders plus known pending and reserved orders."""
+
+        return self.current_open_orders + self.pending_cancel_orders + self.reserved_open_orders
+
+
+@dataclass(frozen=True, slots=True)
 class RiskContext:
     """Immutable state snapshot supplied to risk rule evaluation."""
 
@@ -426,6 +450,7 @@ class RiskContext:
     market_exchanges: Mapping[MarketId, ExchangeId] = field(default_factory=dict)
     exchange_capital: Mapping[ExchangeId, RiskExchangeCapitalState] = field(default_factory=dict)
     daily_loss: RiskDailyLossState | None = None
+    open_order_limit: RiskOpenOrderLimitState | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "evaluated_at", parse_utc_datetime(self.evaluated_at))
@@ -503,6 +528,13 @@ class RiskContext:
             RiskDailyLossState,
         ):
             raise RiskConfigurationError("daily_loss must be a RiskDailyLossState instance")
+        if self.open_order_limit is not None and not isinstance(
+            self.open_order_limit,
+            RiskOpenOrderLimitState,
+        ):
+            raise RiskConfigurationError(
+                "open_order_limit must be a RiskOpenOrderLimitState instance"
+            )
 
     def strategy_enabled_state(self, strategy_id: StrategyId) -> RiskBooleanState | None:
         """Return the enabled state for a strategy, if present in this snapshot."""
@@ -573,6 +605,27 @@ class RiskContext:
         """Return the daily-loss state, if present in this snapshot."""
 
         return self.daily_loss
+
+    def open_order_limit_state(self) -> RiskOpenOrderLimitState | None:
+        """Return the open-order limit state, if present in this snapshot."""
+
+        return self.open_order_limit
+
+
+def _validate_nonnegative_int(value: int, *, field_name: str) -> None:
+    if type(value) is not int:
+        msg = f"{field_name} must be an int"
+        raise TypeError(msg)
+    if value < 0:
+        raise RiskConfigurationError(f"{field_name} must be nonnegative")
+
+
+def _validate_positive_int(value: int, *, field_name: str) -> None:
+    if type(value) is not int:
+        msg = f"{field_name} must be an int"
+        raise TypeError(msg)
+    if value <= 0:
+        raise RiskConfigurationError(f"{field_name} must be positive")
 
 
 def _freeze_strategy_enabled(
