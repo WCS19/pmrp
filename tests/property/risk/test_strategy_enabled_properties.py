@@ -12,6 +12,7 @@ from hypothesis import strategies as st
 from pmrp.risk import (
     RISK_STRATEGY_DISABLED_REASON,
     RISK_STRATEGY_ENABLED_REASON,
+    RISK_STRATEGY_STATE_FUTURE_REASON,
     RISK_STRATEGY_STATE_STALE_REASON,
     RiskBooleanState,
     RiskContext,
@@ -74,6 +75,27 @@ async def test_strategy_enabled_rule_rejects_any_stale_state(age_ms: int) -> Non
     assert result.reason_code == RISK_STRATEGY_STATE_STALE_REASON
     assert result.observed_value == Decimal(age_ms)
     assert result.limit_value == Decimal("5000")
+
+
+@given(future_ms=st.integers(min_value=1, max_value=600000))
+async def test_strategy_enabled_rule_rejects_any_future_state(future_ms: int) -> None:
+    result = await StrategyEnabledRule(max_state_age=timedelta(milliseconds=5000)).evaluate(
+        _intent(),
+        RiskContext(
+            evaluated_at=NOW,
+            strategy_enabled={
+                STRATEGY_ID: RiskBooleanState(
+                    value=True,
+                    observed_at=NOW + timedelta(milliseconds=future_ms),
+                )
+            },
+        ),
+    )
+
+    assert result.passed is False
+    assert result.reason_code == RISK_STRATEGY_STATE_FUTURE_REASON
+    assert result.observed_value == Decimal(future_ms)
+    assert result.limit_value == Decimal("0")
 
 
 def _intent() -> OrderIntent:

@@ -17,6 +17,7 @@ RISK_STRATEGY_ENABLED_REASON = "RISK_STRATEGY_ENABLED"
 RISK_STRATEGY_DISABLED_REASON = "RISK_STRATEGY_DISABLED"
 RISK_STRATEGY_STATE_MISSING_REASON = "RISK_STRATEGY_STATE_MISSING"
 RISK_STRATEGY_STATE_STALE_REASON = "RISK_STRATEGY_STATE_STALE"
+RISK_STRATEGY_STATE_FUTURE_REASON = "RISK_STRATEGY_STATE_FUTURE"
 
 _ENABLED_UNIT = "enabled_flag"
 _MILLISECONDS_UNIT = "milliseconds"
@@ -67,6 +68,16 @@ class StrategyEnabledRule:
                 observed_value=None,
                 limit_value=_ONE,
                 unit=_ENABLED_UNIT,
+                evaluated_at=context.evaluated_at,
+            )
+
+        if state.observed_at > context.evaluated_at:
+            return self._result(
+                passed=False,
+                reason_code=RISK_STRATEGY_STATE_FUTURE_REASON,
+                observed_value=_timedelta_milliseconds(state.observed_at - context.evaluated_at),
+                limit_value=_ZERO,
+                unit=_MILLISECONDS_UNIT,
                 evaluated_at=context.evaluated_at,
             )
 

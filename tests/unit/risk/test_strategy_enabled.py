@@ -12,6 +12,7 @@ from pmrp.risk import (
     RISK_STRATEGY_ENABLED_REASON,
     RISK_STRATEGY_ENABLED_RULE_ID,
     RISK_STRATEGY_ENABLED_RULE_VERSION,
+    RISK_STRATEGY_STATE_FUTURE_REASON,
     RISK_STRATEGY_STATE_MISSING_REASON,
     RISK_STRATEGY_STATE_STALE_REASON,
     RiskBooleanState,
@@ -127,6 +128,27 @@ async def test_strategy_enabled_rule_rejects_stale_strategy_state() -> None:
     assert result.reason_code == RISK_STRATEGY_STATE_STALE_REASON
     assert result.observed_value == Decimal("5001")
     assert result.limit_value == Decimal("5000")
+    assert result.unit == "milliseconds"
+
+
+async def test_strategy_enabled_rule_rejects_future_strategy_state() -> None:
+    result = await StrategyEnabledRule(max_state_age=timedelta(seconds=5)).evaluate(
+        _intent(),
+        RiskContext(
+            evaluated_at=NOW,
+            strategy_enabled={
+                STRATEGY_ID: RiskBooleanState(
+                    value=True,
+                    observed_at=NOW + timedelta(milliseconds=1),
+                )
+            },
+        ),
+    )
+
+    assert result.passed is False
+    assert result.reason_code == RISK_STRATEGY_STATE_FUTURE_REASON
+    assert result.observed_value == Decimal("1")
+    assert result.limit_value == Decimal("0")
     assert result.unit == "milliseconds"
 
 
