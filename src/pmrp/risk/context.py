@@ -109,6 +109,24 @@ class RiskQuantityLimitsState:
 
 
 @dataclass(frozen=True, slots=True)
+class RiskNotionalLimitState:
+    """One timestamped notional-limit input used by deterministic risk rules."""
+
+    max_notional: Decimal
+    observed_at: datetime
+
+    def __post_init__(self) -> None:
+        max_notional = parse_decimal(
+            self.max_notional,
+            field_name="risk notional max_notional",
+        )
+        if max_notional <= Decimal("0"):
+            raise RiskConfigurationError("max_notional must be positive")
+        object.__setattr__(self, "max_notional", max_notional)
+        object.__setattr__(self, "observed_at", parse_utc_datetime(self.observed_at))
+
+
+@dataclass(frozen=True, slots=True)
 class RiskContext:
     """Immutable state snapshot supplied to risk rule evaluation."""
 
@@ -119,6 +137,7 @@ class RiskContext:
     market_data_fresh: Mapping[MarketId, RiskBooleanState] = field(default_factory=dict)
     price_bounds: Mapping[MarketId, RiskPriceBoundsState] = field(default_factory=dict)
     quantity_limits: Mapping[ContractId, RiskQuantityLimitsState] = field(default_factory=dict)
+    notional_limits: Mapping[ContractId, RiskNotionalLimitState] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "evaluated_at", parse_utc_datetime(self.evaluated_at))
@@ -152,6 +171,11 @@ class RiskContext:
             "quantity_limits",
             _freeze_quantity_limits(self.quantity_limits),
         )
+        object.__setattr__(
+            self,
+            "notional_limits",
+            _freeze_notional_limits(self.notional_limits),
+        )
 
     def strategy_enabled_state(self, strategy_id: StrategyId) -> RiskBooleanState | None:
         """Return the enabled state for a strategy, if present in this snapshot."""
@@ -182,6 +206,11 @@ class RiskContext:
         """Return the quantity-limit state for a contract, if present in this snapshot."""
 
         return self.quantity_limits.get(contract_id)
+
+    def notional_limits_state(self, contract_id: ContractId) -> RiskNotionalLimitState | None:
+        """Return the notional-limit state for a contract, if present in this snapshot."""
+
+        return self.notional_limits.get(contract_id)
 
 
 def _freeze_strategy_enabled(
@@ -287,6 +316,24 @@ def _freeze_quantity_limits(
         if not isinstance(state, RiskQuantityLimitsState):
             raise RiskConfigurationError(
                 "quantity_limits values must be RiskQuantityLimitsState instances"
+            )
+        frozen[contract_id] = state
+    return MappingProxyType(frozen)
+
+
+def _freeze_notional_limits(
+    states: Mapping[ContractId, RiskNotionalLimitState],
+) -> Mapping[ContractId, RiskNotionalLimitState]:
+    if not isinstance(states, Mapping):
+        msg = "notional_limits must be a mapping"
+        raise TypeError(msg)
+    frozen: dict[ContractId, RiskNotionalLimitState] = {}
+    for contract_id, state in states.items():
+        if not isinstance(contract_id, ContractId):
+            raise RiskConfigurationError("notional_limits keys must be canonical ContractId values")
+        if not isinstance(state, RiskNotionalLimitState):
+            raise RiskConfigurationError(
+                "notional_limits values must be RiskNotionalLimitState instances"
             )
         frozen[contract_id] = state
     return MappingProxyType(frozen)
