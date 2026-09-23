@@ -44,6 +44,7 @@ from pmrp.risk.engine import (
     RiskEngine,
 )
 from pmrp.risk.errors import RiskConfigurationError, RiskError, RiskInputError
+from pmrp.risk.events import RiskEvaluationCanonicalEvent, RiskEventFactory
 from pmrp.risk.health import (
     RISK_ENGINE_COMPONENT,
     RiskEngineHealthReporter,
@@ -457,9 +458,11 @@ __all__ = [
     "RiskEngine",
     "RiskEngineHealthReporter",
     "RiskError",
+    "RiskEvaluationCanonicalEvent",
     "RiskEvaluationResult",
     "RiskEvaluationService",
     "RiskEvaluationUnitOfWork",
+    "RiskEventFactory",
     "RiskExchangeCapitalState",
     "RiskInputError",
     "RiskKillSwitchClearState",
