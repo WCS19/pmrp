@@ -6,7 +6,13 @@ from pmrp.events.factory import (
     EventIdentifierGenerator,
     PrefixedUlidIdentifierGenerator,
 )
-from pmrp.events.registry import EventTypeRegistration, EventTypeRegistry, UnknownEventTypeError
+from pmrp.events.registry import (
+    EventTypeRegistration,
+    EventTypeRegistry,
+    UnknownEventTypeError,
+    default_event_type_registrations,
+    default_event_type_registry,
+)
 
 __all__ = [
     "DeterministicEventIdentifierGenerator",
@@ -16,4 +22,6 @@ __all__ = [
     "EventTypeRegistry",
     "PrefixedUlidIdentifierGenerator",
     "UnknownEventTypeError",
+    "default_event_type_registrations",
+    "default_event_type_registry",
 ]
