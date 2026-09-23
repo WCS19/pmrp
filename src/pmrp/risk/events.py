@@ -155,7 +155,7 @@ class RiskEventFactory:
         self,
         result: RiskEvaluationResult,
         *,
-        breaches: tuple[RiskBreach, ...] = (),
+        breaches: tuple[RiskBreach, ...] | None = None,
         intent: OrderIntent | None = None,
     ) -> tuple[RiskEvaluationCanonicalEvent, ...]:
         """Build the canonical events implied by one persisted risk evaluation."""
@@ -172,7 +172,10 @@ class RiskEventFactory:
             msg = "risk evaluation events require an approved or rejected decision"
             raise ValueError(msg)
 
-        breach_events = tuple(self.build_limit_breached_event(breach) for breach in breaches)
+        effective_breaches = result.breaches if breaches is None else breaches
+        breach_events = tuple(
+            self.build_limit_breached_event(breach) for breach in effective_breaches
+        )
         return (decision_event, *breach_events)
 
 

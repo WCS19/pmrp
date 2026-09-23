@@ -111,16 +111,17 @@ async def test_risk_evaluation_service_persists_configured_breaches() -> None:
         ),
     )
 
-    result = await service.evaluate_and_persist(
+    result = await service.evaluate_and_persist_result(
         _intent(),
         RiskContext(evaluated_at=NOW),
         input_snapshot_id=INPUT_SNAPSHOT_ID,
     )
 
-    assert result == decision
+    assert result.decision == decision
     assert unit_of_work.store.added == [decision]
     assert len(unit_of_work.breach_store.added) == 1
     breach = unit_of_work.breach_store.added[0]
+    assert result.breaches == (breach,)
     assert breach.rule_id == "RISK-TEST"
     assert breach.scope is RiskLimitScope.STRATEGY
     assert breach.scope_id == "strat_risk_service"
@@ -383,6 +384,43 @@ def test_risk_evaluation_result_rejects_non_approved_artifacts() -> None:
 
     with pytest.raises(ValueError, match="non-approved"):
         RiskEvaluationResult(decision=rejected_decision, approved_order=approved_order)
+
+
+def test_risk_evaluation_result_validates_breach_artifacts() -> None:
+    decision = _decision()
+    matching_breach = RiskBreach(
+        breach_id="breach_risk_service",
+        rule_id="RISK-TEST",
+        rule_version="1.0",
+        scope=RiskLimitScope.STRATEGY,
+        scope_id=str(STRATEGY_ID),
+        severity="critical",
+        detected_at=NOW,
+        observed_value=Decimal("3"),
+        limit_value=Decimal("2"),
+        unit="test",
+        action_taken="reject_order",
+        correlation_id=decision.correlation_id,
+    )
+
+    result = RiskEvaluationResult(decision=decision, breaches=(matching_breach,))
+
+    assert result.breaches == (matching_breach,)
+    with pytest.raises(TypeError, match="tuple"):
+        RiskEvaluationResult(
+            decision=decision,
+            breaches=[matching_breach],  # type: ignore[arg-type]
+        )
+    with pytest.raises(TypeError, match="RiskBreach"):
+        RiskEvaluationResult(
+            decision=decision,
+            breaches=(object(),),  # type: ignore[arg-type]
+        )
+    with pytest.raises(ValueError, match="correlation_id"):
+        RiskEvaluationResult(
+            decision=decision,
+            breaches=(matching_breach.model_copy(update={"correlation_id": "corr_other"}),),
+        )
 
 
 def test_risk_capital_reservation_request_validates_metadata() -> None:
