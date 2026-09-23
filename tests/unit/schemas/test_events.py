@@ -196,6 +196,28 @@ def test_risk_check_requested_event_rejects_intent_correlation_mismatch() -> Non
         )
 
 
+def test_risk_check_requested_event_rejects_snapshot_strategy_mismatch() -> None:
+    with pytest.raises(ValidationError, match="strategy_id"):
+        RiskCheckRequestedEvent.model_validate(
+            {
+                "envelope": _risk_envelope_payload(RISK_CHECK_REQUESTED_EVENT_TYPE),
+                "intent": _order_intent_payload(),
+                "input_snapshot": _risk_input_snapshot_payload(strategy_id="strat_other_event"),
+            }
+        )
+
+
+def test_risk_check_requested_event_rejects_intent_market_mismatch() -> None:
+    with pytest.raises(ValidationError, match="market_id"):
+        RiskCheckRequestedEvent.model_validate(
+            {
+                "envelope": _risk_envelope_payload(RISK_CHECK_REQUESTED_EVENT_TYPE),
+                "intent": _order_intent_payload(market_id="mkt_other_event"),
+                "input_snapshot": _risk_input_snapshot_payload(),
+            }
+        )
+
+
 def test_risk_check_requested_event_rejects_snapshot_exchange_mismatch() -> None:
     with pytest.raises(ValidationError, match="exchange"):
         RiskCheckRequestedEvent.model_validate(
