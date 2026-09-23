@@ -10,7 +10,14 @@ from pydantic import Field, field_validator, model_validator
 
 from pmrp.schemas.base import CanonicalModel
 from pmrp.schemas.enums import RiskDecisionStatus
-from pmrp.schemas.identifiers import CorrelationId, IntentId, RiskDecisionId
+from pmrp.schemas.identifiers import (
+    AccountId,
+    CorrelationId,
+    IntentId,
+    MarketId,
+    RiskDecisionId,
+    StrategyId,
+)
 from pmrp.schemas.numeric import parse_decimal
 from pmrp.schemas.time import UTCDateTime
 
@@ -56,6 +63,43 @@ class RiskLimit(CanonicalModel):
             msg = "expires_at must be after effective_at"
             raise ValueError(msg)
         return self
+
+
+class RiskInputSnapshot(CanonicalModel):
+    risk_input_snapshot_id: str = Field(min_length=1, max_length=_RISK_ID_MAX_LENGTH)
+    captured_at: UTCDateTime
+
+    strategy_id: StrategyId
+    exchange: str = Field(min_length=1, max_length=64)
+    account_id: AccountId
+    market_id: MarketId
+
+    current_position: Decimal
+    open_order_quantity: Decimal = Field(ge=Decimal("0"))
+    available_balance: Decimal = Field(ge=Decimal("0"))
+
+    gross_exposure: Decimal = Field(ge=Decimal("0"))
+    net_exposure: Decimal
+    daily_realized_pnl: Decimal
+    daily_unrealized_pnl: Decimal
+
+    market_data_age_ms: int = Field(ge=0)
+    reconciliation_healthy: bool
+    kill_switch_clear: bool
+
+    @field_validator(
+        "current_position",
+        "open_order_quantity",
+        "available_balance",
+        "gross_exposure",
+        "net_exposure",
+        "daily_realized_pnl",
+        "daily_unrealized_pnl",
+        mode="before",
+    )
+    @classmethod
+    def parse_decimal_fields(cls, value: object) -> Decimal:
+        return parse_decimal(value, field_name="risk input snapshot decimal field")
 
 
 class RiskRuleResult(CanonicalModel):

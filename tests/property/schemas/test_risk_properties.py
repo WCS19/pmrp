@@ -6,7 +6,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from pmrp.schemas.enums import RiskDecisionStatus
-from pmrp.schemas.risk import RiskDecision, RiskRuleResult
+from pmrp.schemas.risk import RiskDecision, RiskInputSnapshot, RiskRuleResult
 from pmrp.schemas.serialization import canonical_json, canonical_sha256
 
 pytestmark = pytest.mark.property
@@ -62,6 +62,29 @@ def _decision_payload(**overrides: object) -> dict[str, object]:
     return payload
 
 
+def _snapshot_payload(**overrides: object) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "risk_input_snapshot_id": "risk_input_01j0000000000000000000",
+        "captured_at": "2026-07-27T15:00:00.100000Z",
+        "strategy_id": "strat_fed_value_v1",
+        "exchange": "kalshi",
+        "account_id": "acct_paper_001",
+        "market_id": "mkt_01j00000000000000000000000",
+        "current_position": "-3",
+        "open_order_quantity": "7",
+        "available_balance": "1200.50",
+        "gross_exposure": "842.25",
+        "net_exposure": "-125.75",
+        "daily_realized_pnl": "-14.10",
+        "daily_unrealized_pnl": "22.35",
+        "market_data_age_ms": 125,
+        "reconciliation_healthy": True,
+        "kill_switch_clear": True,
+    }
+    payload.update(overrides)
+    return payload
+
+
 @given(observed_value=_EXACT_DECIMALS, limit_value=_EXACT_DECIMALS)
 def test_risk_rule_result_decimal_values_round_trip_exactly(
     observed_value: Decimal,
@@ -79,6 +102,36 @@ def test_risk_rule_result_decimal_values_round_trip_exactly(
     assert result.observed_value == observed_value
     assert result.limit_value == limit_value
     assert RiskRuleResult.model_validate_json(canonical_json(result)) == result
+
+
+@given(
+    current_position=_EXACT_DECIMALS,
+    available_balance=_POSITIVE_DECIMALS,
+    net_exposure=_EXACT_DECIMALS,
+    daily_realized_pnl=_EXACT_DECIMALS,
+)
+def test_risk_input_snapshot_decimal_values_round_trip_exactly(
+    current_position: Decimal,
+    available_balance: Decimal,
+    net_exposure: Decimal,
+    daily_realized_pnl: Decimal,
+) -> None:
+    snapshot = RiskInputSnapshot.model_validate_json(
+        json.dumps(
+            _snapshot_payload(
+                current_position=str(current_position),
+                available_balance=str(available_balance),
+                net_exposure=str(net_exposure),
+                daily_realized_pnl=str(daily_realized_pnl),
+            )
+        )
+    )
+
+    assert snapshot.current_position == current_position
+    assert snapshot.available_balance == available_balance
+    assert snapshot.net_exposure == net_exposure
+    assert snapshot.daily_realized_pnl == daily_realized_pnl
+    assert RiskInputSnapshot.model_validate_json(canonical_json(snapshot)) == snapshot
 
 
 @given(approved_quantity=_POSITIVE_DECIMALS, approved_limit_price=_POSITIVE_DECIMALS)
