@@ -22,8 +22,8 @@ from pmrp.schemas.identifiers import (
 )
 from pmrp.schemas.immutability import freeze_canonical_mapping, thaw_canonical_mapping
 from pmrp.schemas.market_data import OrderBookDelta, OrderBookSnapshot, Trade
-from pmrp.schemas.orders import ApprovedOrder
-from pmrp.schemas.risk import KillSwitchState, RiskBreach, RiskDecision
+from pmrp.schemas.orders import ApprovedOrder, OrderIntent
+from pmrp.schemas.risk import KillSwitchState, RiskBreach, RiskDecision, RiskInputSnapshot
 from pmrp.schemas.strategy import Signal, StrategyInstance
 from pmrp.schemas.time import UTCDateTime
 from pmrp.schemas.versions import SchemaVersion
@@ -32,6 +32,7 @@ _DOTTED_EVENT_TYPE_PATTERN = r"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$"
 MARKET_ORDER_BOOK_DELTA_EVENT_TYPE = "market.order_book_delta"
 MARKET_ORDER_BOOK_SNAPSHOT_EVENT_TYPE = "market.order_book_snapshot"
 MARKET_TRADE_OBSERVED_EVENT_TYPE = "market.trade_observed"
+RISK_CHECK_REQUESTED_EVENT_TYPE = "risk.check_requested"
 RISK_APPROVED_EVENT_TYPE = "risk.approved"
 RISK_REJECTED_EVENT_TYPE = "risk.rejected"
 RISK_LIMIT_BREACHED_EVENT_TYPE = "risk.limit_breached"
@@ -221,6 +222,48 @@ class SignalGeneratedEvent(CanonicalModel):
             self.envelope.market_id,
             self.signal.market_id,
             field_name="signal.market_id",
+        )
+        return self
+
+
+class RiskCheckRequestedEvent(CanonicalModel):
+    envelope: EventEnvelope
+    intent: OrderIntent
+    input_snapshot: RiskInputSnapshot
+
+    @model_validator(mode="after")
+    def validate_envelope(self) -> Self:
+        _validate_event_type(self.envelope, RISK_CHECK_REQUESTED_EVENT_TYPE)
+        _validate_correlation_lineage(self.envelope.correlation_id, self.intent.correlation_id)
+        _validate_strategy_lineage(
+            self.envelope.strategy_id,
+            self.intent.strategy_id,
+            field_name="intent.strategy_id",
+        )
+        _validate_strategy_lineage(
+            self.envelope.strategy_id,
+            self.input_snapshot.strategy_id,
+            field_name="input_snapshot.strategy_id",
+        )
+        _validate_market_lineage(
+            self.envelope.market_id,
+            self.intent.market_id,
+            field_name="intent.market_id",
+        )
+        _validate_market_lineage(
+            self.envelope.market_id,
+            self.input_snapshot.market_id,
+            field_name="input_snapshot.market_id",
+        )
+        _validate_exchange_lineage(
+            self.envelope.exchange,
+            self.input_snapshot.exchange,
+            field_name="input_snapshot.exchange",
+        )
+        _validate_account_lineage(
+            self.envelope.account_id,
+            self.input_snapshot.account_id,
+            field_name="input_snapshot.account_id",
         )
         return self
 

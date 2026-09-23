@@ -74,6 +74,7 @@ def _registered_schemas() -> tuple[RegisteredSchema, ...]:
         OrderBookDeltaEvent,
         OrderBookSnapshotEvent,
         RiskApprovedEvent,
+        RiskCheckRequestedEvent,
         RiskLimitBreachedEvent,
         RiskRejectedEvent,
         SignalGeneratedEvent,
@@ -221,6 +222,9 @@ def _registered_schemas() -> tuple[RegisteredSchema, ...]:
         RegisteredSchema("risk_decision", 1, SchemaCategory.DOMAIN, RiskDecision),
         RegisteredSchema("risk_breach", 1, SchemaCategory.DOMAIN, RiskBreach),
         RegisteredSchema("kill_switch_state", 1, SchemaCategory.DOMAIN, KillSwitchState),
+        RegisteredSchema(
+            "risk_check_requested_event", 1, SchemaCategory.EVENT, RiskCheckRequestedEvent
+        ),
         RegisteredSchema("risk_approved_event", 1, SchemaCategory.EVENT, RiskApprovedEvent),
         RegisteredSchema("risk_rejected_event", 1, SchemaCategory.EVENT, RiskRejectedEvent),
         RegisteredSchema(

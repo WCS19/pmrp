@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from pmrp.schemas.enums import DataQualityFlag, OrderType, RiskDecisionStatus, Side, TimeInForce
 from pmrp.schemas.events import (
     RISK_APPROVED_EVENT_TYPE,
+    RISK_CHECK_REQUESTED_EVENT_TYPE,
     RISK_KILL_SWITCH_ACTIVATED_EVENT_TYPE,
     RISK_KILL_SWITCH_RELEASED_EVENT_TYPE,
     RISK_LIMIT_BREACHED_EVENT_TYPE,
@@ -16,6 +17,7 @@ from pmrp.schemas.events import (
     KillSwitchActivatedEvent,
     KillSwitchReleasedEvent,
     RiskApprovedEvent,
+    RiskCheckRequestedEvent,
     RiskLimitBreachedEvent,
     RiskRejectedEvent,
 )
@@ -156,6 +158,67 @@ def test_event_envelope_registry_entry_exists() -> None:
 
     assert registration.model_path == "pmrp.schemas.events.EventEnvelope"
     assert get_schema_model("event_envelope", 1) is EventEnvelope
+
+
+def test_risk_check_requested_event_accepts_valid_lineage() -> None:
+    event = RiskCheckRequestedEvent.model_validate(
+        {
+            "envelope": _risk_envelope_payload(RISK_CHECK_REQUESTED_EVENT_TYPE),
+            "intent": _order_intent_payload(),
+            "input_snapshot": _risk_input_snapshot_payload(),
+        }
+    )
+
+    assert event.envelope.event_type == RISK_CHECK_REQUESTED_EVENT_TYPE
+    assert event.intent.correlation_id == event.envelope.correlation_id
+    assert event.input_snapshot.strategy_id == event.intent.strategy_id
+
+
+def test_risk_check_requested_event_rejects_wrong_event_type() -> None:
+    with pytest.raises(ValidationError, match=RISK_CHECK_REQUESTED_EVENT_TYPE):
+        RiskCheckRequestedEvent.model_validate(
+            {
+                "envelope": _risk_envelope_payload(RISK_APPROVED_EVENT_TYPE),
+                "intent": _order_intent_payload(),
+                "input_snapshot": _risk_input_snapshot_payload(),
+            }
+        )
+
+
+def test_risk_check_requested_event_rejects_intent_correlation_mismatch() -> None:
+    with pytest.raises(ValidationError, match="correlation_id"):
+        RiskCheckRequestedEvent.model_validate(
+            {
+                "envelope": _risk_envelope_payload(RISK_CHECK_REQUESTED_EVENT_TYPE),
+                "intent": _order_intent_payload(correlation_id="corr_other_event"),
+                "input_snapshot": _risk_input_snapshot_payload(),
+            }
+        )
+
+
+def test_risk_check_requested_event_rejects_snapshot_exchange_mismatch() -> None:
+    with pytest.raises(ValidationError, match="exchange"):
+        RiskCheckRequestedEvent.model_validate(
+            {
+                "envelope": _risk_envelope_payload(RISK_CHECK_REQUESTED_EVENT_TYPE),
+                "intent": _order_intent_payload(),
+                "input_snapshot": _risk_input_snapshot_payload(exchange="polymarket"),
+            }
+        )
+
+
+def test_risk_check_requested_event_requires_account_lineage() -> None:
+    with pytest.raises(ValidationError, match="account_id"):
+        RiskCheckRequestedEvent.model_validate(
+            {
+                "envelope": _risk_envelope_payload(
+                    RISK_CHECK_REQUESTED_EVENT_TYPE,
+                    account_id=None,
+                ),
+                "intent": _order_intent_payload(),
+                "input_snapshot": _risk_input_snapshot_payload(),
+            }
+        )
 
 
 def test_risk_approved_event_accepts_valid_lineage() -> None:
@@ -315,6 +378,7 @@ def test_kill_switch_events_validate_active_state() -> None:
 
 def test_risk_event_registry_entries_exist() -> None:
     expected = {
+        "risk_check_requested_event": RiskCheckRequestedEvent,
         "risk_approved_event": RiskApprovedEvent,
         "risk_rejected_event": RiskRejectedEvent,
         "risk_limit_breached_event": RiskLimitBreachedEvent,
@@ -356,6 +420,54 @@ def _risk_rule_result_payload(*, passed: bool = True) -> dict[str, object]:
         "unit": "test",
         "evaluated_at": "2026-07-28T12:00:00Z",
     }
+
+
+def _order_intent_payload(**overrides: object) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "intent_id": "intent_event",
+        "strategy_id": "strat_event",
+        "market_id": "mkt_event",
+        "contract_id": "ctr_event",
+        "outcome_id": "out_event",
+        "side": Side.BUY,
+        "quantity": "10",
+        "limit_price": "0.50",
+        "order_type": OrderType.LIMIT,
+        "time_in_force": TimeInForce.GTC,
+        "post_only": False,
+        "reduce_only": False,
+        "urgency": "0.2",
+        "created_at": "2026-07-28T12:00:00Z",
+        "expires_at": "2026-07-28T12:00:05Z",
+        "signal_ids": (),
+        "correlation_id": "corr_event",
+        "idempotency_key": "intent-event",
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _risk_input_snapshot_payload(**overrides: object) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "risk_input_snapshot_id": "risk_input_event",
+        "captured_at": "2026-07-28T12:00:00Z",
+        "strategy_id": "strat_event",
+        "exchange": "kalshi",
+        "account_id": "acct_event",
+        "market_id": "mkt_event",
+        "current_position": "1",
+        "open_order_quantity": "2",
+        "available_balance": "1000.00",
+        "gross_exposure": "250.00",
+        "net_exposure": "125.00",
+        "daily_realized_pnl": "0",
+        "daily_unrealized_pnl": "12.50",
+        "market_data_age_ms": 125,
+        "reconciliation_healthy": True,
+        "kill_switch_clear": True,
+    }
+    payload.update(overrides)
+    return payload
 
 
 def _risk_decision_payload(**overrides: object) -> dict[str, object]:
