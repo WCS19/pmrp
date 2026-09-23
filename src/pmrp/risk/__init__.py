@@ -44,6 +44,11 @@ from pmrp.risk.engine import (
     RiskEngine,
 )
 from pmrp.risk.errors import RiskConfigurationError, RiskError, RiskInputError
+from pmrp.risk.health import (
+    RISK_ENGINE_COMPONENT,
+    RiskEngineHealthReporter,
+    build_risk_engine_health,
+)
 from pmrp.risk.kill_switches import (
     KillSwitchClearStateFactory,
     KillSwitchEvaluationSubject,
@@ -266,6 +271,7 @@ __all__ = [
     "RISK_DUPLICATE_ORDER_STATE_STALE_REASON",
     "RISK_DUPLICATE_ORDER_VALID_REASON",
     "RISK_ENGINE_APPROVAL_LIMIT_PRICE_MISSING_REASON",
+    "RISK_ENGINE_COMPONENT",
     "RISK_ENGINE_RULE_ERROR_REASON",
     "RISK_ENGINE_RULE_ID",
     "RISK_ENGINE_RULE_RESULT_INVALID_REASON",
@@ -432,6 +438,7 @@ __all__ = [
     "RiskDecisionStore",
     "RiskDuplicateOrderGuardState",
     "RiskEngine",
+    "RiskEngineHealthReporter",
     "RiskError",
     "RiskEvaluationService",
     "RiskEvaluationUnitOfWork",
@@ -453,4 +460,5 @@ __all__ = [
     "StrategyEnabledRule",
     "build_approved_order",
     "build_kill_switch_clear_state",
+    "build_risk_engine_health",
 ]
