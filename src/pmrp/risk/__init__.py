@@ -44,6 +44,11 @@ from pmrp.risk.engine import (
     RiskEngine,
 )
 from pmrp.risk.errors import RiskConfigurationError, RiskError, RiskInputError
+from pmrp.risk.kill_switches import (
+    KillSwitchClearStateFactory,
+    KillSwitchEvaluationSubject,
+    build_kill_switch_clear_state,
+)
 from pmrp.risk.reservations import CapitalReservation, CapitalReservationStatus
 from pmrp.risk.rules import (
     RISK_ARBITRAGE_HEDGE_DEADLINE_MISSING_REASON,
@@ -399,6 +404,8 @@ __all__ = [
     "HashingRiskBreachIdGenerator",
     "HashingRiskDecisionIdGenerator",
     "KillSwitchClearRule",
+    "KillSwitchClearStateFactory",
+    "KillSwitchEvaluationSubject",
     "MarketDataFreshnessRule",
     "MarketEnabledRule",
     "MarketOpenRule",
@@ -445,4 +452,5 @@ __all__ = [
     "StrategyCapitalLimitRule",
     "StrategyEnabledRule",
     "build_approved_order",
+    "build_kill_switch_clear_state",
 ]
