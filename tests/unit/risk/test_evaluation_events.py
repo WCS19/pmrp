@@ -91,6 +91,11 @@ async def test_risk_evaluation_event_workflow_builds_approved_events() -> None:
     assert approved_event.envelope.event_type == RISK_APPROVED_EVENT_TYPE
     assert approved_event.decision == decision
     assert approved_event.approved_order == result.result.approved_order
+    assert result.all_events == (result.check_requested_event, approved_event)
+    assert [event.envelope.event_type for event in result.all_events] == [
+        RISK_CHECK_REQUESTED_EVENT_TYPE,
+        RISK_APPROVED_EVENT_TYPE,
+    ]
 
 
 async def test_risk_evaluation_event_workflow_builds_rejected_and_breach_events() -> None:
@@ -133,6 +138,12 @@ async def test_risk_evaluation_event_workflow_builds_rejected_and_breach_events(
     assert isinstance(breach_event, RiskLimitBreachedEvent)
     assert breach_event.envelope.event_type == RISK_LIMIT_BREACHED_EVENT_TYPE
     assert breach_event.breach == unit_of_work.breach_store.added[0]
+    assert result.all_events == (result.check_requested_event, rejected_event, breach_event)
+    assert [event.envelope.event_type for event in result.all_events] == [
+        RISK_CHECK_REQUESTED_EVENT_TYPE,
+        RISK_REJECTED_EVENT_TYPE,
+        RISK_LIMIT_BREACHED_EVENT_TYPE,
+    ]
 
 
 async def test_risk_evaluation_event_workflow_rejects_snapshot_lineage_before_service() -> None:

@@ -16,6 +16,8 @@ from pmrp.schemas.events import RiskCheckRequestedEvent
 from pmrp.schemas.orders import OrderIntent
 from pmrp.schemas.risk import RiskInputSnapshot
 
+type RiskEvaluationWorkflowEvent = RiskCheckRequestedEvent | RiskEvaluationCanonicalEvent
+
 
 class RiskEvaluationRunner(Protocol):
     """Boundary for services that evaluate and persist one risk decision."""
@@ -54,6 +56,12 @@ class RiskEvaluationEventResult:
             not isinstance(event, RiskEvaluationCanonicalEvent) for event in self.evaluation_events
         ):
             raise TypeError("risk evaluation event result events must be risk evaluation events")
+
+    @property
+    def all_events(self) -> tuple[RiskEvaluationWorkflowEvent, ...]:
+        """Return all events in deterministic publication order."""
+
+        return (self.check_requested_event, *self.evaluation_events)
 
 
 @dataclass(frozen=True, slots=True)
