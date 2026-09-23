@@ -10,6 +10,12 @@ from pmrp.storage.repositories.kill_switches import (
     kill_switch_from_row,
     kill_switch_to_row,
 )
+from pmrp.storage.repositories.outbox import (
+    CANONICAL_EVENTS_TOPIC,
+    CanonicalEventContract,
+    OutboxMessageRepository,
+    outbox_message_to_row,
+)
 from pmrp.storage.repositories.protocols import Repository, VersionedRepository
 from pmrp.storage.repositories.risk_breaches import (
     RiskBreachRepository,
@@ -29,8 +35,11 @@ from pmrp.storage.repositories.risk_limits import (
 from pmrp.storage.repositories.risk_unit_of_work import SqlAlchemyRiskUnitOfWork
 
 __all__ = [
+    "CANONICAL_EVENTS_TOPIC",
+    "CanonicalEventContract",
     "CapitalReservationRepository",
     "KillSwitchRepository",
+    "OutboxMessageRepository",
     "Repository",
     "RiskBreachRepository",
     "RiskDecisionRepository",
@@ -41,6 +50,7 @@ __all__ = [
     "capital_reservation_to_row",
     "kill_switch_from_row",
     "kill_switch_to_row",
+    "outbox_message_to_row",
     "risk_breach_from_row",
     "risk_breach_to_row",
     "risk_decision_from_row",
