@@ -11,8 +11,10 @@ from pmrp.events import (
     EventTypeRegistry,
     PrefixedUlidIdentifierGenerator,
     UnknownEventTypeError,
+    default_event_type_registry,
 )
 from pmrp.schemas.enums import DataQualityFlag
+from pmrp.schemas.events import RISK_CHECK_REQUESTED_EVENT_TYPE
 from pmrp.schemas.identifiers import CorrelationId, EventId
 from pmrp.schemas.serialization import canonical_sha256
 
@@ -53,6 +55,27 @@ def test_event_factory_creates_envelope_with_clock_timestamp_and_registered_vers
     assert event.received_at == _instant()
     assert event.published_at == _instant()
     assert event.producer == "execution"
+
+
+def test_event_factory_uses_default_registry_for_canonical_risk_events() -> None:
+    factory = EventFactory(
+        clock=FrozenClock(_instant()),
+        registry=default_event_type_registry(),
+        identifier_generator=DeterministicEventIdentifierGenerator(),
+    )
+
+    event = factory.create_envelope(
+        event_type=RISK_CHECK_REQUESTED_EVENT_TYPE,
+        producer="risk",
+        strategy_id="strat_example",
+        market_id="mkt_01j00000000000000000000000",
+        account_id="acct_shadow",
+        correlation_id="corr_01j00000000000000000000000",
+    )
+
+    assert event.event_type == RISK_CHECK_REQUESTED_EVENT_TYPE
+    assert event.schema_version == 1
+    assert event.producer == "risk"
 
 
 def test_event_factory_uses_supplied_occurrence_receipt_and_lineage_fields() -> None:
