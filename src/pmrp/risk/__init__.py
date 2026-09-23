@@ -237,7 +237,9 @@ from pmrp.risk.rules import (
     StrategyEnabledRule,
 )
 from pmrp.risk.service import (
+    CapitalReservationStore,
     RiskBreachStore,
+    RiskCapitalReservationRequest,
     RiskDecisionEvaluator,
     RiskDecisionStore,
     RiskEvaluationService,
@@ -412,6 +414,7 @@ __all__ = [
     "CapitalReservationFactory",
     "CapitalReservationIdGenerator",
     "CapitalReservationStatus",
+    "CapitalReservationStore",
     "DailyLossLimitRule",
     "DuplicateOrderGuardRule",
     "ExchangeCapitalLimitRule",
@@ -440,6 +443,7 @@ __all__ = [
     "RiskBreachIdGenerator",
     "RiskBreachPolicy",
     "RiskBreachStore",
+    "RiskCapitalReservationRequest",
     "RiskConfigurationError",
     "RiskContext",
     "RiskDailyLossState",
