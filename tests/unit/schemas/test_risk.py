@@ -11,6 +11,7 @@ from pmrp.schemas.risk import (
     KillSwitchState,
     RiskBreach,
     RiskDecision,
+    RiskInputSnapshot,
     RiskLimit,
     RiskLimitScope,
     RiskRuleResult,
@@ -52,6 +53,29 @@ def _risk_rule_result_payload(**overrides: object) -> dict[str, object]:
         "limit_value": "5000",
         "unit": "milliseconds",
         "evaluated_at": "2026-07-27T15:00:00.145000Z",
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _risk_input_snapshot_payload(**overrides: object) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "risk_input_snapshot_id": "risk_input_01j0000000000000000000",
+        "captured_at": "2026-07-27T15:00:00.100000Z",
+        "strategy_id": "strat_fed_value_v1",
+        "exchange": "kalshi",
+        "account_id": "acct_paper_001",
+        "market_id": "mkt_01j00000000000000000000000",
+        "current_position": "-3",
+        "open_order_quantity": "7",
+        "available_balance": "1200.50",
+        "gross_exposure": "842.25",
+        "net_exposure": "-125.75",
+        "daily_realized_pnl": "-14.10",
+        "daily_unrealized_pnl": "22.35",
+        "market_data_age_ms": 125,
+        "reconciliation_healthy": True,
+        "kill_switch_clear": True,
     }
     payload.update(overrides)
     return payload
@@ -165,6 +189,72 @@ def test_risk_rule_result_rejects_missing_reason_code() -> None:
 
     with pytest.raises(ValidationError, match="Field required"):
         RiskRuleResult.model_validate(payload)
+
+
+def test_risk_input_snapshot_accepts_valid_payload_and_signed_values() -> None:
+    snapshot = RiskInputSnapshot.model_validate(_risk_input_snapshot_payload())
+
+    assert snapshot.risk_input_snapshot_id == "risk_input_01j0000000000000000000"
+    assert snapshot.current_position == Decimal("-3")
+    assert snapshot.net_exposure == Decimal("-125.75")
+    assert snapshot.daily_realized_pnl == Decimal("-14.10")
+    assert snapshot.kill_switch_clear is True
+
+
+def test_risk_input_snapshot_rejects_unknown_fields() -> None:
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        RiskInputSnapshot.model_validate(_risk_input_snapshot_payload(unexpected=True))
+
+
+def test_risk_input_snapshot_rejects_float_financial_values() -> None:
+    with pytest.raises(TypeError, match="float input"):
+        RiskInputSnapshot.model_validate(_risk_input_snapshot_payload(available_balance=1200.50))
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    [
+        ("open_order_quantity", "-1"),
+        ("available_balance", "-0.01"),
+        ("gross_exposure", "-1"),
+        ("market_data_age_ms", -1),
+    ],
+)
+def test_risk_input_snapshot_rejects_negative_nonnegative_fields(
+    field_name: str,
+    value: object,
+) -> None:
+    with pytest.raises(ValidationError, match="greater than or equal"):
+        RiskInputSnapshot.model_validate(_risk_input_snapshot_payload(**{field_name: value}))
+
+
+def test_risk_input_snapshot_rejects_naive_capture_time() -> None:
+    with pytest.raises(ValidationError, match="timezone-aware"):
+        RiskInputSnapshot.model_validate(
+            _risk_input_snapshot_payload(
+                captured_at=datetime.fromisoformat("2026-07-27T15:00:00.100000")
+            )
+        )
+
+
+def test_risk_input_snapshot_json_round_trip_and_decimal_serialization() -> None:
+    snapshot = RiskInputSnapshot.model_validate(_risk_input_snapshot_payload())
+    canonical = canonical_json(snapshot)
+    serialized = json.loads(canonical)
+
+    assert serialized["available_balance"] == "1200.50"
+    assert serialized["captured_at"] == "2026-07-27T15:00:00.100000Z"
+    assert RiskInputSnapshot.model_validate_json(canonical) == snapshot
+    assert canonical_sha256(snapshot) == canonical_sha256(
+        RiskInputSnapshot.model_validate_json(canonical)
+    )
+
+
+def test_risk_input_snapshot_json_schema_generation() -> None:
+    json_schema = RiskInputSnapshot.model_json_schema()
+
+    assert json_schema["title"] == "RiskInputSnapshot"
+    assert "kill_switch_clear" in json_schema["properties"]
 
 
 def test_risk_decision_accepts_valid_payload() -> None:
@@ -312,10 +402,13 @@ def test_risk_decision_json_schema_generation() -> None:
 
 def test_risk_decision_schema_registry_entries_exist() -> None:
     assert get_schema_model("risk_limit", 1) is RiskLimit
+    assert get_schema_model("risk_input_snapshot", 1) is RiskInputSnapshot
     assert get_schema_model("risk_rule_result", 1) is RiskRuleResult
     assert get_schema_model("risk_decision", 1) is RiskDecision
+    snapshot_registration = get_schema_registration("risk_input_snapshot", 1)
     registration = get_schema_registration("risk_decision", 1)
 
+    assert snapshot_registration.model_path == "pmrp.schemas.risk.RiskInputSnapshot"
     assert registration.model_path == "pmrp.schemas.risk.RiskDecision"
 
 

@@ -121,6 +121,7 @@ def _registered_schemas() -> tuple[RegisteredSchema, ...]:
         KillSwitchState,
         RiskBreach,
         RiskDecision,
+        RiskInputSnapshot,
         RiskLimit,
         RiskRuleResult,
     )
@@ -215,6 +216,7 @@ def _registered_schemas() -> tuple[RegisteredSchema, ...]:
         ),
         RegisteredSchema("signal_generated_event", 1, SchemaCategory.EVENT, SignalGeneratedEvent),
         RegisteredSchema("risk_limit", 1, SchemaCategory.DOMAIN, RiskLimit),
+        RegisteredSchema("risk_input_snapshot", 1, SchemaCategory.DOMAIN, RiskInputSnapshot),
         RegisteredSchema("risk_rule_result", 1, SchemaCategory.DOMAIN, RiskRuleResult),
         RegisteredSchema("risk_decision", 1, SchemaCategory.DOMAIN, RiskDecision),
         RegisteredSchema("risk_breach", 1, SchemaCategory.DOMAIN, RiskBreach),
