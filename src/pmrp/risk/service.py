@@ -9,6 +9,10 @@ from typing import Literal, Protocol, Self
 
 from pmrp.risk.breaches import RiskBreachFactory
 from pmrp.risk.context import RiskContext
+from pmrp.risk.reservations import CapitalReservation, CapitalReservationFactory
+from pmrp.schemas.enums import ExchangeName, RiskDecisionStatus
+from pmrp.schemas.identifiers import AccountId
+from pmrp.schemas.numeric import validate_currency
 from pmrp.schemas.orders import OrderIntent
 from pmrp.schemas.risk import RiskBreach, RiskDecision
 
@@ -43,6 +47,14 @@ class RiskBreachStore(Protocol):
         ...
 
 
+class CapitalReservationStore(Protocol):
+    """Persistence boundary for active pre-trade capital reservations."""
+
+    async def add(self, reservation: CapitalReservation) -> None:
+        """Persist a capital reservation without committing independently."""
+        ...
+
+
 class RiskEvaluationUnitOfWork(Protocol):
     """Transaction boundary required by the risk evaluation service."""
 
@@ -69,6 +81,11 @@ class RiskEvaluationUnitOfWork(Protocol):
         """Return the active risk breach store."""
         ...
 
+    @property
+    def capital_reservations(self) -> CapitalReservationStore:
+        """Return the active capital reservation store."""
+        ...
+
     async def commit(self) -> None:
         """Commit the transaction after all risk records are persisted."""
         ...
@@ -78,12 +95,27 @@ type RiskEvaluationUnitOfWorkFactory = Callable[[], RiskEvaluationUnitOfWork]
 
 
 @dataclass(frozen=True, slots=True)
+class RiskCapitalReservationRequest:
+    """Metadata required to reserve capital for an approved decision."""
+
+    exchange: ExchangeName
+    account_id: AccountId
+    currency: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "exchange", ExchangeName(self.exchange))
+        object.__setattr__(self, "account_id", AccountId(str(self.account_id)))
+        object.__setattr__(self, "currency", validate_currency(self.currency))
+
+
+@dataclass(frozen=True, slots=True)
 class RiskEvaluationService:
     """Evaluate risk and persist the immutable decision in one transaction."""
 
     engine: RiskDecisionEvaluator
     unit_of_work_factory: RiskEvaluationUnitOfWorkFactory
     breach_factory: RiskBreachFactory | None = None
+    reservation_factory: CapitalReservationFactory | None = None
 
     async def evaluate_and_persist(
         self,
@@ -91,6 +123,7 @@ class RiskEvaluationService:
         context: RiskContext,
         *,
         input_snapshot_id: str,
+        reservation_request: RiskCapitalReservationRequest | None = None,
     ) -> RiskDecision:
         """Evaluate risk rules, persist the decision, commit, and return it."""
 
@@ -101,6 +134,16 @@ class RiskEvaluationService:
                 input_snapshot_id=input_snapshot_id,
             )
             await unit_of_work.risk_decisions.add(decision)
+            if decision.status is RiskDecisionStatus.APPROVED and reservation_request is not None:
+                reservation_factory = self.reservation_factory or CapitalReservationFactory()
+                reservation = reservation_factory.build(
+                    intent,
+                    decision,
+                    exchange=reservation_request.exchange,
+                    account_id=reservation_request.account_id,
+                    currency=reservation_request.currency,
+                )
+                await unit_of_work.capital_reservations.add(reservation)
             if self.breach_factory is not None:
                 for breach in self.breach_factory.breaches_for_decision(decision):
                     await unit_of_work.risk_breaches.add(breach)
