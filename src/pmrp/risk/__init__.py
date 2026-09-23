@@ -252,6 +252,7 @@ from pmrp.risk.workflow import (
     RiskEvaluationEventResult,
     RiskEvaluationEventWorkflow,
     RiskEvaluationRunner,
+    RiskEvaluationWorkflowEvent,
 )
 
 __all__ = [
@@ -470,6 +471,7 @@ __all__ = [
     "RiskEvaluationRunner",
     "RiskEvaluationService",
     "RiskEvaluationUnitOfWork",
+    "RiskEvaluationWorkflowEvent",
     "RiskEventFactory",
     "RiskExchangeCapitalState",
     "RiskInputError",
