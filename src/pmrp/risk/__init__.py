@@ -54,7 +54,14 @@ from pmrp.risk.kill_switches import (
     KillSwitchEvaluationSubject,
     build_kill_switch_clear_state,
 )
-from pmrp.risk.reservations import CapitalReservation, CapitalReservationStatus
+from pmrp.risk.reservations import (
+    CapitalReservation,
+    CapitalReservationFactory,
+    CapitalReservationIdGenerator,
+    CapitalReservationStatus,
+    HashingCapitalReservationIdGenerator,
+    build_capital_reservation,
+)
 from pmrp.risk.rules import (
     RISK_ARBITRAGE_HEDGE_DEADLINE_MISSING_REASON,
     RISK_ARBITRAGE_HEDGE_TIMEOUT_EXPIRED_REASON,
@@ -402,11 +409,14 @@ __all__ = [
     "ArbitrageLegRiskRule",
     "AvailableBalanceRule",
     "CapitalReservation",
+    "CapitalReservationFactory",
+    "CapitalReservationIdGenerator",
     "CapitalReservationStatus",
     "DailyLossLimitRule",
     "DuplicateOrderGuardRule",
     "ExchangeCapitalLimitRule",
     "HashingApprovedOrderReferenceGenerator",
+    "HashingCapitalReservationIdGenerator",
     "HashingRiskBreachIdGenerator",
     "HashingRiskDecisionIdGenerator",
     "KillSwitchClearRule",
@@ -459,6 +469,7 @@ __all__ = [
     "StrategyCapitalLimitRule",
     "StrategyEnabledRule",
     "build_approved_order",
+    "build_capital_reservation",
     "build_kill_switch_clear_state",
     "build_risk_engine_health",
 ]
