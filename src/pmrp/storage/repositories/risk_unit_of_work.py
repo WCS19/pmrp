@@ -8,6 +8,7 @@ from typing import Literal, Self
 from pmrp.storage.errors import UnitOfWorkStateError
 from pmrp.storage.repositories.capital_reservations import CapitalReservationRepository
 from pmrp.storage.repositories.kill_switches import KillSwitchRepository
+from pmrp.storage.repositories.outbox import OutboxMessageRepository
 from pmrp.storage.repositories.risk_breaches import RiskBreachRepository
 from pmrp.storage.repositories.risk_decisions import RiskDecisionRepository
 from pmrp.storage.repositories.risk_limits import RiskLimitRepository
@@ -22,6 +23,7 @@ class SqlAlchemyRiskUnitOfWork:
         self._unit_of_work = SqlAlchemyUnitOfWork(session_factory=session_factory)
         self._capital_reservations: CapitalReservationRepository | None = None
         self._kill_switches: KillSwitchRepository | None = None
+        self._outbox_messages: OutboxMessageRepository | None = None
         self._risk_breaches: RiskBreachRepository | None = None
         self._risk_decisions: RiskDecisionRepository | None = None
         self._risk_limits: RiskLimitRepository | None = None
@@ -31,6 +33,7 @@ class SqlAlchemyRiskUnitOfWork:
         session = self._unit_of_work.session
         self._capital_reservations = CapitalReservationRepository(session)
         self._kill_switches = KillSwitchRepository(session)
+        self._outbox_messages = OutboxMessageRepository(session)
         self._risk_breaches = RiskBreachRepository(session)
         self._risk_decisions = RiskDecisionRepository(session)
         self._risk_limits = RiskLimitRepository(session)
@@ -48,6 +51,7 @@ class SqlAlchemyRiskUnitOfWork:
         finally:
             self._capital_reservations = None
             self._kill_switches = None
+            self._outbox_messages = None
             self._risk_breaches = None
             self._risk_decisions = None
             self._risk_limits = None
@@ -69,6 +73,15 @@ class SqlAlchemyRiskUnitOfWork:
             raise UnitOfWorkStateError("risk unit of work is not active")
         _ = self._unit_of_work.session
         return self._kill_switches
+
+    @property
+    def outbox_messages(self) -> OutboxMessageRepository:
+        """Return the active transactional outbox repository."""
+
+        if self._outbox_messages is None:
+            raise UnitOfWorkStateError("risk unit of work is not active")
+        _ = self._unit_of_work.session
+        return self._outbox_messages
 
     @property
     def risk_breaches(self) -> RiskBreachRepository:

@@ -20,6 +20,7 @@ from pmrp.storage.models import (
 from pmrp.storage.repositories import (
     CapitalReservationRepository,
     KillSwitchRepository,
+    OutboxMessageRepository,
     RiskBreachRepository,
     RiskDecisionRepository,
     RiskLimitRepository,
@@ -35,6 +36,7 @@ NOW = datetime(2026, 9, 22, 12, 0, tzinfo=UTC)
     [
         "capital_reservations",
         "kill_switches",
+        "outbox_messages",
         "risk_breaches",
         "risk_decisions",
         "risk_limits",
@@ -56,6 +58,7 @@ async def test_risk_unit_of_work_exposes_repositories_during_active_transaction(
     ) as unit_of_work:
         assert isinstance(unit_of_work.capital_reservations, CapitalReservationRepository)
         assert isinstance(unit_of_work.kill_switches, KillSwitchRepository)
+        assert isinstance(unit_of_work.outbox_messages, OutboxMessageRepository)
         assert isinstance(unit_of_work.risk_breaches, RiskBreachRepository)
         assert isinstance(unit_of_work.risk_decisions, RiskDecisionRepository)
         assert isinstance(unit_of_work.risk_limits, RiskLimitRepository)
@@ -144,6 +147,7 @@ def _assert_repositories_reject_after_finished(
     for repository_attribute in (
         "capital_reservations",
         "kill_switches",
+        "outbox_messages",
         "risk_breaches",
         "risk_decisions",
         "risk_limits",
