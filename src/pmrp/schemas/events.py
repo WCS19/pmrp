@@ -8,7 +8,7 @@ from typing import Self
 from pydantic import Field, field_serializer, field_validator, model_validator
 
 from pmrp.schemas.base import CanonicalModel
-from pmrp.schemas.enums import DataQualityFlag, HealthStatus
+from pmrp.schemas.enums import DataQualityFlag, HealthStatus, RiskDecisionStatus
 from pmrp.schemas.identifiers import (
     AccountId,
     CausationRef,
@@ -233,6 +233,7 @@ class RiskApprovedEvent(CanonicalModel):
     @model_validator(mode="after")
     def validate_envelope(self) -> Self:
         _validate_event_type(self.envelope, RISK_APPROVED_EVENT_TYPE)
+        _validate_risk_decision_status(self.decision, RiskDecisionStatus.APPROVED)
         _validate_correlation_lineage(self.envelope.correlation_id, self.decision.correlation_id)
         _validate_approved_order_lineage(self.approved_order, self.decision)
         _validate_strategy_lineage(
@@ -270,6 +271,7 @@ class RiskRejectedEvent(CanonicalModel):
     @model_validator(mode="after")
     def validate_envelope(self) -> Self:
         _validate_event_type(self.envelope, RISK_REJECTED_EVENT_TYPE)
+        _validate_risk_decision_status(self.decision, RiskDecisionStatus.REJECTED)
         _validate_correlation_lineage(self.envelope.correlation_id, self.decision.correlation_id)
         return self
 
@@ -406,6 +408,15 @@ def _validate_correlation_lineage(
 ) -> None:
     if envelope_correlation_id != payload_correlation_id:
         msg = "event envelope correlation_id must match payload correlation_id"
+        raise ValueError(msg)
+
+
+def _validate_risk_decision_status(
+    decision: RiskDecision,
+    expected_status: RiskDecisionStatus,
+) -> None:
+    if decision.status is not expected_status:
+        msg = f"risk event decision status must be {expected_status.value!r}"
         raise ValueError(msg)
 
 

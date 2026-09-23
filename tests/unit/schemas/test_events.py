@@ -193,6 +193,23 @@ def test_risk_approved_event_rejects_mismatched_approval_lineage() -> None:
         )
 
 
+def test_risk_approved_event_rejects_rejected_decision() -> None:
+    with pytest.raises(ValidationError, match="approved"):
+        RiskApprovedEvent.model_validate(
+            {
+                "envelope": _risk_envelope_payload(RISK_APPROVED_EVENT_TYPE),
+                "decision": _risk_decision_payload(
+                    status=RiskDecisionStatus.REJECTED,
+                    rule_results=(_risk_rule_result_payload(passed=False),),
+                    approved_quantity=None,
+                    approved_limit_price=None,
+                    approval_expires_at=None,
+                ),
+                "approved_order": _approved_order_payload(),
+            }
+        )
+
+
 def test_risk_approved_event_requires_order_lineage() -> None:
     with pytest.raises(ValidationError, match="order_id"):
         RiskApprovedEvent.model_validate(
@@ -220,6 +237,16 @@ def test_risk_rejected_event_accepts_rejected_decision() -> None:
 
     assert event.envelope.event_type == RISK_REJECTED_EVENT_TYPE
     assert event.decision.status is RiskDecisionStatus.REJECTED
+
+
+def test_risk_rejected_event_rejects_approved_decision() -> None:
+    with pytest.raises(ValidationError, match="rejected"):
+        RiskRejectedEvent.model_validate(
+            {
+                "envelope": _risk_envelope_payload(RISK_REJECTED_EVENT_TYPE),
+                "decision": _risk_decision_payload(),
+            }
+        )
 
 
 def test_risk_rejected_event_rejects_correlation_mismatch() -> None:
