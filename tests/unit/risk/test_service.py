@@ -24,7 +24,7 @@ from pmrp.risk import (
 from pmrp.risk.breaches import RiskBreachFactory, RiskBreachPolicy
 from pmrp.schemas.enums import ExchangeName, OrderType, RiskDecisionStatus, Side, TimeInForce
 from pmrp.schemas.identifiers import AccountId, ContractId, MarketId, StrategyId
-from pmrp.schemas.orders import OrderIntent
+from pmrp.schemas.orders import ApprovedOrder, OrderIntent
 from pmrp.schemas.risk import RiskBreach, RiskDecision, RiskLimitScope, RiskRuleResult
 
 pytestmark = pytest.mark.unit
@@ -325,6 +325,29 @@ async def test_risk_evaluation_service_rolls_back_when_approved_order_build_fail
     assert unit_of_work.committed == 0
     assert unit_of_work.rolled_back == 1
     assert unit_of_work.exit_error_type is RiskConfigurationError
+
+
+async def test_risk_evaluation_service_rolls_back_when_result_validation_fails() -> None:
+    unit_of_work = _FakeUnitOfWork()
+    decision = _decision()
+    service = RiskEvaluationService(
+        engine=_FakeEvaluator(decision=decision),
+        unit_of_work_factory=lambda: unit_of_work,
+        approved_order_factory=_MismatchedApprovedOrderFactory(),
+    )
+
+    with pytest.raises(ValueError, match="risk_decision_id"):
+        await service.evaluate_and_persist_result(
+            _intent(),
+            RiskContext(evaluated_at=NOW),
+            input_snapshot_id=INPUT_SNAPSHOT_ID,
+            approved_order_request=_approved_order_request(),
+        )
+
+    assert unit_of_work.store.added == [decision]
+    assert unit_of_work.committed == 0
+    assert unit_of_work.rolled_back == 1
+    assert unit_of_work.exit_error_type is ValueError
 
 
 def test_risk_approved_order_request_validates_metadata() -> None:
@@ -628,6 +651,24 @@ class _InvalidApprovedOrderReferences:
     ) -> object:
         del intent, decision, exchange, account_id
         return object()
+
+
+class _MismatchedApprovedOrderFactory(ApprovedOrderFactory):
+    def build(
+        self,
+        intent: OrderIntent,
+        decision: RiskDecision,
+        *,
+        exchange: str,
+        account_id: AccountId,
+    ) -> ApprovedOrder:
+        order = build_approved_order(
+            intent,
+            decision,
+            exchange=exchange,
+            account_id=account_id,
+        )
+        return order.model_copy(update={"risk_decision_id": "risk_mismatched_result"})
 
 
 class _FakeUnitOfWork:

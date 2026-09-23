@@ -216,12 +216,13 @@ class RiskEvaluationService:
             if self.breach_factory is not None:
                 for breach in self.breach_factory.breaches_for_decision(decision):
                     await unit_of_work.risk_breaches.add(breach)
-            await unit_of_work.commit()
-            return RiskEvaluationResult(
+            result = RiskEvaluationResult(
                 decision=decision,
                 approved_order=approved_order,
                 capital_reservation=capital_reservation,
             )
+            await unit_of_work.commit()
+            return result
 
 
 def _validate_approved_order_matches_decision(
