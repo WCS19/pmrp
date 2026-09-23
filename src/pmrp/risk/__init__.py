@@ -248,6 +248,11 @@ from pmrp.risk.service import (
     RiskEvaluationService,
     RiskEvaluationUnitOfWork,
 )
+from pmrp.risk.workflow import (
+    RiskEvaluationEventResult,
+    RiskEvaluationEventWorkflow,
+    RiskEvaluationRunner,
+)
 
 __all__ = [
     "RISK_ARBITRAGE_HEDGE_DEADLINE_MISSING_REASON",
@@ -459,7 +464,10 @@ __all__ = [
     "RiskEngineHealthReporter",
     "RiskError",
     "RiskEvaluationCanonicalEvent",
+    "RiskEvaluationEventResult",
+    "RiskEvaluationEventWorkflow",
     "RiskEvaluationResult",
+    "RiskEvaluationRunner",
     "RiskEvaluationService",
     "RiskEvaluationUnitOfWork",
     "RiskEventFactory",
