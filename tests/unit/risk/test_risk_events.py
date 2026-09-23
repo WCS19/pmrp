@@ -105,8 +105,7 @@ def test_risk_event_factory_builds_rejection_and_breach_events() -> None:
     breach = _breach(decision)
 
     events = _risk_event_factory().build_evaluation_events(
-        RiskEvaluationResult(decision=decision),
-        breaches=(breach,),
+        RiskEvaluationResult(decision=decision, breaches=(breach,)),
         intent=intent,
     )
 
@@ -125,6 +124,21 @@ def test_risk_event_factory_builds_rejection_and_breach_events() -> None:
     assert breach_event.envelope.occurred_at == breach.detected_at
     assert breach_event.envelope.correlation_id == breach.correlation_id
     assert breach_event.breach == breach
+
+
+def test_risk_event_factory_allows_explicit_breach_override() -> None:
+    decision = _rejected_decision()
+    breach = _breach(decision)
+
+    events = _risk_event_factory().build_evaluation_events(
+        RiskEvaluationResult(decision=decision),
+        breaches=(breach,),
+        intent=_intent(),
+    )
+
+    assert len(events) == 2
+    assert isinstance(events[1], RiskLimitBreachedEvent)
+    assert events[1].breach == breach
 
 
 def test_risk_event_factory_requires_approved_order_for_approved_result() -> None:

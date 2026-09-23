@@ -128,10 +128,17 @@ class RiskEvaluationResult:
     decision: RiskDecision
     approved_order: ApprovedOrder | None = None
     capital_reservation: CapitalReservation | None = None
+    breaches: tuple[RiskBreach, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.decision, RiskDecision):
             raise TypeError("risk evaluation result requires a RiskDecision")
+        if not isinstance(self.breaches, tuple):
+            raise TypeError("risk evaluation result breaches must be a tuple")
+        if any(not isinstance(breach, RiskBreach) for breach in self.breaches):
+            raise TypeError("risk evaluation result breaches must contain RiskBreach values")
+        if any(breach.correlation_id != self.decision.correlation_id for breach in self.breaches):
+            raise ValueError("risk evaluation breach correlation_id must match decision")
         if self.decision.status is not RiskDecisionStatus.APPROVED:
             if self.approved_order is not None:
                 raise ValueError("non-approved risk decisions cannot include an approved order")
@@ -213,13 +220,16 @@ class RiskEvaluationService:
                     exchange=approved_order_request.exchange.value,
                     account_id=approved_order_request.account_id,
                 )
+            breaches: list[RiskBreach] = []
             if self.breach_factory is not None:
                 for breach in self.breach_factory.breaches_for_decision(decision):
+                    breaches.append(breach)
                     await unit_of_work.risk_breaches.add(breach)
             result = RiskEvaluationResult(
                 decision=decision,
                 approved_order=approved_order,
                 capital_reservation=capital_reservation,
+                breaches=tuple(breaches),
             )
             await unit_of_work.commit()
             return result
