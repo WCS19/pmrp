@@ -238,10 +238,12 @@ from pmrp.risk.rules import (
 )
 from pmrp.risk.service import (
     CapitalReservationStore,
+    RiskApprovedOrderRequest,
     RiskBreachStore,
     RiskCapitalReservationRequest,
     RiskDecisionEvaluator,
     RiskDecisionStore,
+    RiskEvaluationResult,
     RiskEvaluationService,
     RiskEvaluationUnitOfWork,
 )
@@ -436,6 +438,7 @@ __all__ = [
     "PortfolioGrossLimitRule",
     "PortfolioNetLimitRule",
     "ReconciliationHealthRule",
+    "RiskApprovedOrderRequest",
     "RiskArbitrageLegState",
     "RiskAvailableBalanceState",
     "RiskBooleanState",
@@ -454,6 +457,7 @@ __all__ = [
     "RiskEngine",
     "RiskEngineHealthReporter",
     "RiskError",
+    "RiskEvaluationResult",
     "RiskEvaluationService",
     "RiskEvaluationUnitOfWork",
     "RiskExchangeCapitalState",
