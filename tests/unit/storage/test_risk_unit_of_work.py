@@ -11,13 +11,16 @@ from pmrp.schemas.enums import RiskDecisionStatus
 from pmrp.schemas.risk import RiskDecision, RiskRuleResult
 from pmrp.storage import SqlAlchemyRiskUnitOfWork, UnitOfWorkStateError
 from pmrp.storage.models import (
+    CanonicalEventRow,
     CapitalReservationRow,
+    EventIdRow,
     KillSwitchRow,
     RiskBreachRow,
     RiskDecisionRow,
     RiskLimitRow,
 )
 from pmrp.storage.repositories import (
+    CanonicalEventRepository,
     CapitalReservationRepository,
     KillSwitchRepository,
     OutboxMessageRepository,
@@ -34,6 +37,7 @@ NOW = datetime(2026, 9, 22, 12, 0, tzinfo=UTC)
 @pytest.mark.parametrize(
     "repository_attribute",
     [
+        "canonical_events",
         "capital_reservations",
         "kill_switches",
         "outbox_messages",
@@ -56,6 +60,7 @@ async def test_risk_unit_of_work_exposes_repositories_during_active_transaction(
     async with SqlAlchemyRiskUnitOfWork(
         session_factory=_SessionFactory(_FakeSession()),
     ) as unit_of_work:
+        assert isinstance(unit_of_work.canonical_events, CanonicalEventRepository)
         assert isinstance(unit_of_work.capital_reservations, CapitalReservationRepository)
         assert isinstance(unit_of_work.kill_switches, KillSwitchRepository)
         assert isinstance(unit_of_work.outbox_messages, OutboxMessageRepository)
@@ -145,6 +150,7 @@ def _assert_repositories_reject_after_finished(
     unit_of_work: SqlAlchemyRiskUnitOfWork,
 ) -> None:
     for repository_attribute in (
+        "canonical_events",
         "capital_reservations",
         "kill_switches",
         "outbox_messages",
@@ -167,7 +173,13 @@ class _SessionFactory:
 class _FakeSession:
     def __init__(self) -> None:
         self.added: list[
-            CapitalReservationRow | KillSwitchRow | RiskBreachRow | RiskDecisionRow | RiskLimitRow
+            CanonicalEventRow
+            | CapitalReservationRow
+            | EventIdRow
+            | KillSwitchRow
+            | RiskBreachRow
+            | RiskDecisionRow
+            | RiskLimitRow
         ] = []
         self.flushed = 0
         self.committed = 0
@@ -176,7 +188,13 @@ class _FakeSession:
 
     def add(
         self,
-        row: CapitalReservationRow | KillSwitchRow | RiskBreachRow | RiskDecisionRow | RiskLimitRow,
+        row: CanonicalEventRow
+        | CapitalReservationRow
+        | EventIdRow
+        | KillSwitchRow
+        | RiskBreachRow
+        | RiskDecisionRow
+        | RiskLimitRow,
     ) -> None:
         self.added.append(row)
 

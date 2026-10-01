@@ -6,6 +6,7 @@ from types import TracebackType
 from typing import Literal, Self
 
 from pmrp.storage.errors import UnitOfWorkStateError
+from pmrp.storage.repositories.canonical_events import CanonicalEventRepository
 from pmrp.storage.repositories.capital_reservations import CapitalReservationRepository
 from pmrp.storage.repositories.kill_switches import KillSwitchRepository
 from pmrp.storage.repositories.outbox import OutboxMessageRepository
@@ -21,6 +22,7 @@ class SqlAlchemyRiskUnitOfWork:
 
     def __init__(self, *, session_factory: AsyncSessionFactory) -> None:
         self._unit_of_work = SqlAlchemyUnitOfWork(session_factory=session_factory)
+        self._canonical_events: CanonicalEventRepository | None = None
         self._capital_reservations: CapitalReservationRepository | None = None
         self._kill_switches: KillSwitchRepository | None = None
         self._outbox_messages: OutboxMessageRepository | None = None
@@ -31,6 +33,7 @@ class SqlAlchemyRiskUnitOfWork:
     async def __aenter__(self) -> Self:
         await self._unit_of_work.__aenter__()
         session = self._unit_of_work.session
+        self._canonical_events = CanonicalEventRepository(session)
         self._capital_reservations = CapitalReservationRepository(session)
         self._kill_switches = KillSwitchRepository(session)
         self._outbox_messages = OutboxMessageRepository(session)
@@ -49,12 +52,22 @@ class SqlAlchemyRiskUnitOfWork:
             await self._unit_of_work.__aexit__(exc_type, exc, traceback)
             return False
         finally:
+            self._canonical_events = None
             self._capital_reservations = None
             self._kill_switches = None
             self._outbox_messages = None
             self._risk_breaches = None
             self._risk_decisions = None
             self._risk_limits = None
+
+    @property
+    def canonical_events(self) -> CanonicalEventRepository:
+        """Return the active canonical event repository."""
+
+        if self._canonical_events is None:
+            raise UnitOfWorkStateError("risk unit of work is not active")
+        _ = self._unit_of_work.session
+        return self._canonical_events
 
     @property
     def capital_reservations(self) -> CapitalReservationRepository:
