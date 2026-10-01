@@ -59,6 +59,9 @@ MARKET_RELATIONSHIPS_MIGRATION_PATH = (
 HEALTH_AUDIT_TABLES_MIGRATION_PATH = (
     REPOSITORY_ROOT / "migrations/versions/0021_health_audit_tables.py"
 )
+RISK_INPUT_SNAPSHOTS_MIGRATION_PATH = (
+    REPOSITORY_ROOT / "migrations/versions/0022_risk_input_snapshots.py"
+)
 MAX_ALEMBIC_REVISION_ID_LENGTH = 32
 EXPECTED_LOGICAL_SCHEMAS = (
     "pmrp_core",
@@ -285,6 +288,16 @@ def test_health_audit_tables_migration_revision_metadata_is_stable() -> None:
 
 
 @pytest.mark.unit
+def test_risk_input_snapshots_migration_revision_metadata_is_stable() -> None:
+    migration = _load_migration(RISK_INPUT_SNAPSHOTS_MIGRATION_PATH)
+
+    assert migration.revision == "0022_risk_input_snapshots"
+    assert migration.down_revision == "0021_health_audit_tables"
+    assert migration.branch_labels is None
+    assert migration.depends_on is None
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "migration_path",
     [
@@ -309,6 +322,7 @@ def test_health_audit_tables_migration_revision_metadata_is_stable() -> None:
         REPLAY_SIMULATION_TABLES_MIGRATION_PATH,
         MARKET_RELATIONSHIPS_MIGRATION_PATH,
         HEALTH_AUDIT_TABLES_MIGRATION_PATH,
+        RISK_INPUT_SNAPSHOTS_MIGRATION_PATH,
     ],
 )
 def test_migration_revision_ids_fit_alembic_version_column(migration_path: Path) -> None:
@@ -1277,6 +1291,70 @@ def test_health_audit_tables_migration_uses_expected_names() -> None:
     assert migration.ADAPTER_HEALTH_EXCHANGE_TIME_INDEX_NAME == ("ix_adapter_health__exchange_time")
     assert migration.OPERATOR_AUDIT_ACTOR_TIME_INDEX_NAME == "ix_operator_audit__actor_time"
     assert migration.OPERATOR_AUDIT_SCOPE_TIME_INDEX_NAME == "ix_operator_audit__scope_time"
+
+
+@pytest.mark.unit
+def test_risk_input_snapshots_migration_uses_expected_names() -> None:
+    migration = _load_migration(RISK_INPUT_SNAPSHOTS_MIGRATION_PATH)
+
+    assert migration.SCHEMA_NAME == "pmrp_risk"
+    assert migration.RISK_INPUT_SNAPSHOTS_TABLE_NAME == "risk_input_snapshots"
+    assert migration.RISK_INPUT_SNAPSHOTS_STRATEGY_TIME_INDEX_NAME == (
+        "ix_risk_input_snapshots__strategy_time"
+    )
+    assert migration.RISK_INPUT_SNAPSHOTS_ACCOUNT_MARKET_TIME_INDEX_NAME == (
+        "ix_risk_input_snapshots__account_market_time"
+    )
+    assert migration.RISK_INPUT_SNAPSHOTS_PAYLOAD_HASH_INDEX_NAME == (
+        "ix_risk_input_snapshots__payload_hash"
+    )
+    assert migration.RISK_INPUT_SNAPSHOTS_OPEN_ORDER_QUANTITY_CHECK_NAME == (
+        "ck_risk_input_snapshots__open_order_quantity"
+    )
+    assert migration.RISK_INPUT_SNAPSHOTS_AVAILABLE_BALANCE_CHECK_NAME == (
+        "ck_risk_input_snapshots__available_balance"
+    )
+    assert migration.RISK_INPUT_SNAPSHOTS_GROSS_EXPOSURE_CHECK_NAME == (
+        "ck_risk_input_snapshots__gross_exposure"
+    )
+    assert migration.RISK_INPUT_SNAPSHOTS_MARKET_DATA_AGE_CHECK_NAME == (
+        "ck_risk_input_snapshots__market_data_age"
+    )
+
+
+@pytest.mark.unit
+def test_risk_input_snapshots_migration_marks_constraint_names_as_final(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    migration = _load_migration(RISK_INPUT_SNAPSHOTS_MIGRATION_PATH)
+    formatted_names: list[str] = []
+    created_table_arguments: list[object] = []
+
+    def fake_format_name(name: str) -> str:
+        formatted_names.append(name)
+        return f"final:{name}"
+
+    def fake_create_table(*arguments: object, **_kwargs: object) -> None:
+        created_table_arguments.extend(arguments)
+
+    monkeypatch.setattr(migration.op, "f", fake_format_name)
+    monkeypatch.setattr(migration.op, "create_table", fake_create_table)
+    monkeypatch.setattr(migration.op, "create_index", lambda *_args, **_kwargs: None)
+
+    migration.upgrade()
+
+    final_constraint_names = [
+        constraint.name
+        for constraint in created_table_arguments
+        if isinstance(constraint, CheckConstraint)
+    ]
+    assert formatted_names == [
+        "ck_risk_input_snapshots__open_order_quantity",
+        "ck_risk_input_snapshots__available_balance",
+        "ck_risk_input_snapshots__gross_exposure",
+        "ck_risk_input_snapshots__market_data_age",
+    ]
+    assert final_constraint_names == [f"final:{name}" for name in formatted_names]
 
 
 def _load_initial_migration() -> ModuleType:

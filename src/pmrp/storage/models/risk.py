@@ -8,6 +8,7 @@ from decimal import Decimal
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     DateTime,
     Index,
     Numeric,
@@ -87,6 +88,58 @@ class RiskDecisionRow(StorageBase):
     configuration_hash: Mapped[str] = mapped_column(Text, nullable=False)
     correlation_id: Mapped[str] = mapped_column(Text, nullable=False)
     rule_results: Mapped[list[dict[str, object]]] = mapped_column(JSONB, nullable=False)
+    payload_hash: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class RiskInputSnapshotRow(StorageBase):
+    """Durable canonical risk input snapshot captured before evaluation."""
+
+    __tablename__ = "risk_input_snapshots"
+    __table_args__ = (
+        Index("ix_risk_input_snapshots__strategy_time", "strategy_id", desc("captured_at")),
+        Index(
+            "ix_risk_input_snapshots__account_market_time",
+            "exchange",
+            "account_id",
+            "market_id",
+            desc("captured_at"),
+        ),
+        Index("ix_risk_input_snapshots__payload_hash", "payload_hash"),
+        CheckConstraint(
+            "open_order_quantity >= 0",
+            name="open_order_quantity",
+        ),
+        CheckConstraint(
+            "available_balance >= 0",
+            name="available_balance",
+        ),
+        CheckConstraint(
+            "gross_exposure >= 0",
+            name="gross_exposure",
+        ),
+        CheckConstraint(
+            "market_data_age_ms >= 0",
+            name="market_data_age",
+        ),
+        {"schema": "pmrp_risk"},
+    )
+
+    risk_input_snapshot_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    strategy_id: Mapped[str] = mapped_column(Text, nullable=False)
+    exchange: Mapped[str] = mapped_column(Text, nullable=False)
+    account_id: Mapped[str] = mapped_column(Text, nullable=False)
+    market_id: Mapped[str] = mapped_column(Text, nullable=False)
+    current_position: Mapped[Decimal] = mapped_column(Numeric(38, 18), nullable=False)
+    open_order_quantity: Mapped[Decimal] = mapped_column(Numeric(38, 18), nullable=False)
+    available_balance: Mapped[Decimal] = mapped_column(Numeric(38, 18), nullable=False)
+    gross_exposure: Mapped[Decimal] = mapped_column(Numeric(38, 18), nullable=False)
+    net_exposure: Mapped[Decimal] = mapped_column(Numeric(38, 18), nullable=False)
+    daily_realized_pnl: Mapped[Decimal] = mapped_column(Numeric(38, 18), nullable=False)
+    daily_unrealized_pnl: Mapped[Decimal] = mapped_column(Numeric(38, 18), nullable=False)
+    market_data_age_ms: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    reconciliation_healthy: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    kill_switch_clear: Mapped[bool] = mapped_column(Boolean, nullable=False)
     payload_hash: Mapped[str] = mapped_column(Text, nullable=False)
 
 

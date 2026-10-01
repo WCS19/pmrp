@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from sqlalchemy import Numeric, Table
+from sqlalchemy import CheckConstraint, Numeric, Table
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.dialects.postgresql import JSONB
 
@@ -12,6 +12,7 @@ from pmrp.storage.models import (
     KillSwitchRow,
     RiskBreachRow,
     RiskDecisionRow,
+    RiskInputSnapshotRow,
     RiskLimitRow,
     StorageBase,
 )
@@ -108,6 +109,82 @@ def test_risk_decision_rule_results_use_jsonb() -> None:
 
 
 @pytest.mark.unit
+def test_risk_input_snapshot_row_mapping_matches_database_spec() -> None:
+    table = RiskInputSnapshotRow.__table__
+
+    assert table.schema == "pmrp_risk"
+    assert table.name == "risk_input_snapshots"
+    assert [column.name for column in table.primary_key.columns] == ["risk_input_snapshot_id"]
+    assert set(table.columns.keys()) == {
+        "risk_input_snapshot_id",
+        "captured_at",
+        "strategy_id",
+        "exchange",
+        "account_id",
+        "market_id",
+        "current_position",
+        "open_order_quantity",
+        "available_balance",
+        "gross_exposure",
+        "net_exposure",
+        "daily_realized_pnl",
+        "daily_unrealized_pnl",
+        "market_data_age_ms",
+        "reconciliation_healthy",
+        "kill_switch_clear",
+        "payload_hash",
+    }
+
+
+@pytest.mark.unit
+def test_risk_input_snapshot_indexes_match_database_spec() -> None:
+    table = RiskInputSnapshotRow.__table__
+    strategy_time_index = next(
+        index for index in table.indexes if index.name == "ix_risk_input_snapshots__strategy_time"
+    )
+    account_market_time_index = next(
+        index
+        for index in table.indexes
+        if index.name == "ix_risk_input_snapshots__account_market_time"
+    )
+
+    assert {
+        "ix_risk_input_snapshots__strategy_time",
+        "ix_risk_input_snapshots__account_market_time",
+        "ix_risk_input_snapshots__payload_hash",
+    } <= {index.name for index in table.indexes}
+    assert [
+        str(expression.compile(dialect=postgresql.dialect()))
+        for expression in strategy_time_index.expressions
+    ] == ["pmrp_risk.risk_input_snapshots.strategy_id", "captured_at DESC"]
+    assert [
+        str(expression.compile(dialect=postgresql.dialect()))
+        for expression in account_market_time_index.expressions
+    ] == [
+        "pmrp_risk.risk_input_snapshots.exchange",
+        "pmrp_risk.risk_input_snapshots.account_id",
+        "pmrp_risk.risk_input_snapshots.market_id",
+        "captured_at DESC",
+    ]
+
+
+@pytest.mark.unit
+def test_risk_input_snapshot_check_constraints_match_schema_invariants() -> None:
+    check_constraints = {
+        constraint.name: str(constraint.sqltext)
+        for constraint in RiskInputSnapshotRow.__table__.constraints
+        if isinstance(constraint, CheckConstraint)
+    }
+
+    assert check_constraints == {
+        "ck_risk_input_snapshots__open_order_quantity": "open_order_quantity >= 0",
+        "ck_risk_input_snapshots__available_balance": "available_balance >= 0",
+        "ck_risk_input_snapshots__gross_exposure": "gross_exposure >= 0",
+        "ck_risk_input_snapshots__market_data_age": "market_data_age_ms >= 0",
+    }
+
+
+@pytest.mark.unit
 def test_risk_breach_row_mapping_matches_database_spec() -> None:
     table = RiskBreachRow.__table__
 
@@ -153,6 +230,13 @@ def test_risk_breach_open_severity_index_matches_database_spec() -> None:
         (RiskLimitRow.__table__, "limit_value"),
         (RiskDecisionRow.__table__, "approved_quantity"),
         (RiskDecisionRow.__table__, "approved_limit_price"),
+        (RiskInputSnapshotRow.__table__, "current_position"),
+        (RiskInputSnapshotRow.__table__, "open_order_quantity"),
+        (RiskInputSnapshotRow.__table__, "available_balance"),
+        (RiskInputSnapshotRow.__table__, "gross_exposure"),
+        (RiskInputSnapshotRow.__table__, "net_exposure"),
+        (RiskInputSnapshotRow.__table__, "daily_realized_pnl"),
+        (RiskInputSnapshotRow.__table__, "daily_unrealized_pnl"),
         (RiskBreachRow.__table__, "observed_value"),
         (RiskBreachRow.__table__, "limit_value"),
     ],
@@ -172,6 +256,10 @@ def test_risk_numeric_columns_use_exact_database_scale(
 def test_risk_rows_are_registered_in_storage_metadata() -> None:
     assert StorageBase.metadata.tables["pmrp_risk.risk_limits"] is RiskLimitRow.__table__
     assert StorageBase.metadata.tables["pmrp_risk.risk_decisions"] is RiskDecisionRow.__table__
+    assert (
+        StorageBase.metadata.tables["pmrp_risk.risk_input_snapshots"]
+        is RiskInputSnapshotRow.__table__
+    )
     assert StorageBase.metadata.tables["pmrp_risk.risk_breaches"] is RiskBreachRow.__table__
 
 
