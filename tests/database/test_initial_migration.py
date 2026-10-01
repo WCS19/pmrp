@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from collections.abc import Mapping
 from decimal import Decimal
 from pathlib import Path
 
@@ -40,7 +41,7 @@ def test_migrations_upgrade_downgrade_and_reupgrade_empty_database() -> None:
     command.downgrade(alembic_config, "base")
     command.upgrade(alembic_config, "head")
     assert asyncio.run(_migration_state()) == (
-        "0021_health_audit_tables",
+        "0022_risk_input_snapshots",
         LOGICAL_SCHEMAS,
         True,
     )
@@ -379,6 +380,35 @@ def test_migrations_upgrade_downgrade_and_reupgrade_empty_database() -> None:
         "100.000000000000000000",
     )
     asyncio.run(_assert_risk_storage_constraints())
+    assert asyncio.run(_risk_input_snapshot_state()) == (
+        True,
+        ("risk_input_snapshot_id",),
+        (
+            "ck_risk_input_snapshots__available_balance",
+            "ck_risk_input_snapshots__gross_exposure",
+            "ck_risk_input_snapshots__market_data_age",
+            "ck_risk_input_snapshots__open_order_quantity",
+        ),
+        (
+            "ix_risk_input_snapshots__account_market_time",
+            "ix_risk_input_snapshots__payload_hash",
+            "ix_risk_input_snapshots__strategy_time",
+        ),
+        True,
+        True,
+        "12.500000000000000000",
+        "2.000000000000000000",
+        "1000.000000000000000000",
+        "50.000000000000000000",
+        "-5.000000000000000000",
+        "1.250000000000000000",
+        "-0.500000000000000000",
+        1500,
+        True,
+        True,
+        "sha256:risk-input-snapshot",
+    )
+    asyncio.run(_assert_risk_input_snapshot_constraints())
     assert asyncio.run(_kill_switch_reservations_state()) == (
         True,
         ("kill_switch_id",),
@@ -492,7 +522,7 @@ def test_migrations_upgrade_downgrade_and_reupgrade_empty_database() -> None:
 
     command.upgrade(alembic_config, "head")
     assert asyncio.run(_migration_state()) == (
-        "0021_health_audit_tables",
+        "0022_risk_input_snapshots",
         LOGICAL_SCHEMAS,
         True,
     )
@@ -4687,6 +4717,265 @@ async def _assert_risk_storage_constraints() -> None:
     )
 
 
+async def _risk_input_snapshot_state() -> tuple[
+    bool,
+    tuple[str, ...],
+    tuple[str, ...],
+    tuple[str, ...],
+    bool,
+    bool,
+    str,
+    str,
+    str,
+    str,
+    str,
+    str,
+    str,
+    int,
+    bool,
+    bool,
+    str,
+]:
+    engine = create_database_engine(
+        database_config_from_environment(os.environ, fallback_url=None),
+    )
+    try:
+        async with engine.begin() as connection:
+            risk_input_snapshot_table_exists = await _table_exists(
+                connection,
+                schema_name="pmrp_risk",
+                table_name="risk_input_snapshots",
+            )
+            risk_input_snapshot_primary_key_columns = await _primary_key_columns(
+                connection,
+                "pmrp_risk.risk_input_snapshots",
+            )
+            risk_input_snapshot_check_names = await _check_constraint_names(
+                connection,
+                "pmrp_risk.risk_input_snapshots",
+            )
+            risk_input_snapshot_index_names = await _index_names(
+                connection,
+                schema_name="pmrp_risk",
+                table_name="risk_input_snapshots",
+                expected_names=(
+                    "ix_risk_input_snapshots__account_market_time",
+                    "ix_risk_input_snapshots__payload_hash",
+                    "ix_risk_input_snapshots__strategy_time",
+                ),
+            )
+            strategy_time_index_descending = bool(
+                (
+                    await connection.execute(
+                        text(
+                            """
+                            SELECT indexdef LIKE '%captured_at DESC%'
+                            FROM pg_indexes
+                            WHERE schemaname = 'pmrp_risk'
+                              AND tablename = 'risk_input_snapshots'
+                              AND indexname = 'ix_risk_input_snapshots__strategy_time'
+                            """
+                        )
+                    )
+                ).scalar_one()
+            )
+            account_market_time_index_descending = bool(
+                (
+                    await connection.execute(
+                        text(
+                            """
+                            SELECT indexdef LIKE '%captured_at DESC%'
+                            FROM pg_indexes
+                            WHERE schemaname = 'pmrp_risk'
+                              AND tablename = 'risk_input_snapshots'
+                              AND indexname = 'ix_risk_input_snapshots__account_market_time'
+                            """
+                        )
+                    )
+                ).scalar_one()
+            )
+
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO pmrp_risk.risk_input_snapshots (
+                        risk_input_snapshot_id,
+                        captured_at,
+                        strategy_id,
+                        exchange,
+                        account_id,
+                        market_id,
+                        current_position,
+                        open_order_quantity,
+                        available_balance,
+                        gross_exposure,
+                        net_exposure,
+                        daily_realized_pnl,
+                        daily_unrealized_pnl,
+                        market_data_age_ms,
+                        reconciliation_healthy,
+                        kill_switch_clear,
+                        payload_hash
+                    )
+                    VALUES (
+                        'risk_input_01j00000000000000000000001',
+                        '2026-07-29T12:17:59Z',
+                        'strat_01j00000000000000000000001',
+                        'kalshi',
+                        'acct_01j00000000000000000000001',
+                        'mkt_01j00000000000000000000001',
+                        12.500000000000000000,
+                        2.000000000000000000,
+                        1000.000000000000000000,
+                        50.000000000000000000,
+                        -5.000000000000000000,
+                        1.250000000000000000,
+                        -0.500000000000000000,
+                        1500,
+                        true,
+                        true,
+                        'sha256:risk-input-snapshot'
+                    )
+                    """
+                )
+            )
+            inserted_snapshot = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT
+                            current_position,
+                            open_order_quantity,
+                            available_balance,
+                            gross_exposure,
+                            net_exposure,
+                            daily_realized_pnl,
+                            daily_unrealized_pnl,
+                            market_data_age_ms,
+                            reconciliation_healthy,
+                            kill_switch_clear,
+                            payload_hash
+                        FROM pmrp_risk.risk_input_snapshots
+                        WHERE risk_input_snapshot_id = 'risk_input_01j00000000000000000000001'
+                        """
+                    )
+                )
+            ).one()
+
+            return (
+                risk_input_snapshot_table_exists,
+                risk_input_snapshot_primary_key_columns,
+                risk_input_snapshot_check_names,
+                risk_input_snapshot_index_names,
+                strategy_time_index_descending,
+                account_market_time_index_descending,
+                _numeric_18_text(inserted_snapshot[0]),
+                _numeric_18_text(inserted_snapshot[1]),
+                _numeric_18_text(inserted_snapshot[2]),
+                _numeric_18_text(inserted_snapshot[3]),
+                _numeric_18_text(inserted_snapshot[4]),
+                _numeric_18_text(inserted_snapshot[5]),
+                _numeric_18_text(inserted_snapshot[6]),
+                int(inserted_snapshot[7]),
+                bool(inserted_snapshot[8]),
+                bool(inserted_snapshot[9]),
+                str(inserted_snapshot[10]),
+            )
+    finally:
+        await engine.dispose()
+
+
+async def _assert_risk_input_snapshot_constraints() -> None:
+    statement = """
+        INSERT INTO pmrp_risk.risk_input_snapshots (
+            risk_input_snapshot_id,
+            captured_at,
+            strategy_id,
+            exchange,
+            account_id,
+            market_id,
+            current_position,
+            open_order_quantity,
+            available_balance,
+            gross_exposure,
+            net_exposure,
+            daily_realized_pnl,
+            daily_unrealized_pnl,
+            market_data_age_ms,
+            reconciliation_healthy,
+            kill_switch_clear,
+            payload_hash
+        )
+        VALUES (
+            :snapshot_id,
+            '2026-07-29T12:17:59Z',
+            'strat_01j00000000000000000000001',
+            'kalshi',
+            'acct_01j00000000000000000000001',
+            'mkt_01j00000000000000000000001',
+            12.500000000000000000,
+            :open_order_quantity,
+            :available_balance,
+            :gross_exposure,
+            -5.000000000000000000,
+            1.250000000000000000,
+            -0.500000000000000000,
+            :market_data_age_ms,
+            true,
+            true,
+            :payload_hash
+        )
+        """
+    invalid_rows = (
+        (
+            "risk_input_bad_open_order",
+            Decimal("-1.000000000000000000"),
+            Decimal("1000.000000000000000000"),
+            Decimal("50.000000000000000000"),
+            1500,
+        ),
+        (
+            "risk_input_bad_balance",
+            Decimal("2.000000000000000000"),
+            Decimal("-1.000000000000000000"),
+            Decimal("50.000000000000000000"),
+            1500,
+        ),
+        (
+            "risk_input_bad_gross",
+            Decimal("2.000000000000000000"),
+            Decimal("1000.000000000000000000"),
+            Decimal("-1.000000000000000000"),
+            1500,
+        ),
+        (
+            "risk_input_bad_market_age",
+            Decimal("2.000000000000000000"),
+            Decimal("1000.000000000000000000"),
+            Decimal("50.000000000000000000"),
+            -1,
+        ),
+    )
+    for (
+        snapshot_id,
+        open_order_quantity,
+        available_balance,
+        gross_exposure,
+        market_data_age_ms,
+    ) in invalid_rows:
+        await _assert_integrity_error(
+            statement,
+            {
+                "snapshot_id": snapshot_id,
+                "open_order_quantity": open_order_quantity,
+                "available_balance": available_balance,
+                "gross_exposure": gross_exposure,
+                "market_data_age_ms": market_data_age_ms,
+                "payload_hash": f"sha256:{snapshot_id}",
+            },
+        )
+
+
 async def _kill_switch_reservations_state() -> tuple[
     bool,
     tuple[str, ...],
@@ -6191,7 +6480,10 @@ async def _index_names(
     return tuple(str(row[0]) for row in result)
 
 
-async def _assert_integrity_error(statement: str) -> None:
+async def _assert_integrity_error(
+    statement: str,
+    parameters: Mapping[str, object] | None = None,
+) -> None:
     engine = create_database_engine(
         database_config_from_environment(os.environ, fallback_url=None),
     )
@@ -6200,7 +6492,7 @@ async def _assert_integrity_error(statement: str) -> None:
             transaction = await connection.begin()
             try:
                 with pytest.raises(IntegrityError):
-                    await connection.execute(text(statement))
+                    await connection.execute(text(statement), parameters or {})
             finally:
                 await transaction.rollback()
     finally:

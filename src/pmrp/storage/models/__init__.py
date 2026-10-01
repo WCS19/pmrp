@@ -39,6 +39,7 @@ from pmrp.storage.models.risk import (
     KillSwitchRow,
     RiskBreachRow,
     RiskDecisionRow,
+    RiskInputSnapshotRow,
     RiskLimitRow,
 )
 from pmrp.storage.models.schema_registry import SchemaRegistryRow
@@ -81,6 +82,7 @@ __all__ = [
     "ReplaySessionRow",
     "RiskBreachRow",
     "RiskDecisionRow",
+    "RiskInputSnapshotRow",
     "RiskLimitRow",
     "SchemaRegistryRow",
     "SettlementRow",
