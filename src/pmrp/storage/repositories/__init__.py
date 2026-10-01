@@ -1,10 +1,15 @@
 """Repositories for storage-backed PMRP components."""
 
+from pmrp.storage.repositories.canonical_events import (
+    CanonicalEventRepository,
+    canonical_event_to_rows,
+)
 from pmrp.storage.repositories.capital_reservations import (
     CapitalReservationRepository,
     capital_reservation_from_row,
     capital_reservation_to_row,
 )
+from pmrp.storage.repositories.event_contracts import CanonicalEventContract
 from pmrp.storage.repositories.kill_switches import (
     KillSwitchRepository,
     kill_switch_from_row,
@@ -12,7 +17,6 @@ from pmrp.storage.repositories.kill_switches import (
 )
 from pmrp.storage.repositories.outbox import (
     CANONICAL_EVENTS_TOPIC,
-    CanonicalEventContract,
     OutboxMessageRepository,
     outbox_message_to_row,
 )
@@ -37,6 +41,7 @@ from pmrp.storage.repositories.risk_unit_of_work import SqlAlchemyRiskUnitOfWork
 __all__ = [
     "CANONICAL_EVENTS_TOPIC",
     "CanonicalEventContract",
+    "CanonicalEventRepository",
     "CapitalReservationRepository",
     "KillSwitchRepository",
     "OutboxMessageRepository",
@@ -46,6 +51,7 @@ __all__ = [
     "RiskLimitRepository",
     "SqlAlchemyRiskUnitOfWork",
     "VersionedRepository",
+    "canonical_event_to_rows",
     "capital_reservation_from_row",
     "capital_reservation_to_row",
     "kill_switch_from_row",
