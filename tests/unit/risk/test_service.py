@@ -502,6 +502,27 @@ async def test_risk_evaluation_service_rolls_back_when_evaluation_fails() -> Non
     assert unit_of_work.exit_error_type is RuntimeError
 
 
+async def test_risk_evaluation_service_rolls_back_when_decision_snapshot_mismatches() -> None:
+    unit_of_work = _FakeUnitOfWork()
+    decision = _decision().model_copy(update={"input_snapshot_id": "risk_input_other"})
+    service = RiskEvaluationService(
+        engine=_FakeEvaluator(decision=decision),
+        unit_of_work_factory=lambda: unit_of_work,
+    )
+
+    with pytest.raises(ValueError, match="input_snapshot_id"):
+        await service.evaluate_and_persist(
+            _intent(),
+            RiskContext(evaluated_at=NOW),
+            input_snapshot_id=INPUT_SNAPSHOT_ID,
+        )
+
+    assert unit_of_work.store.added == []
+    assert unit_of_work.committed == 0
+    assert unit_of_work.rolled_back == 1
+    assert unit_of_work.exit_error_type is ValueError
+
+
 async def test_risk_evaluation_service_rolls_back_when_persist_fails() -> None:
     unit_of_work = _FakeUnitOfWork(store_error=RuntimeError("persist failed"))
     service = RiskEvaluationService(
