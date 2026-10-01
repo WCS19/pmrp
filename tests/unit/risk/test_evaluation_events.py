@@ -24,6 +24,7 @@ from pmrp.risk import (
     RiskEvaluationEventWorkflow,
     RiskEvaluationResult,
     RiskEvaluationService,
+    RiskEvaluationWorkflowEvent,
     RiskEventFactory,
 )
 from pmrp.schemas.enums import ExchangeName, OrderType, RiskDecisionStatus, Side, TimeInForce
@@ -144,6 +145,64 @@ async def test_risk_evaluation_event_workflow_builds_rejected_and_breach_events(
         RISK_REJECTED_EVENT_TYPE,
         RISK_LIMIT_BREACHED_EVENT_TYPE,
     ]
+
+
+async def test_risk_evaluation_event_workflow_persists_events_before_commit() -> None:
+    decision = _decision()
+    unit_of_work = _FakeUnitOfWork()
+    workflow = RiskEvaluationEventWorkflow(
+        service=RiskEvaluationService(
+            engine=_FakeEvaluator(decision=decision),
+            unit_of_work_factory=lambda: unit_of_work,
+        ),
+        event_factory=_risk_event_factory(),
+    )
+
+    result = await workflow.evaluate_persist_and_build_events(
+        _intent(),
+        RiskContext(evaluated_at=NOW),
+        _input_snapshot(),
+        approved_order_request=RiskApprovedOrderRequest(
+            exchange=ExchangeName.KALSHI,
+            account_id=ACCOUNT_ID,
+        ),
+    )
+
+    assert unit_of_work.committed == 1
+    assert unit_of_work.rolled_back == 0
+    assert unit_of_work.canonical_event_store.added == [result.all_events]
+    assert unit_of_work.outbox_event_store.added == [result.all_events]
+    assert unit_of_work.canonical_event_store.committed_when_added == [0]
+    assert unit_of_work.outbox_event_store.committed_when_added == [0]
+
+
+async def test_risk_evaluation_event_workflow_rolls_back_when_outbox_persist_fails() -> None:
+    decision = _decision()
+    unit_of_work = _FakeUnitOfWork(outbox_error=RuntimeError("outbox persist failed"))
+    workflow = RiskEvaluationEventWorkflow(
+        service=RiskEvaluationService(
+            engine=_FakeEvaluator(decision=decision),
+            unit_of_work_factory=lambda: unit_of_work,
+        ),
+        event_factory=_risk_event_factory(),
+    )
+
+    with pytest.raises(RuntimeError, match="outbox persist failed"):
+        await workflow.evaluate_persist_and_build_events(
+            _intent(),
+            RiskContext(evaluated_at=NOW),
+            _input_snapshot(),
+            approved_order_request=RiskApprovedOrderRequest(
+                exchange=ExchangeName.KALSHI,
+                account_id=ACCOUNT_ID,
+            ),
+        )
+
+    assert unit_of_work.committed == 0
+    assert unit_of_work.rolled_back == 1
+    assert unit_of_work.exit_error_type is RuntimeError
+    assert unit_of_work.canonical_event_store.added != []
+    assert unit_of_work.outbox_event_store.added == []
 
 
 async def test_risk_evaluation_event_workflow_rejects_snapshot_lineage_before_service() -> None:
@@ -354,12 +413,35 @@ class _FakeReservationStore:
         del reservation
 
 
+class _FakeEventStore:
+    def __init__(
+        self,
+        unit_of_work: _FakeUnitOfWork,
+        *,
+        error: Exception | None = None,
+    ) -> None:
+        self._unit_of_work = unit_of_work
+        self._error = error
+        self.added: list[tuple[RiskEvaluationWorkflowEvent, ...]] = []
+        self.committed_when_added: list[int] = []
+
+    async def add_events(self, events: tuple[RiskEvaluationWorkflowEvent, ...]) -> None:
+        if self._error is not None:
+            raise self._error
+        self.added.append(events)
+        self.committed_when_added.append(self._unit_of_work.committed)
+
+
 class _FakeUnitOfWork:
-    def __init__(self) -> None:
+    def __init__(self, *, outbox_error: Exception | None = None) -> None:
         self.decision_store = _FakeDecisionStore()
         self.breach_store = _FakeBreachStore()
         self.reservation_store = _FakeReservationStore()
+        self.canonical_event_store = _FakeEventStore(self)
+        self.outbox_event_store = _FakeEventStore(self, error=outbox_error)
         self.committed = 0
+        self.rolled_back = 0
+        self.exit_error_type: type[BaseException] | None = None
 
     async def __aenter__(self) -> _FakeUnitOfWork:
         return self
@@ -370,7 +452,10 @@ class _FakeUnitOfWork:
         exc: BaseException | None,
         traceback: TracebackType | None,
     ) -> Literal[False]:
-        del exc_type, exc, traceback
+        del exc, traceback
+        self.exit_error_type = exc_type
+        if self.committed == 0:
+            self.rolled_back += 1
         return False
 
     @property
@@ -384,6 +469,14 @@ class _FakeUnitOfWork:
     @property
     def capital_reservations(self) -> _FakeReservationStore:
         return self.reservation_store
+
+    @property
+    def canonical_events(self) -> _FakeEventStore:
+        return self.canonical_event_store
+
+    @property
+    def outbox_messages(self) -> _FakeEventStore:
+        return self.outbox_event_store
 
     async def commit(self) -> None:
         self.committed += 1
