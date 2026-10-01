@@ -203,6 +203,7 @@ class RiskEvaluationService:
                 context,
                 input_snapshot_id=input_snapshot_id,
             )
+            _validate_decision_input_snapshot(decision, input_snapshot_id)
             await unit_of_work.risk_decisions.add(decision)
             approved_order: ApprovedOrder | None = None
             capital_reservation: CapitalReservation | None = None
@@ -256,6 +257,11 @@ def _validate_approved_order_matches_decision(
         raise ValueError("approved order intent_id must match decision")
     if approved_order.correlation_id != decision.correlation_id:
         raise ValueError("approved order correlation_id must match decision")
+
+
+def _validate_decision_input_snapshot(decision: RiskDecision, input_snapshot_id: str) -> None:
+    if decision.input_snapshot_id != input_snapshot_id:
+        raise ValueError("risk decision input_snapshot_id must match requested snapshot")
 
 
 def _validate_reservation_matches_decision(
