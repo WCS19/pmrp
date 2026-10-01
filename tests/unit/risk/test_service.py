@@ -542,6 +542,69 @@ async def test_risk_evaluation_service_rolls_back_when_commit_fails() -> None:
     assert unit_of_work.exit_error_type is RuntimeError
 
 
+async def test_risk_evaluation_service_runs_before_commit_hook_after_result_records() -> None:
+    unit_of_work = _FakeUnitOfWork()
+    decision = _decision()
+    service = RiskEvaluationService(
+        engine=_FakeEvaluator(decision=decision),
+        unit_of_work_factory=lambda: unit_of_work,
+    )
+    calls: list[RiskEvaluationResult] = []
+
+    async def before_commit(
+        active_unit_of_work: object,
+        result: RiskEvaluationResult,
+    ) -> None:
+        assert active_unit_of_work is unit_of_work
+        assert unit_of_work.store.added == [decision]
+        assert unit_of_work.committed == 0
+        calls.append(result)
+
+    result = await service.evaluate_and_persist_result(
+        _intent(),
+        RiskContext(evaluated_at=NOW),
+        input_snapshot_id=INPUT_SNAPSHOT_ID,
+        approved_order_request=_approved_order_request(),
+        before_commit=before_commit,
+    )
+
+    assert calls == [result]
+    assert calls[0].decision == decision
+    assert calls[0].approved_order is result.approved_order
+    assert unit_of_work.committed == 1
+    assert unit_of_work.rolled_back == 0
+
+
+async def test_risk_evaluation_service_rolls_back_when_before_commit_hook_fails() -> None:
+    unit_of_work = _FakeUnitOfWork()
+    decision = _decision()
+    service = RiskEvaluationService(
+        engine=_FakeEvaluator(decision=decision),
+        unit_of_work_factory=lambda: unit_of_work,
+    )
+
+    async def before_commit(
+        active_unit_of_work: object,
+        result: RiskEvaluationResult,
+    ) -> None:
+        assert active_unit_of_work is unit_of_work
+        assert result.decision == decision
+        raise RuntimeError("event persistence failed")
+
+    with pytest.raises(RuntimeError, match="event persistence failed"):
+        await service.evaluate_and_persist_result(
+            _intent(),
+            RiskContext(evaluated_at=NOW),
+            input_snapshot_id=INPUT_SNAPSHOT_ID,
+            before_commit=before_commit,
+        )
+
+    assert unit_of_work.store.added == [decision]
+    assert unit_of_work.committed == 0
+    assert unit_of_work.rolled_back == 1
+    assert unit_of_work.exit_error_type is RuntimeError
+
+
 def _intent() -> OrderIntent:
     return OrderIntent.model_validate(
         {

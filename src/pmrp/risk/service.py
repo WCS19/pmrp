@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from types import TracebackType
 from typing import Literal, Protocol, Self
@@ -151,6 +151,12 @@ class RiskEvaluationResult:
             _validate_reservation_matches_decision(self.capital_reservation, self.decision)
 
 
+type RiskEvaluationBeforeCommitHook = Callable[
+    [RiskEvaluationUnitOfWork, RiskEvaluationResult],
+    Awaitable[None],
+]
+
+
 @dataclass(frozen=True, slots=True)
 class RiskEvaluationService:
     """Evaluate risk and persist the immutable decision in one transaction."""
@@ -187,6 +193,7 @@ class RiskEvaluationService:
         input_snapshot_id: str,
         approved_order_request: RiskApprovedOrderRequest | None = None,
         reservation_request: RiskCapitalReservationRequest | None = None,
+        before_commit: RiskEvaluationBeforeCommitHook | None = None,
     ) -> RiskEvaluationResult:
         """Evaluate risk, persist risk records, and return optional approval artifacts."""
 
@@ -231,6 +238,8 @@ class RiskEvaluationService:
                 capital_reservation=capital_reservation,
                 breaches=tuple(breaches),
             )
+            if before_commit is not None:
+                await before_commit(unit_of_work, result)
             await unit_of_work.commit()
             return result
 
