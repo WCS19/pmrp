@@ -35,6 +35,7 @@ from pmrp.storage.models import (
     OutboxMessageRow,
     RiskBreachRow,
     RiskDecisionRow,
+    RiskInputSnapshotRow,
     RiskLimitRow,
 )
 from pmrp.storage.repositories import (
@@ -44,6 +45,7 @@ from pmrp.storage.repositories import (
     OutboxMessageRepository,
     RiskBreachRepository,
     RiskDecisionRepository,
+    RiskInputSnapshotRepository,
     RiskLimitRepository,
 )
 
@@ -65,6 +67,7 @@ ACCOUNT_ID = AccountId("acct_01k00000000000000000000000")
         "outbox_messages",
         "risk_breaches",
         "risk_decisions",
+        "risk_input_snapshots",
         "risk_limits",
     ],
 )
@@ -88,6 +91,7 @@ async def test_risk_unit_of_work_exposes_repositories_during_active_transaction(
         assert isinstance(unit_of_work.outbox_messages, OutboxMessageRepository)
         assert isinstance(unit_of_work.risk_breaches, RiskBreachRepository)
         assert isinstance(unit_of_work.risk_decisions, RiskDecisionRepository)
+        assert isinstance(unit_of_work.risk_input_snapshots, RiskInputSnapshotRepository)
         assert isinstance(unit_of_work.risk_limits, RiskLimitRepository)
 
 
@@ -105,6 +109,28 @@ async def test_risk_unit_of_work_persists_decision_and_commits() -> None:
     assert len(session.added) == 1
     assert isinstance(session.added[0], RiskDecisionRow)
     assert session.flushed == 1
+    assert session.committed == 1
+    assert session.rolled_back == 0
+    assert session.closed == 1
+
+
+@pytest.mark.asyncio
+async def test_risk_unit_of_work_persists_input_snapshot_and_decision_in_one_transaction() -> None:
+    session = _FakeSession()
+    snapshot = _input_snapshot()
+    decision = _decision()
+
+    async with SqlAlchemyRiskUnitOfWork(
+        session_factory=_SessionFactory(session),
+    ) as unit_of_work:
+        await unit_of_work.risk_input_snapshots.add(snapshot)
+        await unit_of_work.risk_decisions.add(decision)
+        await unit_of_work.commit()
+
+    assert [type(row) for row in session.added] == [RiskInputSnapshotRow, RiskDecisionRow]
+    assert session.added[0].risk_input_snapshot_id == snapshot.risk_input_snapshot_id
+    assert session.added[1].input_snapshot_id == snapshot.risk_input_snapshot_id
+    assert session.flushed == 2
     assert session.committed == 1
     assert session.rolled_back == 0
     assert session.closed == 1
@@ -289,6 +315,7 @@ def _assert_repositories_reject_after_finished(
         "outbox_messages",
         "risk_breaches",
         "risk_decisions",
+        "risk_input_snapshots",
         "risk_limits",
     ):
         with pytest.raises(UnitOfWorkStateError, match="already finished"):
@@ -313,6 +340,7 @@ class _FakeSession:
             | OutboxMessageRow
             | RiskBreachRow
             | RiskDecisionRow
+            | RiskInputSnapshotRow
             | RiskLimitRow
         ] = []
         self.flushed = 0
@@ -329,6 +357,7 @@ class _FakeSession:
         | OutboxMessageRow
         | RiskBreachRow
         | RiskDecisionRow
+        | RiskInputSnapshotRow
         | RiskLimitRow,
     ) -> None:
         self.added.append(row)
