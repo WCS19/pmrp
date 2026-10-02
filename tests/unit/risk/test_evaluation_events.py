@@ -82,7 +82,12 @@ async def test_risk_evaluation_event_workflow_builds_approved_events() -> None:
     assert result.result.decision == decision
     assert result.result.approved_order is not None
     assert engine.calls == [(intent, context, snapshot.risk_input_snapshot_id)]
+    assert unit_of_work.snapshot_store.added == [snapshot]
     assert unit_of_work.decision_store.added == [decision]
+    assert unit_of_work.operations == [
+        "snapshot:risk_input_01k0000000000000000",
+        "decision:risk_01k00000000000000000000000",
+    ]
     assert unit_of_work.committed == 1
     assert result.check_requested_event.envelope.event_type == RISK_CHECK_REQUESTED_EVENT_TYPE
     assert result.check_requested_event.input_snapshot == snapshot
@@ -129,6 +134,7 @@ async def test_risk_evaluation_event_workflow_builds_rejected_and_breach_events(
     )
 
     assert result.result.decision == decision
+    assert unit_of_work.snapshot_store.added == [_input_snapshot()]
     assert result.result.breaches == tuple(unit_of_work.breach_store.added)
     assert len(result.evaluation_events) == 2
     rejected_event = result.evaluation_events[0]
@@ -170,6 +176,7 @@ async def test_risk_evaluation_event_workflow_persists_events_before_commit() ->
 
     assert unit_of_work.committed == 1
     assert unit_of_work.rolled_back == 0
+    assert unit_of_work.snapshot_store.added == [_input_snapshot()]
     assert unit_of_work.canonical_event_store.added == [result.all_events]
     assert unit_of_work.outbox_event_store.added == [result.all_events]
     assert unit_of_work.canonical_event_store.committed_when_added == [0]
@@ -201,6 +208,7 @@ async def test_risk_evaluation_event_workflow_rolls_back_when_outbox_persist_fai
     assert unit_of_work.committed == 0
     assert unit_of_work.rolled_back == 1
     assert unit_of_work.exit_error_type is RuntimeError
+    assert unit_of_work.snapshot_store.added == [_input_snapshot()]
     assert unit_of_work.canonical_event_store.added != []
     assert unit_of_work.outbox_event_store.added == []
 
@@ -393,11 +401,23 @@ class _FakeEvaluator:
 
 
 class _FakeDecisionStore:
-    def __init__(self) -> None:
+    def __init__(self, *, operations: list[str]) -> None:
+        self._operations = operations
         self.added: list[RiskDecision] = []
 
     async def add(self, decision: RiskDecision) -> None:
         self.added.append(decision)
+        self._operations.append(f"decision:{decision.risk_decision_id}")
+
+
+class _FakeSnapshotStore:
+    def __init__(self, *, operations: list[str]) -> None:
+        self._operations = operations
+        self.added: list[RiskInputSnapshot] = []
+
+    async def add(self, snapshot: RiskInputSnapshot) -> None:
+        self.added.append(snapshot)
+        self._operations.append(f"snapshot:{snapshot.risk_input_snapshot_id}")
 
 
 class _FakeBreachStore:
@@ -434,7 +454,9 @@ class _FakeEventStore:
 
 class _FakeUnitOfWork:
     def __init__(self, *, outbox_error: Exception | None = None) -> None:
-        self.decision_store = _FakeDecisionStore()
+        self.operations: list[str] = []
+        self.decision_store = _FakeDecisionStore(operations=self.operations)
+        self.snapshot_store = _FakeSnapshotStore(operations=self.operations)
         self.breach_store = _FakeBreachStore()
         self.reservation_store = _FakeReservationStore()
         self.canonical_event_store = _FakeEventStore(self)
@@ -461,6 +483,10 @@ class _FakeUnitOfWork:
     @property
     def risk_decisions(self) -> _FakeDecisionStore:
         return self.decision_store
+
+    @property
+    def risk_input_snapshots(self) -> _FakeSnapshotStore:
+        return self.snapshot_store
 
     @property
     def risk_breaches(self) -> _FakeBreachStore:

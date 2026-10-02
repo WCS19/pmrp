@@ -15,7 +15,7 @@ from pmrp.schemas.enums import ExchangeName, RiskDecisionStatus
 from pmrp.schemas.identifiers import AccountId
 from pmrp.schemas.numeric import validate_currency
 from pmrp.schemas.orders import ApprovedOrder, OrderIntent
-from pmrp.schemas.risk import RiskBreach, RiskDecision
+from pmrp.schemas.risk import RiskBreach, RiskDecision, RiskInputSnapshot
 
 
 class RiskDecisionEvaluator(Protocol):
@@ -37,6 +37,14 @@ class RiskDecisionStore(Protocol):
 
     async def add(self, decision: RiskDecision) -> None:
         """Persist a canonical risk decision without committing independently."""
+        ...
+
+
+class RiskInputSnapshotStore(Protocol):
+    """Persistence boundary for canonical risk input snapshots."""
+
+    async def add(self, snapshot: RiskInputSnapshot) -> None:
+        """Persist a canonical risk input snapshot without committing independently."""
         ...
 
 
@@ -75,6 +83,11 @@ class RiskEvaluationUnitOfWork(Protocol):
     @property
     def risk_decisions(self) -> RiskDecisionStore:
         """Return the active risk decision store."""
+        ...
+
+    @property
+    def risk_input_snapshots(self) -> RiskInputSnapshotStore:
+        """Return the active risk input snapshot store."""
         ...
 
     @property
@@ -173,6 +186,7 @@ class RiskEvaluationService:
         context: RiskContext,
         *,
         input_snapshot_id: str,
+        input_snapshot: RiskInputSnapshot | None = None,
         reservation_request: RiskCapitalReservationRequest | None = None,
     ) -> RiskDecision:
         """Evaluate risk rules, persist the decision, commit, and return the decision."""
@@ -181,6 +195,7 @@ class RiskEvaluationService:
             intent,
             context,
             input_snapshot_id=input_snapshot_id,
+            input_snapshot=input_snapshot,
             reservation_request=reservation_request,
         )
         return result.decision
@@ -191,12 +206,14 @@ class RiskEvaluationService:
         context: RiskContext,
         *,
         input_snapshot_id: str,
+        input_snapshot: RiskInputSnapshot | None = None,
         approved_order_request: RiskApprovedOrderRequest | None = None,
         reservation_request: RiskCapitalReservationRequest | None = None,
         before_commit: RiskEvaluationBeforeCommitHook | None = None,
     ) -> RiskEvaluationResult:
         """Evaluate risk, persist risk records, and return optional approval artifacts."""
 
+        _validate_input_snapshot_matches_request(input_snapshot, input_snapshot_id)
         async with self.unit_of_work_factory() as unit_of_work:
             decision = await self.engine.evaluate(
                 intent,
@@ -204,6 +221,8 @@ class RiskEvaluationService:
                 input_snapshot_id=input_snapshot_id,
             )
             _validate_decision_input_snapshot(decision, input_snapshot_id)
+            if input_snapshot is not None:
+                await unit_of_work.risk_input_snapshots.add(input_snapshot)
             await unit_of_work.risk_decisions.add(decision)
             approved_order: ApprovedOrder | None = None
             capital_reservation: CapitalReservation | None = None
@@ -262,6 +281,14 @@ def _validate_approved_order_matches_decision(
 def _validate_decision_input_snapshot(decision: RiskDecision, input_snapshot_id: str) -> None:
     if decision.input_snapshot_id != input_snapshot_id:
         raise ValueError("risk decision input_snapshot_id must match requested snapshot")
+
+
+def _validate_input_snapshot_matches_request(
+    input_snapshot: RiskInputSnapshot | None,
+    input_snapshot_id: str,
+) -> None:
+    if input_snapshot is not None and input_snapshot.risk_input_snapshot_id != input_snapshot_id:
+        raise ValueError("risk input snapshot ID must match requested snapshot")
 
 
 def _validate_reservation_matches_decision(

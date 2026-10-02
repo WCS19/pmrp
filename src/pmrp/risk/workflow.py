@@ -54,6 +54,7 @@ class RiskEvaluationRunner(Protocol):
         context: RiskContext,
         *,
         input_snapshot_id: str,
+        input_snapshot: RiskInputSnapshot | None = None,
         approved_order_request: RiskApprovedOrderRequest | None = None,
         reservation_request: RiskCapitalReservationRequest | None = None,
         before_commit: RiskEvaluationBeforeCommitHook | None = None,
@@ -117,6 +118,7 @@ class RiskEvaluationEventWorkflow:
             intent,
             context,
             input_snapshot_id=input_snapshot.risk_input_snapshot_id,
+            input_snapshot=input_snapshot,
             approved_order_request=approved_order_request,
             reservation_request=reservation_request,
         )
@@ -162,6 +164,7 @@ class RiskEvaluationEventWorkflow:
             intent,
             context,
             input_snapshot_id=input_snapshot.risk_input_snapshot_id,
+            input_snapshot=input_snapshot,
             approved_order_request=approved_order_request,
             reservation_request=reservation_request,
             before_commit=persist_events_before_commit,
