@@ -45,6 +45,12 @@ def test_first_buy_fill_opens_long_position() -> None:
     assert result.realized_trading_pnl == _money("0")
     assert result.fee == _money("0.02")
     assert result.rebate == _money("0")
+    assert result.trade_notional == _money("4.00")
+    assert result.closed_quantity == Decimal("0")
+    assert result.opened_quantity == Decimal("10")
+    assert result.closed_cost_basis == _money("0")
+    assert result.closed_trade_value == _money("0")
+    assert result.opened_notional == _money("4.00")
 
 
 def test_derived_position_id_is_stable_for_same_account_contract_identity() -> None:
@@ -74,6 +80,12 @@ def test_additional_buy_uses_weighted_average_cost() -> None:
     assert second.position.average_entry_price == Decimal("0.50")
     assert second.position.realized_pnl == _money("0")
     assert second.position.aggregate_version == 2
+    assert second.trade_notional == _money("3.50")
+    assert second.closed_quantity == Decimal("0")
+    assert second.opened_quantity == Decimal("5")
+    assert second.closed_cost_basis == _money("0")
+    assert second.closed_trade_value == _money("0")
+    assert second.opened_notional == _money("3.50")
 
 
 def test_partial_sell_reduces_long_position_and_realizes_pnl() -> None:
@@ -95,6 +107,12 @@ def test_partial_sell_reduces_long_position_and_realizes_pnl() -> None:
     assert second.position.average_entry_price == Decimal("0.40")
     assert second.realized_trading_pnl == _money("0.80")
     assert second.position.realized_pnl == _money("0.80")
+    assert second.trade_notional == _money("2.40")
+    assert second.closed_quantity == Decimal("4")
+    assert second.opened_quantity == Decimal("0")
+    assert second.closed_cost_basis == _money("1.60")
+    assert second.closed_trade_value == _money("2.40")
+    assert second.opened_notional == _money("0")
 
 
 def test_full_close_clears_average_and_open_timestamp() -> None:
@@ -117,6 +135,12 @@ def test_full_close_clears_average_and_open_timestamp() -> None:
     assert second.position.opened_at is None
     assert second.realized_trading_pnl == _money("0.50")
     assert second.position.realized_pnl == _money("0.50")
+    assert second.trade_notional == _money("4.50")
+    assert second.closed_quantity == Decimal("10")
+    assert second.opened_quantity == Decimal("0")
+    assert second.closed_cost_basis == _money("4.00")
+    assert second.closed_trade_value == _money("4.50")
+    assert second.opened_notional == _money("0")
 
 
 def test_reversal_closes_existing_position_and_opens_new_direction() -> None:
@@ -142,6 +166,12 @@ def test_reversal_closes_existing_position_and_opens_new_direction() -> None:
     assert second.position.opened_at == reversal_time
     assert second.realized_trading_pnl == _money("1.00")
     assert second.position.realized_pnl == _money("1.00")
+    assert second.trade_notional == _money("7.50")
+    assert second.closed_quantity == Decimal("10")
+    assert second.opened_quantity == Decimal("5")
+    assert second.closed_cost_basis == _money("4.00")
+    assert second.closed_trade_value == _money("5.00")
+    assert second.opened_notional == _money("2.50")
 
 
 def test_partial_buy_reduces_short_position_and_realizes_pnl() -> None:
@@ -167,6 +197,12 @@ def test_partial_buy_reduces_short_position_and_realizes_pnl() -> None:
     assert second.position.average_entry_price == Decimal("0.70")
     assert second.realized_trading_pnl == _money("1.20")
     assert second.position.realized_pnl == _money("1.20")
+    assert second.trade_notional == _money("1.60")
+    assert second.closed_quantity == Decimal("4")
+    assert second.opened_quantity == Decimal("0")
+    assert second.closed_cost_basis == _money("2.80")
+    assert second.closed_trade_value == _money("1.60")
+    assert second.opened_notional == _money("0")
 
 
 def test_fees_and_rebates_accumulate_without_changing_realized_trading_pnl() -> None:

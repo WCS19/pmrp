@@ -31,8 +31,26 @@ class PositionProjectionResult:
     realized_trading_pnl: Money
     fee: Money
     rebate: Money
+    trade_notional: Money
+    closed_quantity: Decimal
+    opened_quantity: Decimal
+    closed_cost_basis: Money
+    closed_trade_value: Money
+    opened_notional: Money
     accounting_method: str = WEIGHTED_AVERAGE_COST_METHOD
     unrealized_pnl_policy: str = UNREALIZED_PNL_POLICY
+
+
+@dataclass(frozen=True, slots=True)
+class _WeightedAverageProjection:
+    quantity: Decimal
+    average_entry_price: Decimal | None
+    realized_trading_pnl: Decimal
+    closed_quantity: Decimal
+    opened_quantity: Decimal
+    closed_cost_basis: Decimal
+    closed_trade_value: Decimal
+    opened_notional: Decimal
 
 
 def apply_fill_to_position(
@@ -88,7 +106,7 @@ def apply_fill_to_position(
             fill=fill,
         )
 
-    projected_quantity, projected_average, realized_increment = _apply_weighted_average_fill(
+    projection = _apply_weighted_average_fill(
         existing_quantity=existing_quantity,
         existing_average=existing_average,
         fill=fill,
@@ -96,7 +114,7 @@ def apply_fill_to_position(
 
     opened_at = _project_opened_at(
         existing_quantity=existing_quantity,
-        projected_quantity=projected_quantity,
+        projected_quantity=projection.quantity,
         existing_opened_at=existing_opened_at,
         fill=fill,
     )
@@ -109,10 +127,10 @@ def apply_fill_to_position(
         market_id=fill.market_id,
         contract_id=fill.contract_id,
         outcome_id=fill.outcome_id,
-        quantity=projected_quantity,
-        average_entry_price=projected_average,
+        quantity=projection.quantity,
+        average_entry_price=projection.average_entry_price,
         realized_pnl=Money(
-            amount=existing_realized.amount + realized_increment,
+            amount=existing_realized.amount + projection.realized_trading_pnl,
             currency=validated_currency,
         ),
         unrealized_pnl=_zero_money(validated_currency),
@@ -130,9 +148,30 @@ def apply_fill_to_position(
     )
     return PositionProjectionResult(
         position=projected_position,
-        realized_trading_pnl=Money(amount=realized_increment, currency=validated_currency),
+        realized_trading_pnl=Money(
+            amount=projection.realized_trading_pnl,
+            currency=validated_currency,
+        ),
         fee=fee,
         rebate=rebate,
+        trade_notional=Money(
+            amount=fill.quantity * fill.price,
+            currency=validated_currency,
+        ),
+        closed_quantity=projection.closed_quantity,
+        opened_quantity=projection.opened_quantity,
+        closed_cost_basis=Money(
+            amount=projection.closed_cost_basis,
+            currency=validated_currency,
+        ),
+        closed_trade_value=Money(
+            amount=projection.closed_trade_value,
+            currency=validated_currency,
+        ),
+        opened_notional=Money(
+            amount=projection.opened_notional,
+            currency=validated_currency,
+        ),
     )
 
 
@@ -157,12 +196,22 @@ def _apply_weighted_average_fill(
     existing_quantity: Decimal,
     existing_average: Decimal | None,
     fill: Fill,
-) -> tuple[Decimal, Decimal | None, Decimal]:
+) -> _WeightedAverageProjection:
     fill_quantity = _signed_fill_quantity(fill)
     projected_quantity = existing_quantity + fill_quantity
 
     if existing_quantity == _ZERO:
-        return projected_quantity, fill.price, _ZERO
+        opened_quantity = abs(fill_quantity)
+        return _WeightedAverageProjection(
+            quantity=projected_quantity,
+            average_entry_price=fill.price,
+            realized_trading_pnl=_ZERO,
+            closed_quantity=_ZERO,
+            opened_quantity=opened_quantity,
+            closed_cost_basis=_ZERO,
+            closed_trade_value=_ZERO,
+            opened_notional=opened_quantity * fill.price,
+        )
 
     if existing_average is None:
         msg = "nonzero existing position requires average_entry_price"
@@ -172,18 +221,59 @@ def _apply_weighted_average_fill(
         projected_average = (
             (abs(existing_quantity) * existing_average) + (abs(fill_quantity) * fill.price)
         ) / abs(projected_quantity)
-        return projected_quantity, projected_average, _ZERO
+        opened_quantity = abs(fill_quantity)
+        return _WeightedAverageProjection(
+            quantity=projected_quantity,
+            average_entry_price=projected_average,
+            realized_trading_pnl=_ZERO,
+            closed_quantity=_ZERO,
+            opened_quantity=opened_quantity,
+            closed_cost_basis=_ZERO,
+            closed_trade_value=_ZERO,
+            opened_notional=opened_quantity * fill.price,
+        )
 
     closed_quantity = min(abs(existing_quantity), abs(fill_quantity))
     realized_increment = (
         closed_quantity * (fill.price - existing_average) * _sign(existing_quantity)
     )
+    opened_quantity = max(abs(fill_quantity) - abs(existing_quantity), _ZERO)
+    closed_cost_basis = closed_quantity * existing_average
+    closed_trade_value = closed_quantity * fill.price
+    opened_notional = opened_quantity * fill.price
 
     if projected_quantity == _ZERO:
-        return projected_quantity, None, realized_increment
+        return _WeightedAverageProjection(
+            quantity=projected_quantity,
+            average_entry_price=None,
+            realized_trading_pnl=realized_increment,
+            closed_quantity=closed_quantity,
+            opened_quantity=opened_quantity,
+            closed_cost_basis=closed_cost_basis,
+            closed_trade_value=closed_trade_value,
+            opened_notional=opened_notional,
+        )
     if _same_direction(existing_quantity, projected_quantity):
-        return projected_quantity, existing_average, realized_increment
-    return projected_quantity, fill.price, realized_increment
+        return _WeightedAverageProjection(
+            quantity=projected_quantity,
+            average_entry_price=existing_average,
+            realized_trading_pnl=realized_increment,
+            closed_quantity=closed_quantity,
+            opened_quantity=opened_quantity,
+            closed_cost_basis=closed_cost_basis,
+            closed_trade_value=closed_trade_value,
+            opened_notional=opened_notional,
+        )
+    return _WeightedAverageProjection(
+        quantity=projected_quantity,
+        average_entry_price=fill.price,
+        realized_trading_pnl=realized_increment,
+        closed_quantity=closed_quantity,
+        opened_quantity=opened_quantity,
+        closed_cost_basis=closed_cost_basis,
+        closed_trade_value=closed_trade_value,
+        opened_notional=opened_notional,
+    )
 
 
 def _fill_money(

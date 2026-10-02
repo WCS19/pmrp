@@ -65,6 +65,12 @@ def test_same_direction_buys_preserve_weighted_average_cost(
     assert second.position.quantity == Decimal(first_quantity + second_quantity)
     assert second.position.average_entry_price == expected_average
     assert second.realized_trading_pnl.amount == Decimal("0")
+    assert second.closed_quantity == Decimal("0")
+    assert second.opened_quantity == Decimal(second_quantity)
+    assert second.trade_notional.amount == Decimal(second_quantity) * second_price
+    assert second.opened_notional.amount == Decimal(second_quantity) * second_price
+    assert second.closed_cost_basis.amount == Decimal("0")
+    assert second.closed_trade_value.amount == Decimal("0")
 
 
 @given(
@@ -109,6 +115,12 @@ def test_long_reductions_realize_average_cost_pnl(
     assert second.position.quantity == expected_quantity
     assert second.realized_trading_pnl.amount == expected_realized
     assert second.position.realized_pnl.amount == expected_realized
+    assert second.closed_quantity == Decimal(close_quantity)
+    assert second.opened_quantity == Decimal("0")
+    assert second.trade_notional.amount == Decimal(close_quantity) * exit_price
+    assert second.closed_cost_basis.amount == Decimal(close_quantity) * entry_price
+    assert second.closed_trade_value.amount == Decimal(close_quantity) * exit_price
+    assert second.opened_notional.amount == Decimal("0")
     if expected_quantity == Decimal("0"):
         assert second.position.average_entry_price is None
     else:
