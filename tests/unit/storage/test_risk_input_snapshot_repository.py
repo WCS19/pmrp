@@ -8,13 +8,14 @@ from typing import Any
 
 import pytest
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
 from sqlalchemy.sql import Select
 
 from pmrp.schemas.enums import ExchangeName
 from pmrp.schemas.risk import RiskInputSnapshot
 from pmrp.schemas.serialization import canonical_sha256
-from pmrp.storage import InvariantViolationError, PersistenceTimeoutError
+from pmrp.storage import DuplicateRecordError, InvariantViolationError, PersistenceTimeoutError
 from pmrp.storage.models import RiskInputSnapshotRow
 from pmrp.storage.repositories import (
     RiskInputSnapshotRepository,
@@ -115,6 +116,18 @@ async def test_repository_add_classifies_sqlalchemy_flush_errors() -> None:
 
 
 @pytest.mark.asyncio
+async def test_repository_add_classifies_duplicate_snapshot_id() -> None:
+    session = _FakeSession(flush_error=_integrity_error(sqlstate="23505"))
+    repository = RiskInputSnapshotRepository(session)  # type: ignore[arg-type]
+
+    with pytest.raises(DuplicateRecordError, match="already exists") as exc_info:
+        await repository.add(_snapshot())
+
+    assert exc_info.value.context == {"sqlstate": "23505"}
+    assert session.flushed == 0
+
+
+@pytest.mark.asyncio
 async def test_repository_get_queries_snapshot_id() -> None:
     row = risk_input_snapshot_to_row(_snapshot())
     session = _FakeSession(execute_rows=(row,))
@@ -188,6 +201,20 @@ def _compile(statement: Select[Any]) -> str:
             compile_kwargs={"literal_binds": True},
         )
     )
+
+
+def _integrity_error(*, sqlstate: str) -> IntegrityError:
+    return IntegrityError(
+        statement="INSERT INTO pmrp_ops.risk_input_snapshots (...)",
+        params={},
+        orig=_DatabaseError(sqlstate=sqlstate),
+    )
+
+
+class _DatabaseError(Exception):
+    def __init__(self, *, sqlstate: str) -> None:
+        super().__init__("database error")
+        self.sqlstate = sqlstate
 
 
 class _FakeSession:
