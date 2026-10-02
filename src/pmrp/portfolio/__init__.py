@@ -18,6 +18,11 @@ from pmrp.portfolio.journal import (
     build_fill_journal_entry,
     derive_fill_journal_entry_id,
 )
+from pmrp.portfolio.pnl import (
+    JOURNAL_PNL_ATTRIBUTION_VERSION,
+    build_journal_pnl_attribution,
+    derive_journal_pnl_attribution_id,
+)
 from pmrp.portfolio.positions import (
     UNREALIZED_PNL_POLICY,
     WEIGHTED_AVERAGE_COST_METHOD,
@@ -34,6 +39,7 @@ __all__ = [
     "ACCOUNT_REALIZED_TRADING_PNL",
     "ACCOUNT_REBATES_RECEIVED",
     "FILL_REFERENCE_TYPE",
+    "JOURNAL_PNL_ATTRIBUTION_VERSION",
     "UNREALIZED_PNL_POLICY",
     "WEIGHTED_AVERAGE_COST_METHOD",
     "CashBalanceApplicationResult",
@@ -47,7 +53,9 @@ __all__ = [
     "apply_journal_to_cash_balance",
     "apply_journal_to_cash_balance_once",
     "build_fill_journal_entry",
+    "build_journal_pnl_attribution",
     "derive_cash_balance_id",
     "derive_fill_journal_entry_id",
+    "derive_journal_pnl_attribution_id",
     "derive_position_id",
 ]
