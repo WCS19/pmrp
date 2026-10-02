@@ -18,6 +18,7 @@ from pmrp.portfolio.positions import (
     apply_fill_to_position,
     derive_position_id,
 )
+from pmrp.portfolio.projections import FillApplicationResult, apply_fill_once
 
 __all__ = [
     "ACCOUNT_CASH",
@@ -28,9 +29,11 @@ __all__ = [
     "FILL_REFERENCE_TYPE",
     "UNREALIZED_PNL_POLICY",
     "WEIGHTED_AVERAGE_COST_METHOD",
+    "FillApplicationResult",
     "PortfolioError",
     "PortfolioProjectionError",
     "PositionProjectionResult",
+    "apply_fill_once",
     "apply_fill_to_position",
     "build_fill_journal_entry",
     "derive_fill_journal_entry_id",
