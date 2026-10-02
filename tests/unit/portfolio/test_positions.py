@@ -40,7 +40,7 @@ def test_first_buy_fill_opens_long_position() -> None:
     assert result.position.fees_paid == _money("0.02")
     assert result.position.rebates_received == _money("0")
     assert result.position.opened_at == OCCURRED_AT
-    assert result.position.last_updated_at == RECEIVED_AT
+    assert result.position.last_updated_at == OCCURRED_AT
     assert result.position.aggregate_version == 1
     assert result.realized_trading_pnl == _money("0")
     assert result.fee == _money("0.02")
@@ -231,6 +231,22 @@ def test_projection_resets_stale_unrealized_pnl_until_mark_policy_runs() -> None
     assert result.position.unrealized_pnl == _money("0")
 
 
+def test_projection_rejects_fill_older_than_position_update_horizon() -> None:
+    position = _position()
+
+    with pytest.raises(PortfolioProjectionError, match="older than the position update horizon"):
+        apply_fill_to_position(
+            position,
+            _fill(
+                fill_id="fill_stale_001",
+                exchange_fill_id="ex-fill-stale-001",
+                exchange_occurred_at=OCCURRED_AT - timedelta(seconds=1),
+                received_at=RECEIVED_AT + timedelta(seconds=30),
+            ),
+            currency="USD",
+        )
+
+
 def _fill(
     *,
     fill_id: str = "fill_test_001",
@@ -299,7 +315,7 @@ def _position(
         fees_paid=fees_paid or _money("0"),
         rebates_received=rebates_received or _money("0"),
         opened_at=OCCURRED_AT,
-        last_updated_at=RECEIVED_AT,
+        last_updated_at=OCCURRED_AT,
         aggregate_version=3,
     )
 

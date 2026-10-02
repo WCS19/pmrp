@@ -47,6 +47,9 @@ def apply_fill_to_position(
     The projection updates position quantity, average entry price, cumulative
     realized trading PnL, and cumulative fee/rebate totals. Unrealized PnL is
     reset to zero because this fill-only projection does not have a mark price.
+    Fills must be applied in nondecreasing ``exchange_occurred_at`` order; this
+    helper stores the latest applied fill exchange timestamp in
+    ``Position.last_updated_at`` and rejects older fills.
     Duplicate-fill idempotency is handled by the journal or repository layer.
     """
 
@@ -80,6 +83,10 @@ def apply_fill_to_position(
         existing_opened_at = position.opened_at
         existing_last_updated_at = position.last_updated_at
         existing_version = position.aggregate_version
+        _validate_fill_order(
+            existing_last_updated_at=existing_last_updated_at,
+            fill=fill,
+        )
 
     projected_quantity, projected_average, realized_increment = _apply_weighted_average_fill(
         existing_quantity=existing_quantity,
@@ -254,11 +261,16 @@ def _project_opened_at(
     return fill.exchange_occurred_at
 
 
+def _validate_fill_order(*, existing_last_updated_at: datetime, fill: Fill) -> None:
+    if fill.exchange_occurred_at < existing_last_updated_at:
+        msg = "fill exchange_occurred_at is older than the position update horizon"
+        raise PortfolioProjectionError(msg)
+
+
 def _project_updated_at(existing_last_updated_at: datetime | None, fill: Fill) -> datetime:
-    timestamps = [fill.exchange_occurred_at, fill.received_at]
-    if existing_last_updated_at is not None:
-        timestamps.append(existing_last_updated_at)
-    return max(timestamps)
+    if existing_last_updated_at is None:
+        return fill.exchange_occurred_at
+    return max(existing_last_updated_at, fill.exchange_occurred_at)
 
 
 def _signed_fill_quantity(fill: Fill) -> Decimal:
