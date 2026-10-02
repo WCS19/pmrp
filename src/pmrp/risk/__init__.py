@@ -248,6 +248,7 @@ from pmrp.risk.service import (
     RiskEvaluationResult,
     RiskEvaluationService,
     RiskEvaluationUnitOfWork,
+    RiskInputSnapshotStore,
 )
 from pmrp.risk.workflow import (
     RiskEvaluationEventResult,
@@ -481,6 +482,7 @@ __all__ = [
     "RiskEventFactory",
     "RiskExchangeCapitalState",
     "RiskInputError",
+    "RiskInputSnapshotStore",
     "RiskKillSwitchClearState",
     "RiskMarketPositionState",
     "RiskMarketStatusState",

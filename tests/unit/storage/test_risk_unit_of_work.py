@@ -164,10 +164,16 @@ async def test_risk_unit_of_work_supports_transactional_event_workflow() -> None
     assert session.committed == 1
     assert session.rolled_back == 0
     assert session.closed == 1
-    assert session.flushed == 3
+    assert session.flushed == 4
 
-    assert isinstance(session.added[0], RiskDecisionRow)
-    assert session.added[0].risk_decision_id == str(decision.risk_decision_id)
+    assert isinstance(session.added[0], RiskInputSnapshotRow)
+    assert (
+        session.added[0].risk_input_snapshot_id
+        == result.check_requested_event.input_snapshot.risk_input_snapshot_id
+    )
+    assert isinstance(session.added[1], RiskDecisionRow)
+    assert session.added[1].risk_decision_id == str(decision.risk_decision_id)
+    assert session.added[1].input_snapshot_id == session.added[0].risk_input_snapshot_id
     event_id_rows = [row for row in session.added if isinstance(row, EventIdRow)]
     canonical_rows = [row for row in session.added if isinstance(row, CanonicalEventRow)]
     outbox_rows = [row for row in session.added if isinstance(row, OutboxMessageRow)]

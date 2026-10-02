@@ -25,7 +25,13 @@ from pmrp.risk.breaches import RiskBreachFactory, RiskBreachPolicy
 from pmrp.schemas.enums import ExchangeName, OrderType, RiskDecisionStatus, Side, TimeInForce
 from pmrp.schemas.identifiers import AccountId, ContractId, MarketId, StrategyId
 from pmrp.schemas.orders import ApprovedOrder, OrderIntent
-from pmrp.schemas.risk import RiskBreach, RiskDecision, RiskLimitScope, RiskRuleResult
+from pmrp.schemas.risk import (
+    RiskBreach,
+    RiskDecision,
+    RiskInputSnapshot,
+    RiskLimitScope,
+    RiskRuleResult,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -58,6 +64,32 @@ async def test_risk_evaluation_service_persists_and_commits_decision() -> None:
     assert unit_of_work.committed == 1
     assert unit_of_work.rolled_back == 0
     assert unit_of_work.exited == 1
+
+
+async def test_risk_evaluation_service_persists_snapshot_before_decision() -> None:
+    decision = _decision()
+    snapshot = _input_snapshot()
+    unit_of_work = _FakeUnitOfWork()
+    service = RiskEvaluationService(
+        engine=_FakeEvaluator(decision=decision),
+        unit_of_work_factory=lambda: unit_of_work,
+    )
+
+    result = await service.evaluate_and_persist_result(
+        _intent(),
+        RiskContext(evaluated_at=NOW),
+        input_snapshot_id=INPUT_SNAPSHOT_ID,
+        input_snapshot=snapshot,
+    )
+
+    assert result.decision == decision
+    assert unit_of_work.snapshot_store.added == [snapshot]
+    assert unit_of_work.store.added == [decision]
+    assert unit_of_work.operations == [
+        "snapshot:risk_input_01k0000000000000000",
+        "decision:risk_01k00000000000000000000000",
+    ]
+    assert unit_of_work.committed == 1
 
 
 async def test_risk_evaluation_service_persists_rejections() -> None:
@@ -523,6 +555,52 @@ async def test_risk_evaluation_service_rolls_back_when_decision_snapshot_mismatc
     assert unit_of_work.exit_error_type is ValueError
 
 
+async def test_risk_evaluation_service_rejects_mismatched_input_snapshot_before_work() -> None:
+    unit_of_work = _FakeUnitOfWork()
+    engine = _FakeEvaluator(decision=_decision())
+    service = RiskEvaluationService(
+        engine=engine,
+        unit_of_work_factory=lambda: unit_of_work,
+    )
+
+    with pytest.raises(ValueError, match="risk input snapshot ID"):
+        await service.evaluate_and_persist(
+            _intent(),
+            RiskContext(evaluated_at=NOW),
+            input_snapshot_id=INPUT_SNAPSHOT_ID,
+            input_snapshot=_input_snapshot().model_copy(
+                update={"risk_input_snapshot_id": "risk_input_other"}
+            ),
+        )
+
+    assert engine.calls == []
+    assert unit_of_work.entered == 0
+    assert unit_of_work.committed == 0
+    assert unit_of_work.rolled_back == 0
+
+
+async def test_risk_evaluation_service_rolls_back_when_snapshot_persist_fails() -> None:
+    unit_of_work = _FakeUnitOfWork(snapshot_store_error=RuntimeError("snapshot persist failed"))
+    service = RiskEvaluationService(
+        engine=_FakeEvaluator(decision=_decision()),
+        unit_of_work_factory=lambda: unit_of_work,
+    )
+
+    with pytest.raises(RuntimeError, match="snapshot persist failed"):
+        await service.evaluate_and_persist(
+            _intent(),
+            RiskContext(evaluated_at=NOW),
+            input_snapshot_id=INPUT_SNAPSHOT_ID,
+            input_snapshot=_input_snapshot(),
+        )
+
+    assert unit_of_work.snapshot_store.added == []
+    assert unit_of_work.store.added == []
+    assert unit_of_work.committed == 0
+    assert unit_of_work.rolled_back == 1
+    assert unit_of_work.exit_error_type is RuntimeError
+
+
 async def test_risk_evaluation_service_rolls_back_when_persist_fails() -> None:
     unit_of_work = _FakeUnitOfWork(store_error=RuntimeError("persist failed"))
     service = RiskEvaluationService(
@@ -651,6 +729,27 @@ def _intent() -> OrderIntent:
     )
 
 
+def _input_snapshot() -> RiskInputSnapshot:
+    return RiskInputSnapshot(
+        risk_input_snapshot_id=INPUT_SNAPSHOT_ID,
+        captured_at=NOW - timedelta(seconds=1),
+        strategy_id=STRATEGY_ID,
+        exchange=ExchangeName.KALSHI.value,
+        account_id=ACCOUNT_ID,
+        market_id=MARKET_ID,
+        current_position=Decimal("2"),
+        open_order_quantity=Decimal("3"),
+        available_balance=Decimal("100.00"),
+        gross_exposure=Decimal("40.00"),
+        net_exposure=Decimal("25.00"),
+        daily_realized_pnl=Decimal("1.00"),
+        daily_unrealized_pnl=Decimal("-0.25"),
+        market_data_age_ms=250,
+        reconciliation_healthy=True,
+        kill_switch_clear=True,
+    )
+
+
 def _reservation_request() -> RiskCapitalReservationRequest:
     return RiskCapitalReservationRequest(
         exchange=ExchangeName.KALSHI,
@@ -730,7 +829,13 @@ class _FakeEvaluator:
 
 
 class _FakeDecisionStore:
-    def __init__(self, *, error: Exception | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        operations: list[str],
+        error: Exception | None = None,
+    ) -> None:
+        self._operations = operations
         self._error = error
         self.added: list[RiskDecision] = []
 
@@ -738,6 +843,25 @@ class _FakeDecisionStore:
         if self._error is not None:
             raise self._error
         self.added.append(decision)
+        self._operations.append(f"decision:{decision.risk_decision_id}")
+
+
+class _FakeSnapshotStore:
+    def __init__(
+        self,
+        *,
+        operations: list[str],
+        error: Exception | None = None,
+    ) -> None:
+        self._operations = operations
+        self._error = error
+        self.added: list[RiskInputSnapshot] = []
+
+    async def add(self, snapshot: RiskInputSnapshot) -> None:
+        if self._error is not None:
+            raise self._error
+        self.added.append(snapshot)
+        self._operations.append(f"snapshot:{snapshot.risk_input_snapshot_id}")
 
 
 class _FakeBreachStore:
@@ -798,11 +922,17 @@ class _FakeUnitOfWork:
         self,
         *,
         store_error: Exception | None = None,
+        snapshot_store_error: Exception | None = None,
         breach_store_error: Exception | None = None,
         reservation_store_error: Exception | None = None,
         commit_error: Exception | None = None,
     ) -> None:
-        self.store = _FakeDecisionStore(error=store_error)
+        self.operations: list[str] = []
+        self.store = _FakeDecisionStore(operations=self.operations, error=store_error)
+        self.snapshot_store = _FakeSnapshotStore(
+            operations=self.operations,
+            error=snapshot_store_error,
+        )
         self.breach_store = _FakeBreachStore(error=breach_store_error)
         self.reservation_store = _FakeReservationStore(error=reservation_store_error)
         self._commit_error = commit_error
@@ -832,6 +962,10 @@ class _FakeUnitOfWork:
     @property
     def risk_decisions(self) -> _FakeDecisionStore:
         return self.store
+
+    @property
+    def risk_input_snapshots(self) -> _FakeSnapshotStore:
+        return self.snapshot_store
 
     @property
     def risk_breaches(self) -> _FakeBreachStore:
