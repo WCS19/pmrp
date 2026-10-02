@@ -212,6 +212,86 @@ def test_build_fill_journal_entry_rejects_mismatched_projection_fee() -> None:
         )
 
 
+def test_build_fill_journal_entry_rejects_negative_projection_fee() -> None:
+    clean_fill = _fill(price="0.40", quantity="10")
+    projection = apply_fill_to_position(None, clean_fill, currency="USD")
+    fill = _fill(price="0.40", quantity="10", fee=_money("-0.02"))
+    negative_fee_projection = projection.__class__(
+        position=projection.position,
+        realized_trading_pnl=projection.realized_trading_pnl,
+        fee=_money("-0.02"),
+        rebate=projection.rebate,
+        trade_notional=projection.trade_notional,
+        closed_quantity=projection.closed_quantity,
+        opened_quantity=projection.opened_quantity,
+        closed_cost_basis=projection.closed_cost_basis,
+        closed_trade_value=projection.closed_trade_value,
+        opened_notional=projection.opened_notional,
+    )
+
+    with pytest.raises(PortfolioProjectionError, match="fee amount must be nonnegative"):
+        build_fill_journal_entry(
+            fill=fill,
+            projection=negative_fee_projection,
+            source_event_id=SOURCE_EVENT_ID,
+            created_at=CREATED_AT,
+        )
+
+
+def test_build_fill_journal_entry_rejects_negative_projection_rebate() -> None:
+    clean_fill = _fill(price="0.40", quantity="10")
+    projection = apply_fill_to_position(None, clean_fill, currency="USD")
+    fill = _fill(price="0.40", quantity="10", rebate=_money("-0.01"))
+    negative_rebate_projection = projection.__class__(
+        position=projection.position,
+        realized_trading_pnl=projection.realized_trading_pnl,
+        fee=projection.fee,
+        rebate=_money("-0.01"),
+        trade_notional=projection.trade_notional,
+        closed_quantity=projection.closed_quantity,
+        opened_quantity=projection.opened_quantity,
+        closed_cost_basis=projection.closed_cost_basis,
+        closed_trade_value=projection.closed_trade_value,
+        opened_notional=projection.opened_notional,
+    )
+
+    with pytest.raises(PortfolioProjectionError, match="rebate amount must be nonnegative"):
+        build_fill_journal_entry(
+            fill=fill,
+            projection=negative_rebate_projection,
+            source_event_id=SOURCE_EVENT_ID,
+            created_at=CREATED_AT,
+        )
+
+
+def test_build_fill_journal_entry_rejects_negative_projection_opened_notional() -> None:
+    fill = _fill(price="0.40", quantity="10")
+    projection = apply_fill_to_position(None, fill, currency="USD")
+    negative_opened_notional_projection = projection.__class__(
+        position=projection.position,
+        realized_trading_pnl=projection.realized_trading_pnl,
+        fee=projection.fee,
+        rebate=projection.rebate,
+        trade_notional=projection.trade_notional,
+        closed_quantity=projection.closed_quantity,
+        opened_quantity=projection.opened_quantity,
+        closed_cost_basis=projection.closed_cost_basis,
+        closed_trade_value=projection.closed_trade_value,
+        opened_notional=_money("-4.00"),
+    )
+
+    with pytest.raises(
+        PortfolioProjectionError,
+        match="opened_notional amount must be nonnegative",
+    ):
+        build_fill_journal_entry(
+            fill=fill,
+            projection=negative_opened_notional_projection,
+            source_event_id=SOURCE_EVENT_ID,
+            created_at=CREATED_AT,
+        )
+
+
 def _line_amounts(journal: AccountingJournalEntry) -> list[tuple[str, Decimal]]:
     return [(line.account_code, line.amount) for line in journal.lines]
 

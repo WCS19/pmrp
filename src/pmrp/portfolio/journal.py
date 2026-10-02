@@ -168,6 +168,12 @@ def _validate_projection_for_fill(fill: Fill, projection: PositionProjectionResu
     _validate_money(projection.closed_cost_basis, currency, "closed_cost_basis")
     _validate_money(projection.closed_trade_value, currency, "closed_trade_value")
     _validate_money(projection.opened_notional, currency, "opened_notional")
+    _validate_nonnegative_money(projection.trade_notional, "trade_notional")
+    _validate_nonnegative_money(projection.fee, "fee")
+    _validate_nonnegative_money(projection.rebate, "rebate")
+    _validate_nonnegative_money(projection.closed_cost_basis, "closed_cost_basis")
+    _validate_nonnegative_money(projection.closed_trade_value, "closed_trade_value")
+    _validate_nonnegative_money(projection.opened_notional, "opened_notional")
 
     if projection.trade_notional.amount != expected_trade_notional:
         msg = "projection trade_notional does not match fill notional"
@@ -202,6 +208,12 @@ def _validate_projection_for_fill(fill: Fill, projection: PositionProjectionResu
 def _validate_money(money: Money, currency: str, field_name: str) -> None:
     if money.currency != currency:
         msg = f"projection {field_name} currency does not match trade_notional currency"
+        raise PortfolioProjectionError(msg)
+
+
+def _validate_nonnegative_money(money: Money, field_name: str) -> None:
+    if money.amount < _ZERO:
+        msg = f"projection {field_name} amount must be nonnegative"
         raise PortfolioProjectionError(msg)
 
 
