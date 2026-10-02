@@ -72,6 +72,20 @@ def test_risk_input_snapshot_from_row_accepts_database_scaled_decimals() -> None
     assert risk_input_snapshot_from_row(row) == _snapshot()
 
 
+def test_risk_input_snapshot_from_row_accepts_database_normalized_signed_zero() -> None:
+    snapshot = _snapshot().model_copy(update={"current_position": Decimal("-0")})
+    row = risk_input_snapshot_to_row(snapshot)
+
+    assert row.current_position == Decimal("0.000000000000000000")
+    assert not row.current_position.is_signed()
+
+    row.current_position = Decimal("0.000000000000000000")
+
+    result = risk_input_snapshot_from_row(row)
+    assert result.current_position == Decimal("0.000000000000000000")
+    assert not result.current_position.is_signed()
+
+
 def test_risk_input_snapshot_from_row_rejects_payload_hash_mismatch() -> None:
     row = risk_input_snapshot_to_row(_snapshot())
     row.payload_hash = "sha256:tampered"

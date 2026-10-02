@@ -159,4 +159,6 @@ def _database_decimal(value: Decimal, field_name: str) -> Decimal:
             "risk input snapshot decimal exceeds database scale",
             context={"field_name": field_name},
         )
+    if quantized.is_zero():
+        return quantized.copy_abs()
     return quantized
