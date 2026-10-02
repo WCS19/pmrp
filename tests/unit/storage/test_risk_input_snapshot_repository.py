@@ -38,17 +38,17 @@ def test_risk_input_snapshot_to_row_serializes_canonical_payload() -> None:
     assert row.exchange == "kalshi"
     assert row.account_id == "acct_01k00000000000000000000000"
     assert row.market_id == "mkt_01k00000000000000000000000"
-    assert row.current_position == Decimal("2")
-    assert row.open_order_quantity == Decimal("3")
-    assert row.available_balance == Decimal("100.00")
-    assert row.gross_exposure == Decimal("40.00")
-    assert row.net_exposure == Decimal("25.00")
-    assert row.daily_realized_pnl == Decimal("1.00")
-    assert row.daily_unrealized_pnl == Decimal("-0.25")
+    assert row.current_position == Decimal("2.000000000000000000")
+    assert row.open_order_quantity == Decimal("3.000000000000000000")
+    assert row.available_balance == Decimal("100.000000000000000000")
+    assert row.gross_exposure == Decimal("40.000000000000000000")
+    assert row.net_exposure == Decimal("25.000000000000000000")
+    assert row.daily_realized_pnl == Decimal("1.000000000000000000")
+    assert row.daily_unrealized_pnl == Decimal("-0.250000000000000000")
     assert row.market_data_age_ms == 250
     assert row.reconciliation_healthy is True
     assert row.kill_switch_clear is True
-    assert row.payload_hash == canonical_sha256(snapshot)
+    assert row.payload_hash == canonical_sha256(_database_scaled_snapshot())
 
 
 def test_risk_input_snapshot_from_row_round_trips_canonical_snapshot() -> None:
@@ -56,6 +56,19 @@ def test_risk_input_snapshot_from_row_round_trips_canonical_snapshot() -> None:
     row = risk_input_snapshot_to_row(snapshot)
 
     assert risk_input_snapshot_from_row(row) == snapshot
+
+
+def test_risk_input_snapshot_from_row_accepts_database_scaled_decimals() -> None:
+    row = risk_input_snapshot_to_row(_snapshot())
+    row.current_position = Decimal("2.000000000000000000")
+    row.open_order_quantity = Decimal("3.000000000000000000")
+    row.available_balance = Decimal("100.000000000000000000")
+    row.gross_exposure = Decimal("40.000000000000000000")
+    row.net_exposure = Decimal("25.000000000000000000")
+    row.daily_realized_pnl = Decimal("1.000000000000000000")
+    row.daily_unrealized_pnl = Decimal("-0.250000000000000000")
+
+    assert risk_input_snapshot_from_row(row) == _snapshot()
 
 
 def test_risk_input_snapshot_from_row_rejects_payload_hash_mismatch() -> None:
@@ -68,6 +81,15 @@ def test_risk_input_snapshot_from_row_rejects_payload_hash_mismatch() -> None:
     assert exc_info.value.context == {"risk_input_snapshot_id": "risk_input_01k0000000000000000"}
 
 
+def test_risk_input_snapshot_to_row_rejects_decimal_values_beyond_database_scale() -> None:
+    snapshot = _snapshot().model_copy(update={"current_position": Decimal("0.1234567890123456789")})
+
+    with pytest.raises(InvariantViolationError, match="database scale") as exc_info:
+        risk_input_snapshot_to_row(snapshot)
+
+    assert exc_info.value.context == {"field_name": "current_position"}
+
+
 @pytest.mark.asyncio
 async def test_repository_add_inserts_row_and_flushes_without_commit() -> None:
     session = _FakeSession()
@@ -78,7 +100,7 @@ async def test_repository_add_inserts_row_and_flushes_without_commit() -> None:
 
     assert len(session.added) == 1
     assert isinstance(session.added[0], RiskInputSnapshotRow)
-    assert session.added[0].payload_hash == canonical_sha256(snapshot)
+    assert session.added[0].payload_hash == canonical_sha256(_database_scaled_snapshot())
     assert session.flushed == 1
     assert session.committed == 0
 
@@ -142,6 +164,20 @@ def _snapshot() -> RiskInputSnapshot:
         market_data_age_ms=250,
         reconciliation_healthy=True,
         kill_switch_clear=True,
+    )
+
+
+def _database_scaled_snapshot() -> RiskInputSnapshot:
+    return _snapshot().model_copy(
+        update={
+            "current_position": Decimal("2.000000000000000000"),
+            "open_order_quantity": Decimal("3.000000000000000000"),
+            "available_balance": Decimal("100.000000000000000000"),
+            "gross_exposure": Decimal("40.000000000000000000"),
+            "net_exposure": Decimal("25.000000000000000000"),
+            "daily_realized_pnl": Decimal("1.000000000000000000"),
+            "daily_unrealized_pnl": Decimal("-0.250000000000000000"),
+        }
     )
 
 
