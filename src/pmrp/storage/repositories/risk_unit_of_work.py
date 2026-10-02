@@ -12,6 +12,7 @@ from pmrp.storage.repositories.kill_switches import KillSwitchRepository
 from pmrp.storage.repositories.outbox import OutboxMessageRepository
 from pmrp.storage.repositories.risk_breaches import RiskBreachRepository
 from pmrp.storage.repositories.risk_decisions import RiskDecisionRepository
+from pmrp.storage.repositories.risk_input_snapshots import RiskInputSnapshotRepository
 from pmrp.storage.repositories.risk_limits import RiskLimitRepository
 from pmrp.storage.session import AsyncSessionFactory
 from pmrp.storage.transactions import SqlAlchemyUnitOfWork
@@ -28,6 +29,7 @@ class SqlAlchemyRiskUnitOfWork:
         self._outbox_messages: OutboxMessageRepository | None = None
         self._risk_breaches: RiskBreachRepository | None = None
         self._risk_decisions: RiskDecisionRepository | None = None
+        self._risk_input_snapshots: RiskInputSnapshotRepository | None = None
         self._risk_limits: RiskLimitRepository | None = None
 
     async def __aenter__(self) -> Self:
@@ -39,6 +41,7 @@ class SqlAlchemyRiskUnitOfWork:
         self._outbox_messages = OutboxMessageRepository(session)
         self._risk_breaches = RiskBreachRepository(session)
         self._risk_decisions = RiskDecisionRepository(session)
+        self._risk_input_snapshots = RiskInputSnapshotRepository(session)
         self._risk_limits = RiskLimitRepository(session)
         return self
 
@@ -58,6 +61,7 @@ class SqlAlchemyRiskUnitOfWork:
             self._outbox_messages = None
             self._risk_breaches = None
             self._risk_decisions = None
+            self._risk_input_snapshots = None
             self._risk_limits = None
 
     @property
@@ -113,6 +117,15 @@ class SqlAlchemyRiskUnitOfWork:
             raise UnitOfWorkStateError("risk unit of work is not active")
         _ = self._unit_of_work.session
         return self._risk_decisions
+
+    @property
+    def risk_input_snapshots(self) -> RiskInputSnapshotRepository:
+        """Return the active risk input snapshot repository."""
+
+        if self._risk_input_snapshots is None:
+            raise UnitOfWorkStateError("risk unit of work is not active")
+        _ = self._unit_of_work.session
+        return self._risk_input_snapshots
 
     @property
     def risk_limits(self) -> RiskLimitRepository:

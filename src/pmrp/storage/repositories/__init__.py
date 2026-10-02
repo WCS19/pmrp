@@ -31,6 +31,11 @@ from pmrp.storage.repositories.risk_decisions import (
     risk_decision_from_row,
     risk_decision_to_row,
 )
+from pmrp.storage.repositories.risk_input_snapshots import (
+    RiskInputSnapshotRepository,
+    risk_input_snapshot_from_row,
+    risk_input_snapshot_to_row,
+)
 from pmrp.storage.repositories.risk_limits import (
     RiskLimitRepository,
     risk_limit_from_row,
@@ -48,6 +53,7 @@ __all__ = [
     "Repository",
     "RiskBreachRepository",
     "RiskDecisionRepository",
+    "RiskInputSnapshotRepository",
     "RiskLimitRepository",
     "SqlAlchemyRiskUnitOfWork",
     "VersionedRepository",
@@ -61,6 +67,8 @@ __all__ = [
     "risk_breach_to_row",
     "risk_decision_from_row",
     "risk_decision_to_row",
+    "risk_input_snapshot_from_row",
+    "risk_input_snapshot_to_row",
     "risk_limit_from_row",
     "risk_limit_to_row",
 ]
