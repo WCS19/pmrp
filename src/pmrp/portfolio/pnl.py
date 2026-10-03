@@ -12,6 +12,7 @@ from pmrp.portfolio.journal import (
     ACCOUNT_FEES_PAID,
     ACCOUNT_REALIZED_TRADING_PNL,
     ACCOUNT_REBATES_RECEIVED,
+    ACCOUNT_SETTLEMENT_PNL,
 )
 from pmrp.schemas.identifiers import MarketId, StrategyId
 from pmrp.schemas.numeric import Money, validate_currency
@@ -88,6 +89,18 @@ def build_journal_pnl_attribution(
         currency=validated_currency,
         field_name="settlement_pnl",
     )
+    journal_settlement_pnl = Money(
+        amount=-_sum_account(
+            entries,
+            account_code=ACCOUNT_SETTLEMENT_PNL,
+            currency=validated_currency,
+        ),
+        currency=validated_currency,
+    )
+    combined_settlement_pnl = _combine_optional_money(
+        journal_settlement_pnl,
+        validated_settlement,
+    )
 
     return PnlAttribution(
         attribution_id=attribution_id
@@ -110,7 +123,7 @@ def build_journal_pnl_attribution(
         fees=fees,
         rebates=rebates,
         slippage=validated_slippage,
-        settlement_pnl=validated_settlement,
+        settlement_pnl=combined_settlement_pnl,
         total_pnl=Money(
             amount=(
                 realized_trading_pnl.amount
@@ -118,7 +131,7 @@ def build_journal_pnl_attribution(
                 - fees.amount
                 + rebates.amount
                 + _optional_amount(validated_slippage)
-                + _optional_amount(validated_settlement)
+                + _optional_amount(combined_settlement_pnl)
             ),
             currency=validated_currency,
         ),
@@ -241,3 +254,11 @@ def _optional_amount(value: Money | None) -> Decimal:
     if value is None:
         return _ZERO
     return value.amount
+
+
+def _combine_optional_money(first: Money, second: Money | None) -> Money | None:
+    if first.amount == _ZERO and second is None:
+        return None
+    if second is None:
+        return first
+    return Money(amount=first.amount + second.amount, currency=first.currency)

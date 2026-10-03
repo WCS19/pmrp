@@ -14,6 +14,7 @@ from pmrp.portfolio.journal import (
     ACCOUNT_POSITION_COST,
     ACCOUNT_REALIZED_TRADING_PNL,
     ACCOUNT_REBATES_RECEIVED,
+    ACCOUNT_SETTLEMENT_PNL,
     FILL_REFERENCE_TYPE,
     build_fill_journal_entry,
     derive_fill_journal_entry_id,
@@ -31,6 +32,13 @@ from pmrp.portfolio.positions import (
     derive_position_id,
 )
 from pmrp.portfolio.projections import FillApplicationResult, apply_fill_once
+from pmrp.portfolio.settlement import (
+    SETTLEMENT_REFERENCE_TYPE,
+    SettlementAccountingResult,
+    build_settlement_accounting_result,
+    build_settlement_journal_entry,
+    derive_settlement_journal_entry_id,
+)
 
 __all__ = [
     "ACCOUNT_CASH",
@@ -38,8 +46,10 @@ __all__ = [
     "ACCOUNT_POSITION_COST",
     "ACCOUNT_REALIZED_TRADING_PNL",
     "ACCOUNT_REBATES_RECEIVED",
+    "ACCOUNT_SETTLEMENT_PNL",
     "FILL_REFERENCE_TYPE",
     "JOURNAL_PNL_ATTRIBUTION_VERSION",
+    "SETTLEMENT_REFERENCE_TYPE",
     "UNREALIZED_PNL_POLICY",
     "WEIGHTED_AVERAGE_COST_METHOD",
     "CashBalanceApplicationResult",
@@ -48,14 +58,18 @@ __all__ = [
     "PortfolioError",
     "PortfolioProjectionError",
     "PositionProjectionResult",
+    "SettlementAccountingResult",
     "apply_fill_once",
     "apply_fill_to_position",
     "apply_journal_to_cash_balance",
     "apply_journal_to_cash_balance_once",
     "build_fill_journal_entry",
     "build_journal_pnl_attribution",
+    "build_settlement_accounting_result",
+    "build_settlement_journal_entry",
     "derive_cash_balance_id",
     "derive_fill_journal_entry_id",
     "derive_journal_pnl_attribution_id",
     "derive_position_id",
+    "derive_settlement_journal_entry_id",
 ]

@@ -18,6 +18,7 @@ from pmrp.schemas.serialization import canonical_sha256
 ACCOUNT_CASH: Final = "cash"
 ACCOUNT_POSITION_COST: Final = "position_cost"
 ACCOUNT_REALIZED_TRADING_PNL: Final = "realized_trading_pnl"
+ACCOUNT_SETTLEMENT_PNL: Final = "settlement_pnl"
 ACCOUNT_FEES_PAID: Final = "fees_paid"
 ACCOUNT_REBATES_RECEIVED: Final = "rebates_received"
 FILL_REFERENCE_TYPE: Final = "fill"
