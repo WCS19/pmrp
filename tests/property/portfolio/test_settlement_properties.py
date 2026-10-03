@@ -9,10 +9,20 @@ import pytest
 from hypothesis import assume, given
 from hypothesis import strategies as st
 
-from pmrp.portfolio import build_settlement_accounting_result, build_settlement_journal_entry
+from pmrp.portfolio import (
+    apply_settlement_once,
+    build_settlement_accounting_result,
+    build_settlement_journal_entry,
+)
 from pmrp.schemas.identifiers import EventId
 from pmrp.schemas.numeric import Money
-from pmrp.schemas.portfolio import AccountingJournalEntry, Position, Settlement, SettlementStatus
+from pmrp.schemas.portfolio import (
+    AccountingJournalEntry,
+    CashBalance,
+    Position,
+    Settlement,
+    SettlementStatus,
+)
 
 pytestmark = pytest.mark.property
 
@@ -92,6 +102,53 @@ def test_settlement_journal_entries_balance(
     assert _journal_total(journal) == Decimal("0")
 
 
+@given(
+    quantity=_QUANTITIES,
+    average_entry_price=_PROBABILITY_AMOUNTS,
+    payout_per_unit=_PROBABILITY_AMOUNTS,
+    available=st.integers(min_value=-1_000_000, max_value=1_000_000).map(
+        lambda cents: Decimal(cents) / Decimal("100")
+    ),
+    reserved=st.integers(min_value=0, max_value=1_000_000).map(
+        lambda cents: Decimal(cents) / Decimal("100")
+    ),
+    winning_position=st.booleans(),
+)
+def test_apply_settlement_once_closes_position_and_preserves_cash_identity(
+    quantity: Decimal,
+    average_entry_price: Decimal,
+    payout_per_unit: Decimal,
+    available: Decimal,
+    reserved: Decimal,
+    winning_position: bool,
+) -> None:
+    assume(quantity != Decimal("0"))
+    position = _position(quantity=quantity, average_entry_price=average_entry_price)
+    cash_balance = _cash_balance(available=available, reserved=reserved)
+    settlement = _settlement(
+        winning_outcome_ids=("out_yes",) if winning_position else ("out_no",),
+        payout_per_unit=payout_per_unit,
+    )
+
+    result = apply_settlement_once(
+        position=position,
+        cash_balance=cash_balance,
+        settlement=settlement,
+        applied_journal_entry_ids=frozenset(),
+        currency="USD",
+        source_event_id=EventId("evt_property_settlement_apply"),
+        created_at=CREATED_AT,
+    )
+
+    expected_cash_delta = quantity * (payout_per_unit if winning_position else Decimal("0"))
+    assert result.applied is True
+    assert result.position.quantity == Decimal("0")
+    assert result.position.average_entry_price is None
+    assert result.cash_balance.available == available + expected_cash_delta
+    assert result.cash_balance.reserved == reserved
+    assert result.cash_balance.total == result.cash_balance.available + result.cash_balance.reserved
+
+
 def _position(*, quantity: Decimal, average_entry_price: Decimal) -> Position:
     return Position(
         position_id="pos_property_settlement",
@@ -135,6 +192,19 @@ def _settlement(
 
 def _money(amount: str) -> Money:
     return Money(amount=Decimal(amount), currency="USD")
+
+
+def _cash_balance(*, available: Decimal, reserved: Decimal) -> CashBalance:
+    return CashBalance(
+        balance_id="cash_property_settlement",
+        exchange="kalshi",
+        account_id="acct_property_settlement",
+        currency="USD",
+        available=available,
+        reserved=reserved,
+        total=available + reserved,
+        captured_at=UPDATED_AT,
+    )
 
 
 def _journal_total(journal: AccountingJournalEntry) -> Decimal:
