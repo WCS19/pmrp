@@ -13,12 +13,16 @@ from pmrp.portfolio import (
     ACCOUNT_SETTLEMENT_PNL,
     SETTLEMENT_REFERENCE_TYPE,
     PortfolioProjectionError,
+    apply_settlement_correction_once,
     apply_settlement_once,
     apply_settlement_to_position,
     build_journal_pnl_attribution,
     build_settlement_accounting_result,
+    build_settlement_correction_accounting_result,
+    build_settlement_correction_journal_entry,
     build_settlement_journal_entry,
     derive_cash_balance_id,
+    derive_settlement_correction_journal_entry_id,
     derive_settlement_journal_entry_id,
 )
 from pmrp.schemas.identifiers import EventId
@@ -245,6 +249,209 @@ def test_apply_settlement_once_returns_noop_for_duplicate_journal_id() -> None:
     assert duplicate.applied_journal_entry_ids == first.applied_journal_entry_ids
 
 
+def test_build_settlement_correction_journal_entry_balances_loss_to_win_delta() -> None:
+    position = _position(quantity="10", average_entry_price="0.40")
+    previous_settlement = _settlement(
+        winning_outcome_ids=("out_no",),
+        payout_per_unit="1",
+    )
+    corrected_settlement = _corrected_settlement(
+        winning_outcome_ids=("out_yes",),
+        payout_per_unit="1",
+    )
+
+    result = build_settlement_correction_accounting_result(
+        original_position=position,
+        previous_settlement=previous_settlement,
+        corrected_settlement=corrected_settlement,
+        currency="USD",
+    )
+    journal = build_settlement_correction_journal_entry(
+        original_position=position,
+        previous_settlement=previous_settlement,
+        corrected_settlement=corrected_settlement,
+        currency="USD",
+        source_event_id=SOURCE_EVENT_ID,
+        created_at=CREATED_AT,
+    )
+
+    assert result.previous_accounting.settlement_pnl == _money("-4.00")
+    assert result.corrected_accounting.settlement_pnl == _money("6.00")
+    assert result.cash_delta == _money("10")
+    assert result.position_cost_basis_delta == _money("0.00")
+    assert result.settlement_pnl_delta == _money("10.00")
+    assert journal.journal_entry_id == derive_settlement_correction_journal_entry_id(
+        original_position=position,
+        previous_settlement=previous_settlement,
+        corrected_settlement=corrected_settlement,
+    )
+    assert journal.occurred_at == corrected_settlement.settled_at
+    assert journal.reference_type == SETTLEMENT_REFERENCE_TYPE
+    assert journal.reference_id == corrected_settlement.settlement_id
+    assert _line_amounts(journal) == [
+        (ACCOUNT_CASH, Decimal("10")),
+        (ACCOUNT_POSITION_COST, Decimal("0.00")),
+        (ACCOUNT_SETTLEMENT_PNL, Decimal("-10.00")),
+    ]
+    assert _journal_total(journal) == Decimal("0")
+
+
+def test_apply_settlement_correction_once_updates_cash_and_flat_position_pnl() -> None:
+    position = _position(quantity="10", average_entry_price="0.40")
+    cash_balance = _cash_balance(available="100.00", reserved="5.00")
+    previous_settlement = _settlement(winning_outcome_ids=("out_no",), payout_per_unit="1")
+    first = apply_settlement_once(
+        position=position,
+        cash_balance=cash_balance,
+        settlement=previous_settlement,
+        applied_journal_entry_ids=frozenset(),
+        currency="USD",
+        source_event_id=SOURCE_EVENT_ID,
+        created_at=CREATED_AT,
+    )
+    corrected_settlement = _corrected_settlement(
+        winning_outcome_ids=("out_yes",),
+        payout_per_unit="1",
+    )
+
+    result = apply_settlement_correction_once(
+        original_position=position,
+        settled_position=first.position,
+        cash_balance=first.cash_balance,
+        previous_settlement=previous_settlement,
+        corrected_settlement=corrected_settlement,
+        applied_journal_entry_ids=first.applied_journal_entry_ids,
+        currency="USD",
+        source_event_id=EventId("evt_settlement_correction_001"),
+        created_at=CREATED_AT + timedelta(seconds=1),
+    )
+
+    expected_journal_id = derive_settlement_correction_journal_entry_id(
+        original_position=position,
+        previous_settlement=previous_settlement,
+        corrected_settlement=corrected_settlement,
+    )
+    assert result.applied is True
+    assert result.duplicate_correction is False
+    assert result.position.quantity == Decimal("0")
+    assert result.position.average_entry_price is None
+    assert result.position.realized_pnl == _money("6.00")
+    assert result.position.last_updated_at == corrected_settlement.settled_at
+    assert result.position.aggregate_version == first.position.aggregate_version + 1
+    assert result.cash_balance.available == Decimal("110.00")
+    assert result.cash_balance.reserved == Decimal("5.00")
+    assert result.cash_balance.total == Decimal("115.00")
+    assert result.journal_entry is not None
+    assert result.journal_entry.journal_entry_id == expected_journal_id
+    assert result.applied_journal_entry_ids == first.applied_journal_entry_ids | {
+        expected_journal_id
+    }
+
+
+def test_apply_settlement_correction_once_returns_noop_for_duplicate_correction() -> None:
+    position = _position(quantity="10", average_entry_price="0.40")
+    cash_balance = _cash_balance(available="100.00", reserved="5.00")
+    previous_settlement = _settlement(winning_outcome_ids=("out_no",), payout_per_unit="1")
+    first = apply_settlement_once(
+        position=position,
+        cash_balance=cash_balance,
+        settlement=previous_settlement,
+        applied_journal_entry_ids=frozenset(),
+        currency="USD",
+        source_event_id=SOURCE_EVENT_ID,
+        created_at=CREATED_AT,
+    )
+    corrected_settlement = _corrected_settlement(
+        winning_outcome_ids=("out_yes",),
+        payout_per_unit="1",
+    )
+    applied_journal_entry_ids = first.applied_journal_entry_ids | {
+        derive_settlement_correction_journal_entry_id(
+            original_position=position,
+            previous_settlement=previous_settlement,
+            corrected_settlement=corrected_settlement,
+        )
+    }
+
+    duplicate = apply_settlement_correction_once(
+        original_position=position,
+        settled_position=first.position,
+        cash_balance=first.cash_balance,
+        previous_settlement=previous_settlement,
+        corrected_settlement=_corrected_settlement(
+            winning_outcome_ids=("out_yes",),
+            payout_per_unit="1",
+            settled_at=first.position.last_updated_at - timedelta(seconds=1),
+        ),
+        applied_journal_entry_ids=applied_journal_entry_ids,
+        currency="USD",
+        source_event_id=EventId("evt_settlement_correction_duplicate"),
+        created_at=CREATED_AT + timedelta(seconds=1),
+    )
+
+    assert duplicate.applied is False
+    assert duplicate.duplicate_correction is True
+    assert duplicate.position == first.position
+    assert duplicate.cash_balance == first.cash_balance
+    assert duplicate.correction_accounting is None
+    assert duplicate.cash_projection is None
+    assert duplicate.journal_entry is None
+    assert duplicate.applied_journal_entry_ids == applied_journal_entry_ids
+
+
+def test_build_settlement_correction_journal_entry_rejects_wrong_correction_reference() -> None:
+    position = _position(quantity="10", average_entry_price="0.40")
+    previous_settlement = _settlement(winning_outcome_ids=("out_no",), payout_per_unit="1")
+    corrected_settlement = _corrected_settlement(
+        winning_outcome_ids=("out_yes",),
+        payout_per_unit="1",
+        correction_of_settlement_id="set_other_settlement",
+    )
+
+    with pytest.raises(PortfolioProjectionError, match="reference previous settlement"):
+        build_settlement_correction_journal_entry(
+            original_position=position,
+            previous_settlement=previous_settlement,
+            corrected_settlement=corrected_settlement,
+            currency="USD",
+            source_event_id=SOURCE_EVENT_ID,
+            created_at=CREATED_AT,
+        )
+
+
+def test_apply_settlement_correction_once_rejects_stale_correction() -> None:
+    position = _position(quantity="10", average_entry_price="0.40")
+    cash_balance = _cash_balance(available="100.00", reserved="5.00")
+    previous_settlement = _settlement(winning_outcome_ids=("out_no",), payout_per_unit="1")
+    first = apply_settlement_once(
+        position=position,
+        cash_balance=cash_balance,
+        settlement=previous_settlement,
+        applied_journal_entry_ids=frozenset(),
+        currency="USD",
+        source_event_id=SOURCE_EVENT_ID,
+        created_at=CREATED_AT,
+    )
+    corrected_settlement = _corrected_settlement(
+        winning_outcome_ids=("out_yes",),
+        payout_per_unit="1",
+        settled_at=first.position.last_updated_at - timedelta(seconds=1),
+    )
+
+    with pytest.raises(PortfolioProjectionError, match="older than the position update horizon"):
+        apply_settlement_correction_once(
+            original_position=position,
+            settled_position=first.position,
+            cash_balance=first.cash_balance,
+            previous_settlement=previous_settlement,
+            corrected_settlement=corrected_settlement,
+            applied_journal_entry_ids=first.applied_journal_entry_ids,
+            currency="USD",
+            source_event_id=EventId("evt_settlement_correction_stale"),
+            created_at=CREATED_AT + timedelta(seconds=1),
+        )
+
+
 def test_apply_settlement_to_position_rejects_stale_settlement() -> None:
     position = _position(
         quantity="10",
@@ -303,7 +510,7 @@ def test_build_settlement_journal_entry_rejects_unsettled_settlement() -> None:
         payout_per_unit="1",
     )
 
-    with pytest.raises(PortfolioProjectionError, match="settled settlement status"):
+    with pytest.raises(PortfolioProjectionError, match=r"status in \{settled\}"):
         build_settlement_journal_entry(
             position=position,
             settlement=settlement,
@@ -383,6 +590,7 @@ def _settlement(
     winning_outcome_ids: tuple[str, ...],
     payout_per_unit: str,
     settled_at: datetime | None = SETTLED_AT,
+    correction_of_settlement_id: str | None = None,
 ) -> Settlement:
     return Settlement(
         settlement_id=settlement_id,
@@ -396,7 +604,25 @@ def _settlement(
         payout_per_unit=payout_per_unit,
         source="exchange",
         source_reference="settlement-source-001",
-        correction_of_settlement_id=None,
+        correction_of_settlement_id=correction_of_settlement_id,
+    )
+
+
+def _corrected_settlement(
+    *,
+    settlement_id: str = "set_settlement_correction_001",
+    winning_outcome_ids: tuple[str, ...],
+    payout_per_unit: str,
+    settled_at: datetime | None = CREATED_AT,
+    correction_of_settlement_id: str | None = "set_settlement_001",
+) -> Settlement:
+    return _settlement(
+        settlement_id=settlement_id,
+        status=SettlementStatus.CORRECTED,
+        winning_outcome_ids=winning_outcome_ids,
+        payout_per_unit=payout_per_unit,
+        settled_at=settled_at,
+        correction_of_settlement_id=correction_of_settlement_id,
     )
 
 
