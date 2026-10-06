@@ -11,6 +11,8 @@ from pmrp.schemas.events import (
     MARKET_ORDER_BOOK_DELTA_EVENT_TYPE,
     MARKET_ORDER_BOOK_SNAPSHOT_EVENT_TYPE,
     MARKET_TRADE_OBSERVED_EVENT_TYPE,
+    PORTFOLIO_MISMATCH_DETECTED_EVENT_TYPE,
+    PORTFOLIO_RECONCILED_EVENT_TYPE,
     RISK_APPROVED_EVENT_TYPE,
     RISK_CHECK_REQUESTED_EVENT_TYPE,
     RISK_KILL_SWITCH_ACTIVATED_EVENT_TYPE,
@@ -59,11 +61,19 @@ def test_default_event_type_registrations_cover_implemented_canonical_events() -
         RISK_LIMIT_BREACHED_EVENT_TYPE,
         RISK_KILL_SWITCH_ACTIVATED_EVENT_TYPE,
         RISK_KILL_SWITCH_RELEASED_EVENT_TYPE,
+        PORTFOLIO_RECONCILED_EVENT_TYPE,
+        PORTFOLIO_MISMATCH_DETECTED_EVENT_TYPE,
     }
     assert by_event_type[RISK_CHECK_REQUESTED_EVENT_TYPE].schema_name == (
         "risk_check_requested_event"
     )
     assert by_event_type[RISK_APPROVED_EVENT_TYPE].schema_name == "risk_approved_event"
+    assert by_event_type[PORTFOLIO_RECONCILED_EVENT_TYPE].schema_name == (
+        "portfolio_reconciled_event"
+    )
+    assert by_event_type[PORTFOLIO_MISMATCH_DETECTED_EVENT_TYPE].schema_name == (
+        "portfolio_mismatch_detected_event"
+    )
     assert all(registration.schema_version == 1 for registration in registrations)
 
 
