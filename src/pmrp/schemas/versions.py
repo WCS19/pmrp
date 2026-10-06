@@ -68,13 +68,16 @@ class RegisteredSchema:
 def _registered_schemas() -> tuple[RegisteredSchema, ...]:
     from pmrp.schemas.commands import CommandEnvelope
     from pmrp.schemas.events import (
+        CashBalanceChangedEvent,
         EventEnvelope,
         KillSwitchActivatedEvent,
         KillSwitchReleasedEvent,
         OrderBookDeltaEvent,
         OrderBookSnapshotEvent,
+        PnlUpdatedEvent,
         PortfolioMismatchDetectedEvent,
         PortfolioReconciledEvent,
+        PositionChangedEvent,
         RiskApprovedEvent,
         RiskCheckRequestedEvent,
         RiskLimitBreachedEvent,
@@ -246,6 +249,24 @@ def _registered_schemas() -> tuple[RegisteredSchema, ...]:
             1,
             SchemaCategory.EVENT,
             KillSwitchReleasedEvent,
+        ),
+        RegisteredSchema(
+            "position_changed_event",
+            1,
+            SchemaCategory.EVENT,
+            PositionChangedEvent,
+        ),
+        RegisteredSchema(
+            "cash_balance_changed_event",
+            1,
+            SchemaCategory.EVENT,
+            CashBalanceChangedEvent,
+        ),
+        RegisteredSchema(
+            "pnl_updated_event",
+            1,
+            SchemaCategory.EVENT,
+            PnlUpdatedEvent,
         ),
         RegisteredSchema(
             "portfolio_reconciled_event",

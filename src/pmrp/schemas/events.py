@@ -14,6 +14,7 @@ from pmrp.schemas.identifiers import (
     CausationRef,
     CorrelationId,
     EventId,
+    FillId,
     MarketId,
     OrderId,
     ReplaySessionId,
@@ -23,7 +24,13 @@ from pmrp.schemas.identifiers import (
 from pmrp.schemas.immutability import freeze_canonical_mapping, thaw_canonical_mapping
 from pmrp.schemas.market_data import OrderBookDelta, OrderBookSnapshot, Trade
 from pmrp.schemas.orders import ApprovedOrder, OrderIntent
-from pmrp.schemas.portfolio import ReconciliationResult, ReconciliationStatus
+from pmrp.schemas.portfolio import (
+    CashBalance,
+    PnlAttribution,
+    Position,
+    ReconciliationResult,
+    ReconciliationStatus,
+)
 from pmrp.schemas.risk import KillSwitchState, RiskBreach, RiskDecision, RiskInputSnapshot
 from pmrp.schemas.strategy import Signal, StrategyInstance
 from pmrp.schemas.time import UTCDateTime
@@ -39,6 +46,9 @@ RISK_REJECTED_EVENT_TYPE = "risk.rejected"
 RISK_LIMIT_BREACHED_EVENT_TYPE = "risk.limit_breached"
 RISK_KILL_SWITCH_ACTIVATED_EVENT_TYPE = "risk.kill_switch_activated"
 RISK_KILL_SWITCH_RELEASED_EVENT_TYPE = "risk.kill_switch_released"
+PORTFOLIO_POSITION_CHANGED_EVENT_TYPE = "portfolio.position_changed"
+PORTFOLIO_CASH_BALANCE_CHANGED_EVENT_TYPE = "portfolio.cash_balance_changed"
+PORTFOLIO_PNL_UPDATED_EVENT_TYPE = "portfolio.pnl_updated"
 PORTFOLIO_RECONCILED_EVENT_TYPE = "portfolio.reconciled"
 PORTFOLIO_MISMATCH_DETECTED_EVENT_TYPE = "portfolio.mismatch_detected"
 STRATEGY_STARTED_EVENT_TYPE = "strategy.started"
@@ -359,6 +369,52 @@ class KillSwitchReleasedEvent(CanonicalModel):
         return self
 
 
+class PositionChangedEvent(CanonicalModel):
+    envelope: EventEnvelope
+    previous_position: Position | None = None
+    current_position: Position
+    source_fill_id: FillId | None = None
+
+    @model_validator(mode="after")
+    def validate_envelope(self) -> Self:
+        _validate_event_type(self.envelope, PORTFOLIO_POSITION_CHANGED_EVENT_TYPE)
+        _validate_position_lineage(self.envelope, self.current_position)
+        if self.previous_position is not None:
+            _validate_position_identity(self.previous_position, self.current_position)
+        return self
+
+
+class CashBalanceChangedEvent(CanonicalModel):
+    envelope: EventEnvelope
+    previous_balance: CashBalance | None = None
+    current_balance: CashBalance
+    reason: str = Field(min_length=1, max_length=1024)
+
+    @field_validator("reason")
+    @classmethod
+    def validate_reason(cls, value: str) -> str:
+        return _validate_required_text(value, field_name="cash balance change reason")
+
+    @model_validator(mode="after")
+    def validate_envelope(self) -> Self:
+        _validate_event_type(self.envelope, PORTFOLIO_CASH_BALANCE_CHANGED_EVENT_TYPE)
+        _validate_cash_balance_lineage(self.envelope, self.current_balance)
+        if self.previous_balance is not None:
+            _validate_cash_balance_identity(self.previous_balance, self.current_balance)
+        return self
+
+
+class PnlUpdatedEvent(CanonicalModel):
+    envelope: EventEnvelope
+    attribution: PnlAttribution
+
+    @model_validator(mode="after")
+    def validate_envelope(self) -> Self:
+        _validate_event_type(self.envelope, PORTFOLIO_PNL_UPDATED_EVENT_TYPE)
+        _validate_pnl_lineage(self.envelope, self.attribution)
+        return self
+
+
 class PortfolioReconciledEvent(CanonicalModel):
     envelope: EventEnvelope
     result: ReconciliationResult
@@ -433,7 +489,7 @@ def _validate_exchange_lineage(
     field_name: str,
 ) -> None:
     if envelope_exchange is None:
-        msg = "event envelope exchange is required for market data events"
+        msg = "event envelope exchange is required for exchange-scoped events"
         raise ValueError(msg)
     if envelope_exchange != payload_exchange:
         msg = f"event envelope exchange must match {field_name}"
@@ -505,6 +561,106 @@ def _validate_reconciliation_lineage(
         result.account_id,
         field_name="result.account_id",
     )
+
+
+def _validate_position_lineage(
+    envelope: EventEnvelope,
+    position: Position,
+) -> None:
+    _validate_exchange_lineage(
+        envelope.exchange,
+        position.exchange,
+        field_name="current_position.exchange",
+    )
+    _validate_account_lineage(
+        envelope.account_id,
+        position.account_id,
+        field_name="current_position.account_id",
+    )
+    _validate_market_lineage(
+        envelope.market_id,
+        position.market_id,
+        field_name="current_position.market_id",
+    )
+
+
+def _validate_position_identity(previous: Position, current: Position) -> None:
+    identity_fields = (
+        "position_id",
+        "exchange",
+        "account_id",
+        "market_id",
+        "contract_id",
+        "outcome_id",
+    )
+    for field_name in identity_fields:
+        if getattr(previous, field_name) != getattr(current, field_name):
+            msg = f"previous_position {field_name} must match current_position"
+            raise ValueError(msg)
+
+
+def _validate_cash_balance_lineage(
+    envelope: EventEnvelope,
+    balance: CashBalance,
+) -> None:
+    _validate_exchange_lineage(
+        envelope.exchange,
+        balance.exchange,
+        field_name="current_balance.exchange",
+    )
+    _validate_account_lineage(
+        envelope.account_id,
+        balance.account_id,
+        field_name="current_balance.account_id",
+    )
+
+
+def _validate_cash_balance_identity(previous: CashBalance, current: CashBalance) -> None:
+    identity_fields = (
+        "balance_id",
+        "exchange",
+        "account_id",
+        "currency",
+    )
+    for field_name in identity_fields:
+        if getattr(previous, field_name) != getattr(current, field_name):
+            msg = f"previous_balance {field_name} must match current_balance"
+            raise ValueError(msg)
+
+
+def _validate_pnl_lineage(
+    envelope: EventEnvelope,
+    attribution: PnlAttribution,
+) -> None:
+    if attribution.exchange is not None:
+        _validate_exchange_lineage(
+            envelope.exchange,
+            attribution.exchange,
+            field_name="attribution.exchange",
+        )
+    elif envelope.exchange is not None:
+        msg = "event envelope exchange requires attribution.exchange"
+        raise ValueError(msg)
+
+    if attribution.strategy_id is not None:
+        _validate_strategy_lineage(
+            envelope.strategy_id,
+            attribution.strategy_id,
+            field_name="attribution.strategy_id",
+        )
+    elif envelope.strategy_id is not None:
+        msg = "event envelope strategy_id requires attribution.strategy_id"
+        raise ValueError(msg)
+
+    if attribution.market_id is not None:
+        _validate_market_lineage(
+            envelope.market_id,
+            attribution.market_id,
+            field_name="attribution.market_id",
+        )
+    elif envelope.market_id is not None:
+        msg = "event envelope market_id requires attribution.market_id"
+        raise ValueError(msg)
 
 
 def _validate_risk_decision_status(
