@@ -38,6 +38,14 @@ from pmrp.portfolio.positions import (
     derive_position_id,
 )
 from pmrp.portfolio.projections import FillApplicationResult, apply_fill_once
+from pmrp.portfolio.reconciliation import (
+    RECONCILIATION_SEVERITY_MISMATCH,
+    RECONCILIATION_SEVERITY_UNKNOWN,
+    build_reconciliation_mismatch,
+    build_reconciliation_result,
+    derive_reconciliation_mismatch_id,
+    reconcile_portfolio_snapshots,
+)
 from pmrp.portfolio.settlement import (
     SETTLEMENT_REFERENCE_TYPE,
     SettlementAccountingResult,
@@ -61,6 +69,8 @@ __all__ = [
     "BALANCE_CORRECTION_REFERENCE_TYPE",
     "FILL_REFERENCE_TYPE",
     "JOURNAL_PNL_ATTRIBUTION_VERSION",
+    "RECONCILIATION_SEVERITY_MISMATCH",
+    "RECONCILIATION_SEVERITY_UNKNOWN",
     "SETTLEMENT_REFERENCE_TYPE",
     "UNREALIZED_PNL_POLICY",
     "WEIGHTED_AVERAGE_COST_METHOD",
@@ -84,6 +94,8 @@ __all__ = [
     "build_balance_correction_journal_entry",
     "build_fill_journal_entry",
     "build_journal_pnl_attribution",
+    "build_reconciliation_mismatch",
+    "build_reconciliation_result",
     "build_settlement_accounting_result",
     "build_settlement_journal_entry",
     "derive_balance_correction_journal_entry_id",
@@ -91,5 +103,7 @@ __all__ = [
     "derive_fill_journal_entry_id",
     "derive_journal_pnl_attribution_id",
     "derive_position_id",
+    "derive_reconciliation_mismatch_id",
     "derive_settlement_journal_entry_id",
+    "reconcile_portfolio_snapshots",
 ]
