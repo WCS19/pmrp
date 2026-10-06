@@ -23,6 +23,7 @@ from pmrp.schemas.identifiers import (
 from pmrp.schemas.immutability import freeze_canonical_mapping, thaw_canonical_mapping
 from pmrp.schemas.market_data import OrderBookDelta, OrderBookSnapshot, Trade
 from pmrp.schemas.orders import ApprovedOrder, OrderIntent
+from pmrp.schemas.portfolio import ReconciliationResult, ReconciliationStatus
 from pmrp.schemas.risk import KillSwitchState, RiskBreach, RiskDecision, RiskInputSnapshot
 from pmrp.schemas.strategy import Signal, StrategyInstance
 from pmrp.schemas.time import UTCDateTime
@@ -38,6 +39,8 @@ RISK_REJECTED_EVENT_TYPE = "risk.rejected"
 RISK_LIMIT_BREACHED_EVENT_TYPE = "risk.limit_breached"
 RISK_KILL_SWITCH_ACTIVATED_EVENT_TYPE = "risk.kill_switch_activated"
 RISK_KILL_SWITCH_RELEASED_EVENT_TYPE = "risk.kill_switch_released"
+PORTFOLIO_RECONCILED_EVENT_TYPE = "portfolio.reconciled"
+PORTFOLIO_MISMATCH_DETECTED_EVENT_TYPE = "portfolio.mismatch_detected"
 STRATEGY_STARTED_EVENT_TYPE = "strategy.started"
 STRATEGY_STOPPED_EVENT_TYPE = "strategy.stopped"
 STRATEGY_HEALTH_CHANGED_EVENT_TYPE = "strategy.health_changed"
@@ -356,6 +359,40 @@ class KillSwitchReleasedEvent(CanonicalModel):
         return self
 
 
+class PortfolioReconciledEvent(CanonicalModel):
+    envelope: EventEnvelope
+    result: ReconciliationResult
+
+    @model_validator(mode="after")
+    def validate_envelope(self) -> Self:
+        _validate_event_type(self.envelope, PORTFOLIO_RECONCILED_EVENT_TYPE)
+        _validate_reconciliation_lineage(self.envelope, self.result)
+        if self.result.status is not ReconciliationStatus.HEALTHY:
+            msg = "portfolio reconciled event requires healthy reconciliation status"
+            raise ValueError(msg)
+        if not self.result.trading_gate_released:
+            msg = "portfolio reconciled event requires released trading gate"
+            raise ValueError(msg)
+        return self
+
+
+class PortfolioMismatchDetectedEvent(CanonicalModel):
+    envelope: EventEnvelope
+    result: ReconciliationResult
+
+    @model_validator(mode="after")
+    def validate_envelope(self) -> Self:
+        _validate_event_type(self.envelope, PORTFOLIO_MISMATCH_DETECTED_EVENT_TYPE)
+        _validate_reconciliation_lineage(self.envelope, self.result)
+        if self.result.status is ReconciliationStatus.HEALTHY:
+            msg = "portfolio mismatch event requires non-healthy reconciliation status"
+            raise ValueError(msg)
+        if not self.result.mismatches:
+            msg = "portfolio mismatch event requires at least one mismatch"
+            raise ValueError(msg)
+        return self
+
+
 def _validate_event_type(envelope: EventEnvelope, expected_event_type: str) -> None:
     if envelope.event_type != expected_event_type:
         msg = f"event envelope event_type must be {expected_event_type!r}"
@@ -452,6 +489,22 @@ def _validate_correlation_lineage(
     if envelope_correlation_id != payload_correlation_id:
         msg = "event envelope correlation_id must match payload correlation_id"
         raise ValueError(msg)
+
+
+def _validate_reconciliation_lineage(
+    envelope: EventEnvelope,
+    result: ReconciliationResult,
+) -> None:
+    _validate_exchange_lineage(
+        envelope.exchange,
+        result.exchange,
+        field_name="result.exchange",
+    )
+    _validate_account_lineage(
+        envelope.account_id,
+        result.account_id,
+        field_name="result.account_id",
+    )
 
 
 def _validate_risk_decision_status(

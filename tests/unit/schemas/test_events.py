@@ -7,6 +7,8 @@ from pydantic import ValidationError
 
 from pmrp.schemas.enums import DataQualityFlag, OrderType, RiskDecisionStatus, Side, TimeInForce
 from pmrp.schemas.events import (
+    PORTFOLIO_MISMATCH_DETECTED_EVENT_TYPE,
+    PORTFOLIO_RECONCILED_EVENT_TYPE,
     RISK_APPROVED_EVENT_TYPE,
     RISK_CHECK_REQUESTED_EVENT_TYPE,
     RISK_KILL_SWITCH_ACTIVATED_EVENT_TYPE,
@@ -16,12 +18,15 @@ from pmrp.schemas.events import (
     EventEnvelope,
     KillSwitchActivatedEvent,
     KillSwitchReleasedEvent,
+    PortfolioMismatchDetectedEvent,
+    PortfolioReconciledEvent,
     RiskApprovedEvent,
     RiskCheckRequestedEvent,
     RiskLimitBreachedEvent,
     RiskRejectedEvent,
 )
 from pmrp.schemas.identifiers import CausationId, CommandId, EventId
+from pmrp.schemas.portfolio import ReconciliationStatus
 from pmrp.schemas.risk import KillSwitchScope, RiskLimitScope
 from pmrp.schemas.serialization import canonical_json, canonical_sha256
 from pmrp.schemas.versions import get_schema_model, get_schema_registration
@@ -398,6 +403,107 @@ def test_kill_switch_events_validate_active_state() -> None:
         )
 
 
+def test_portfolio_reconciled_event_accepts_healthy_result() -> None:
+    event = PortfolioReconciledEvent.model_validate(
+        {
+            "envelope": _portfolio_envelope_payload(PORTFOLIO_RECONCILED_EVENT_TYPE),
+            "result": _reconciliation_result_payload(),
+        }
+    )
+
+    assert event.envelope.event_type == PORTFOLIO_RECONCILED_EVENT_TYPE
+    assert event.result.status is ReconciliationStatus.HEALTHY
+    assert event.result.trading_gate_released is True
+
+
+def test_portfolio_reconciled_event_rejects_wrong_event_type() -> None:
+    with pytest.raises(ValidationError, match=PORTFOLIO_RECONCILED_EVENT_TYPE):
+        PortfolioReconciledEvent.model_validate(
+            {
+                "envelope": _portfolio_envelope_payload(PORTFOLIO_MISMATCH_DETECTED_EVENT_TYPE),
+                "result": _reconciliation_result_payload(),
+            }
+        )
+
+
+def test_portfolio_reconciled_event_rejects_nonhealthy_result() -> None:
+    with pytest.raises(ValidationError, match="healthy"):
+        PortfolioReconciledEvent.model_validate(
+            {
+                "envelope": _portfolio_envelope_payload(PORTFOLIO_RECONCILED_EVENT_TYPE),
+                "result": _reconciliation_result_payload(
+                    status=ReconciliationStatus.MISMATCH,
+                    mismatches=(_reconciliation_mismatch_payload(),),
+                    trading_gate_released=False,
+                ),
+            }
+        )
+
+
+def test_portfolio_mismatch_detected_event_accepts_mismatch_result() -> None:
+    event = PortfolioMismatchDetectedEvent.model_validate(
+        {
+            "envelope": _portfolio_envelope_payload(PORTFOLIO_MISMATCH_DETECTED_EVENT_TYPE),
+            "result": _reconciliation_result_payload(
+                status=ReconciliationStatus.MISMATCH,
+                mismatches=(_reconciliation_mismatch_payload(),),
+                trading_gate_released=False,
+            ),
+        }
+    )
+
+    assert event.envelope.event_type == PORTFOLIO_MISMATCH_DETECTED_EVENT_TYPE
+    assert event.result.status is ReconciliationStatus.MISMATCH
+    assert event.result.trading_gate_released is False
+
+
+def test_portfolio_mismatch_detected_event_rejects_healthy_result() -> None:
+    with pytest.raises(ValidationError, match="non-healthy"):
+        PortfolioMismatchDetectedEvent.model_validate(
+            {
+                "envelope": _portfolio_envelope_payload(PORTFOLIO_MISMATCH_DETECTED_EVENT_TYPE),
+                "result": _reconciliation_result_payload(),
+            }
+        )
+
+
+def test_portfolio_mismatch_detected_event_rejects_missing_mismatches() -> None:
+    with pytest.raises(ValidationError, match="at least one mismatch"):
+        PortfolioMismatchDetectedEvent.model_validate(
+            {
+                "envelope": _portfolio_envelope_payload(PORTFOLIO_MISMATCH_DETECTED_EVENT_TYPE),
+                "result": _reconciliation_result_payload(
+                    status=ReconciliationStatus.UNKNOWN,
+                    mismatches=(),
+                    trading_gate_released=False,
+                ),
+            }
+        )
+
+
+def test_portfolio_reconciliation_events_require_account_lineage() -> None:
+    with pytest.raises(ValidationError, match="account_id"):
+        PortfolioReconciledEvent.model_validate(
+            {
+                "envelope": _portfolio_envelope_payload(
+                    PORTFOLIO_RECONCILED_EVENT_TYPE,
+                    account_id=None,
+                ),
+                "result": _reconciliation_result_payload(),
+            }
+        )
+
+
+def test_portfolio_reconciliation_events_reject_exchange_mismatch() -> None:
+    with pytest.raises(ValidationError, match="exchange"):
+        PortfolioReconciledEvent.model_validate(
+            {
+                "envelope": _portfolio_envelope_payload(PORTFOLIO_RECONCILED_EVENT_TYPE),
+                "result": _reconciliation_result_payload(exchange="polymarket"),
+            }
+        )
+
+
 def test_risk_event_registry_entries_exist() -> None:
     expected = {
         "risk_check_requested_event": RiskCheckRequestedEvent,
@@ -413,6 +519,67 @@ def test_risk_event_registry_entries_exist() -> None:
 
         assert registration.model_path == f"pmrp.schemas.events.{model.__name__}"
         assert get_schema_model(schema_name, 1) is model
+
+
+def test_portfolio_reconciliation_event_registry_entries_exist() -> None:
+    expected = {
+        "portfolio_reconciled_event": PortfolioReconciledEvent,
+        "portfolio_mismatch_detected_event": PortfolioMismatchDetectedEvent,
+    }
+
+    for schema_name, model in expected.items():
+        registration = get_schema_registration(schema_name, 1)
+
+        assert registration.model_path == f"pmrp.schemas.events.{model.__name__}"
+        assert get_schema_model(schema_name, 1) is model
+
+
+def _portfolio_envelope_payload(event_type: str, **overrides: object) -> dict[str, object]:
+    payload = _event_payload(
+        event_type=event_type,
+        producer="portfolio",
+        market_id=None,
+        account_id="acct_event",
+        strategy_id=None,
+        order_id=None,
+        correlation_id="corr_portfolio_event",
+        causation_id="evt_01j00000000000000000000000",
+    )
+    payload.update(overrides)
+    return payload
+
+
+def _reconciliation_result_payload(**overrides: object) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "reconciliation_id": "recon_event_001",
+        "exchange": "kalshi",
+        "account_id": "acct_event",
+        "started_at": "2026-07-28T12:00:00Z",
+        "completed_at": "2026-07-28T12:00:01Z",
+        "status": ReconciliationStatus.HEALTHY,
+        "mismatches": (),
+        "open_orders_checked": 0,
+        "positions_checked": 1,
+        "balances_checked": 1,
+        "fills_checked": 0,
+        "trading_gate_released": True,
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _reconciliation_mismatch_payload(**overrides: object) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "mismatch_id": "recon_mismatch_event_001",
+        "category": "balance.available",
+        "local_value": "100.00",
+        "external_value": "101.50",
+        "severity": "mismatch",
+        "explanation": "Available cash differs.",
+        "requires_manual_review": True,
+    }
+    payload.update(overrides)
+    return payload
 
 
 def _risk_envelope_payload(event_type: str, **overrides: object) -> dict[str, object]:
