@@ -11,7 +11,10 @@ from pmrp.schemas.events import (
     MARKET_ORDER_BOOK_DELTA_EVENT_TYPE,
     MARKET_ORDER_BOOK_SNAPSHOT_EVENT_TYPE,
     MARKET_TRADE_OBSERVED_EVENT_TYPE,
+    PORTFOLIO_CASH_BALANCE_CHANGED_EVENT_TYPE,
     PORTFOLIO_MISMATCH_DETECTED_EVENT_TYPE,
+    PORTFOLIO_PNL_UPDATED_EVENT_TYPE,
+    PORTFOLIO_POSITION_CHANGED_EVENT_TYPE,
     PORTFOLIO_RECONCILED_EVENT_TYPE,
     RISK_APPROVED_EVENT_TYPE,
     RISK_CHECK_REQUESTED_EVENT_TYPE,
@@ -61,6 +64,9 @@ def test_default_event_type_registrations_cover_implemented_canonical_events() -
         RISK_LIMIT_BREACHED_EVENT_TYPE,
         RISK_KILL_SWITCH_ACTIVATED_EVENT_TYPE,
         RISK_KILL_SWITCH_RELEASED_EVENT_TYPE,
+        PORTFOLIO_POSITION_CHANGED_EVENT_TYPE,
+        PORTFOLIO_CASH_BALANCE_CHANGED_EVENT_TYPE,
+        PORTFOLIO_PNL_UPDATED_EVENT_TYPE,
         PORTFOLIO_RECONCILED_EVENT_TYPE,
         PORTFOLIO_MISMATCH_DETECTED_EVENT_TYPE,
     }
@@ -68,6 +74,13 @@ def test_default_event_type_registrations_cover_implemented_canonical_events() -
         "risk_check_requested_event"
     )
     assert by_event_type[RISK_APPROVED_EVENT_TYPE].schema_name == "risk_approved_event"
+    assert by_event_type[PORTFOLIO_POSITION_CHANGED_EVENT_TYPE].schema_name == (
+        "position_changed_event"
+    )
+    assert by_event_type[PORTFOLIO_CASH_BALANCE_CHANGED_EVENT_TYPE].schema_name == (
+        "cash_balance_changed_event"
+    )
+    assert by_event_type[PORTFOLIO_PNL_UPDATED_EVENT_TYPE].schema_name == "pnl_updated_event"
     assert by_event_type[PORTFOLIO_RECONCILED_EVENT_TYPE].schema_name == (
         "portfolio_reconciled_event"
     )

@@ -7,7 +7,10 @@ from pydantic import ValidationError
 
 from pmrp.schemas.enums import DataQualityFlag, OrderType, RiskDecisionStatus, Side, TimeInForce
 from pmrp.schemas.events import (
+    PORTFOLIO_CASH_BALANCE_CHANGED_EVENT_TYPE,
     PORTFOLIO_MISMATCH_DETECTED_EVENT_TYPE,
+    PORTFOLIO_PNL_UPDATED_EVENT_TYPE,
+    PORTFOLIO_POSITION_CHANGED_EVENT_TYPE,
     PORTFOLIO_RECONCILED_EVENT_TYPE,
     RISK_APPROVED_EVENT_TYPE,
     RISK_CHECK_REQUESTED_EVENT_TYPE,
@@ -15,11 +18,14 @@ from pmrp.schemas.events import (
     RISK_KILL_SWITCH_RELEASED_EVENT_TYPE,
     RISK_LIMIT_BREACHED_EVENT_TYPE,
     RISK_REJECTED_EVENT_TYPE,
+    CashBalanceChangedEvent,
     EventEnvelope,
     KillSwitchActivatedEvent,
     KillSwitchReleasedEvent,
+    PnlUpdatedEvent,
     PortfolioMismatchDetectedEvent,
     PortfolioReconciledEvent,
+    PositionChangedEvent,
     RiskApprovedEvent,
     RiskCheckRequestedEvent,
     RiskLimitBreachedEvent,
@@ -403,6 +409,158 @@ def test_kill_switch_events_validate_active_state() -> None:
         )
 
 
+def test_position_changed_event_accepts_valid_lineage() -> None:
+    event = PositionChangedEvent.model_validate(
+        {
+            "envelope": _portfolio_envelope_payload(
+                PORTFOLIO_POSITION_CHANGED_EVENT_TYPE,
+                market_id="mkt_event",
+            ),
+            "previous_position": _position_payload(quantity="4", aggregate_version=1),
+            "current_position": _position_payload(quantity="5", aggregate_version=2),
+            "source_fill_id": "fill_event",
+        }
+    )
+
+    assert event.envelope.event_type == PORTFOLIO_POSITION_CHANGED_EVENT_TYPE
+    assert event.source_fill_id == "fill_event"
+    assert event.current_position.quantity == 5
+
+
+def test_position_changed_event_rejects_wrong_event_type() -> None:
+    with pytest.raises(ValidationError, match=PORTFOLIO_POSITION_CHANGED_EVENT_TYPE):
+        PositionChangedEvent.model_validate(
+            {
+                "envelope": _portfolio_envelope_payload(
+                    PORTFOLIO_CASH_BALANCE_CHANGED_EVENT_TYPE,
+                    market_id="mkt_event",
+                ),
+                "current_position": _position_payload(),
+            }
+        )
+
+
+def test_position_changed_event_rejects_market_mismatch() -> None:
+    with pytest.raises(ValidationError, match="market_id"):
+        PositionChangedEvent.model_validate(
+            {
+                "envelope": _portfolio_envelope_payload(
+                    PORTFOLIO_POSITION_CHANGED_EVENT_TYPE,
+                    market_id="mkt_other_event",
+                ),
+                "current_position": _position_payload(),
+            }
+        )
+
+
+def test_position_changed_event_rejects_previous_identity_mismatch() -> None:
+    with pytest.raises(ValidationError, match="contract_id"):
+        PositionChangedEvent.model_validate(
+            {
+                "envelope": _portfolio_envelope_payload(
+                    PORTFOLIO_POSITION_CHANGED_EVENT_TYPE,
+                    market_id="mkt_event",
+                ),
+                "previous_position": _position_payload(contract_id="ctr_other_event"),
+                "current_position": _position_payload(),
+            }
+        )
+
+
+def test_cash_balance_changed_event_accepts_valid_lineage() -> None:
+    event = CashBalanceChangedEvent.model_validate(
+        {
+            "envelope": _portfolio_envelope_payload(PORTFOLIO_CASH_BALANCE_CHANGED_EVENT_TYPE),
+            "previous_balance": _cash_balance_payload(available="99.00", total="109.00"),
+            "current_balance": _cash_balance_payload(available="100.00", total="110.00"),
+            "reason": "manual_balance_correction",
+        }
+    )
+
+    assert event.envelope.event_type == PORTFOLIO_CASH_BALANCE_CHANGED_EVENT_TYPE
+    assert event.current_balance.available == 100
+    assert event.reason == "manual_balance_correction"
+
+
+def test_cash_balance_changed_event_rejects_blank_reason() -> None:
+    with pytest.raises(ValidationError, match="cash balance change reason"):
+        CashBalanceChangedEvent.model_validate(
+            {
+                "envelope": _portfolio_envelope_payload(PORTFOLIO_CASH_BALANCE_CHANGED_EVENT_TYPE),
+                "current_balance": _cash_balance_payload(),
+                "reason": " manual_balance_correction",
+            }
+        )
+
+
+def test_cash_balance_changed_event_rejects_account_mismatch() -> None:
+    with pytest.raises(ValidationError, match="account_id"):
+        CashBalanceChangedEvent.model_validate(
+            {
+                "envelope": _portfolio_envelope_payload(
+                    PORTFOLIO_CASH_BALANCE_CHANGED_EVENT_TYPE,
+                    account_id="acct_other_event",
+                ),
+                "current_balance": _cash_balance_payload(),
+                "reason": "manual_balance_correction",
+            }
+        )
+
+
+def test_cash_balance_changed_event_rejects_previous_currency_mismatch() -> None:
+    with pytest.raises(ValidationError, match="currency"):
+        CashBalanceChangedEvent.model_validate(
+            {
+                "envelope": _portfolio_envelope_payload(PORTFOLIO_CASH_BALANCE_CHANGED_EVENT_TYPE),
+                "previous_balance": _cash_balance_payload(currency="EUR"),
+                "current_balance": _cash_balance_payload(),
+                "reason": "manual_balance_correction",
+            }
+        )
+
+
+def test_pnl_updated_event_accepts_valid_lineage() -> None:
+    event = PnlUpdatedEvent.model_validate(
+        {
+            "envelope": _portfolio_envelope_payload(
+                PORTFOLIO_PNL_UPDATED_EVENT_TYPE,
+                market_id="mkt_event",
+                strategy_id="strat_event",
+            ),
+            "attribution": _pnl_attribution_payload(),
+        }
+    )
+
+    assert event.envelope.event_type == PORTFOLIO_PNL_UPDATED_EVENT_TYPE
+    assert str(event.attribution.total_pnl.amount) == "2.85"
+
+
+def test_pnl_updated_event_rejects_missing_strategy_lineage() -> None:
+    with pytest.raises(ValidationError, match="strategy_id"):
+        PnlUpdatedEvent.model_validate(
+            {
+                "envelope": _portfolio_envelope_payload(
+                    PORTFOLIO_PNL_UPDATED_EVENT_TYPE,
+                    market_id="mkt_event",
+                ),
+                "attribution": _pnl_attribution_payload(),
+            }
+        )
+
+
+def test_pnl_updated_event_rejects_envelope_market_without_payload_scope() -> None:
+    with pytest.raises(ValidationError, match=r"attribution\.market_id"):
+        PnlUpdatedEvent.model_validate(
+            {
+                "envelope": _portfolio_envelope_payload(
+                    PORTFOLIO_PNL_UPDATED_EVENT_TYPE,
+                    market_id="mkt_event",
+                ),
+                "attribution": _pnl_attribution_payload(strategy_id=None, market_id=None),
+            }
+        )
+
+
 def test_portfolio_reconciled_event_accepts_healthy_result() -> None:
     event = PortfolioReconciledEvent.model_validate(
         {
@@ -504,6 +662,16 @@ def test_portfolio_reconciliation_events_reject_exchange_mismatch() -> None:
         )
 
 
+def test_portfolio_reconciliation_events_reject_account_mismatch() -> None:
+    with pytest.raises(ValidationError, match="account_id"):
+        PortfolioReconciledEvent.model_validate(
+            {
+                "envelope": _portfolio_envelope_payload(PORTFOLIO_RECONCILED_EVENT_TYPE),
+                "result": _reconciliation_result_payload(account_id="acct_other_event"),
+            }
+        )
+
+
 def test_risk_event_registry_entries_exist() -> None:
     expected = {
         "risk_check_requested_event": RiskCheckRequestedEvent,
@@ -523,6 +691,9 @@ def test_risk_event_registry_entries_exist() -> None:
 
 def test_portfolio_reconciliation_event_registry_entries_exist() -> None:
     expected = {
+        "position_changed_event": PositionChangedEvent,
+        "cash_balance_changed_event": CashBalanceChangedEvent,
+        "pnl_updated_event": PnlUpdatedEvent,
         "portfolio_reconciled_event": PortfolioReconciledEvent,
         "portfolio_mismatch_detected_event": PortfolioMismatchDetectedEvent,
     }
@@ -545,6 +716,68 @@ def _portfolio_envelope_payload(event_type: str, **overrides: object) -> dict[st
         correlation_id="corr_portfolio_event",
         causation_id="evt_01j00000000000000000000000",
     )
+    payload.update(overrides)
+    return payload
+
+
+def _money_payload(amount: str = "0.00", currency: str = "USD") -> dict[str, object]:
+    return {"amount": amount, "currency": currency}
+
+
+def _position_payload(**overrides: object) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "position_id": "pos_event",
+        "exchange": "kalshi",
+        "account_id": "acct_event",
+        "market_id": "mkt_event",
+        "contract_id": "ctr_event",
+        "outcome_id": "out_event",
+        "quantity": "5",
+        "average_entry_price": "0.45",
+        "realized_pnl": _money_payload("0.00"),
+        "unrealized_pnl": _money_payload("1.25"),
+        "fees_paid": _money_payload("0.25"),
+        "rebates_received": _money_payload("0.00"),
+        "opened_at": "2026-07-28T12:00:00Z",
+        "last_updated_at": "2026-07-28T12:01:00Z",
+        "aggregate_version": 2,
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _cash_balance_payload(**overrides: object) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "balance_id": "bal_event",
+        "exchange": "kalshi",
+        "account_id": "acct_event",
+        "currency": "USD",
+        "available": "100.00",
+        "reserved": "10.00",
+        "total": "110.00",
+        "captured_at": "2026-07-28T12:00:00Z",
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _pnl_attribution_payload(**overrides: object) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "attribution_id": "pnl_event",
+        "strategy_id": "strat_event",
+        "market_id": "mkt_event",
+        "exchange": "kalshi",
+        "starts_at": "2026-07-28T12:00:00Z",
+        "ends_at": "2026-07-28T12:01:00Z",
+        "realized_trading_pnl": _money_payload("2.00"),
+        "unrealized_pnl_change": _money_payload("1.00"),
+        "fees": _money_payload("0.25"),
+        "rebates": _money_payload("0.10"),
+        "slippage": None,
+        "settlement_pnl": None,
+        "total_pnl": _money_payload("2.85"),
+        "calculation_version": "avg-cost-v1",
+    }
     payload.update(overrides)
     return payload
 
