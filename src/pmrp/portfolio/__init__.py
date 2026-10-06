@@ -1,10 +1,16 @@
 """Portfolio accounting domain services."""
 
 from pmrp.portfolio.balances import (
+    ACCOUNT_BALANCE_CORRECTION,
+    BALANCE_CORRECTION_REFERENCE_TYPE,
     CashBalanceApplicationResult,
+    CashBalanceCorrectionResult,
     CashBalanceProjectionResult,
+    apply_balance_correction_once,
     apply_journal_to_cash_balance,
     apply_journal_to_cash_balance_once,
+    build_balance_correction_journal_entry,
+    derive_balance_correction_journal_entry_id,
     derive_cash_balance_id,
 )
 from pmrp.portfolio.errors import PortfolioError, PortfolioProjectionError
@@ -45,18 +51,21 @@ from pmrp.portfolio.settlement import (
 )
 
 __all__ = [
+    "ACCOUNT_BALANCE_CORRECTION",
     "ACCOUNT_CASH",
     "ACCOUNT_FEES_PAID",
     "ACCOUNT_POSITION_COST",
     "ACCOUNT_REALIZED_TRADING_PNL",
     "ACCOUNT_REBATES_RECEIVED",
     "ACCOUNT_SETTLEMENT_PNL",
+    "BALANCE_CORRECTION_REFERENCE_TYPE",
     "FILL_REFERENCE_TYPE",
     "JOURNAL_PNL_ATTRIBUTION_VERSION",
     "SETTLEMENT_REFERENCE_TYPE",
     "UNREALIZED_PNL_POLICY",
     "WEIGHTED_AVERAGE_COST_METHOD",
     "CashBalanceApplicationResult",
+    "CashBalanceCorrectionResult",
     "CashBalanceProjectionResult",
     "FillApplicationResult",
     "PortfolioError",
@@ -65,16 +74,19 @@ __all__ = [
     "SettlementAccountingResult",
     "SettlementApplicationResult",
     "SettlementPositionProjectionResult",
+    "apply_balance_correction_once",
     "apply_fill_once",
     "apply_fill_to_position",
     "apply_journal_to_cash_balance",
     "apply_journal_to_cash_balance_once",
     "apply_settlement_once",
     "apply_settlement_to_position",
+    "build_balance_correction_journal_entry",
     "build_fill_journal_entry",
     "build_journal_pnl_attribution",
     "build_settlement_accounting_result",
     "build_settlement_journal_entry",
+    "derive_balance_correction_journal_entry_id",
     "derive_cash_balance_id",
     "derive_fill_journal_entry_id",
     "derive_journal_pnl_attribution_id",
