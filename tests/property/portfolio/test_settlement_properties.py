@@ -12,6 +12,7 @@ from hypothesis import strategies as st
 from pmrp.portfolio import (
     apply_settlement_once,
     build_settlement_accounting_result,
+    build_settlement_correction_journal_entry,
     build_settlement_journal_entry,
 )
 from pmrp.schemas.identifiers import EventId
@@ -105,6 +106,45 @@ def test_settlement_journal_entries_balance(
 @given(
     quantity=_QUANTITIES,
     average_entry_price=_PROBABILITY_AMOUNTS,
+    previous_winning_position=st.booleans(),
+    corrected_winning_position=st.booleans(),
+    previous_payout_per_unit=_PROBABILITY_AMOUNTS,
+    corrected_payout_per_unit=_PROBABILITY_AMOUNTS,
+)
+def test_settlement_correction_journal_entries_balance(
+    quantity: Decimal,
+    average_entry_price: Decimal,
+    previous_winning_position: bool,
+    corrected_winning_position: bool,
+    previous_payout_per_unit: Decimal,
+    corrected_payout_per_unit: Decimal,
+) -> None:
+    assume(quantity != Decimal("0"))
+    position = _position(quantity=quantity, average_entry_price=average_entry_price)
+    previous_settlement = _settlement(
+        winning_outcome_ids=("out_yes",) if previous_winning_position else ("out_no",),
+        payout_per_unit=previous_payout_per_unit,
+    )
+    corrected_settlement = _corrected_settlement(
+        winning_outcome_ids=("out_yes",) if corrected_winning_position else ("out_no",),
+        payout_per_unit=corrected_payout_per_unit,
+    )
+
+    journal = build_settlement_correction_journal_entry(
+        original_position=position,
+        previous_settlement=previous_settlement,
+        corrected_settlement=corrected_settlement,
+        currency="USD",
+        source_event_id=EventId("evt_property_settlement_correction_journal"),
+        created_at=CREATED_AT,
+    )
+
+    assert _journal_total(journal) == Decimal("0")
+
+
+@given(
+    quantity=_QUANTITIES,
+    average_entry_price=_PROBABILITY_AMOUNTS,
     payout_per_unit=_PROBABILITY_AMOUNTS,
     available=st.integers(min_value=-1_000_000, max_value=1_000_000).map(
         lambda cents: Decimal(cents) / Decimal("100")
@@ -187,6 +227,27 @@ def _settlement(
         source="exchange",
         source_reference="settlement-source-property",
         correction_of_settlement_id=None,
+    )
+
+
+def _corrected_settlement(
+    *,
+    winning_outcome_ids: tuple[str, ...],
+    payout_per_unit: Decimal,
+) -> Settlement:
+    return Settlement(
+        settlement_id="set_property_settlement_correction",
+        market_id="mkt_property_settlement",
+        exchange="kalshi",
+        status=SettlementStatus.CORRECTED,
+        winning_outcome_ids=winning_outcome_ids,
+        resolved_at=RESOLVED_AT,
+        finalized_at=FINALIZED_AT,
+        settled_at=SETTLED_AT,
+        payout_per_unit=payout_per_unit,
+        source="exchange",
+        source_reference="settlement-source-property-correction",
+        correction_of_settlement_id="set_property_settlement",
     )
 
 
