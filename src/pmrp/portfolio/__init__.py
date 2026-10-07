@@ -67,9 +67,8 @@ from pmrp.portfolio.transfers import (
     ACCOUNT_CASH_TRANSFER,
     TRANSFER_REFERENCE_TYPE,
     CashTransferApplicationResult,
-    CashTransferJournalEntries,
     apply_cash_transfer_once,
-    build_cash_transfer_journal_entries,
+    build_cash_transfer_journal_entry,
     derive_cash_transfer_journal_entry_id,
 )
 
@@ -95,7 +94,6 @@ __all__ = [
     "CashBalanceCorrectionResult",
     "CashBalanceProjectionResult",
     "CashTransferApplicationResult",
-    "CashTransferJournalEntries",
     "FillApplicationResult",
     "PortfolioError",
     "PortfolioProjectionError",
@@ -115,7 +113,7 @@ __all__ = [
     "apply_settlement_once",
     "apply_settlement_to_position",
     "build_balance_correction_journal_entry",
-    "build_cash_transfer_journal_entries",
+    "build_cash_transfer_journal_entry",
     "build_fill_journal_entry",
     "build_journal_pnl_attribution",
     "build_reconciliation_mismatch",

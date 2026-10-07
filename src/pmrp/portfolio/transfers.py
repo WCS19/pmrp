@@ -20,16 +20,7 @@ ACCOUNT_CASH_TRANSFER: Final = "cash_transfer"
 TRANSFER_REFERENCE_TYPE: Final = "transfer"
 
 _ZERO = Decimal("0")
-_OUTBOUND_DIRECTION = "outbound"
-_INBOUND_DIRECTION = "inbound"
-
-
-@dataclass(frozen=True, slots=True)
-class CashTransferJournalEntries:
-    """Balanced journal entries for the two cash legs of a transfer."""
-
-    outbound_journal_entry: AccountingJournalEntry
-    inbound_journal_entry: AccountingJournalEntry
+_MAX_ACCOUNT_CODE_LENGTH = 128
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,14 +31,13 @@ class CashTransferApplicationResult:
     to_balance: CashBalance
     outbound_projection: CashBalanceProjectionResult | None
     inbound_projection: CashBalanceProjectionResult | None
-    outbound_journal_entry: AccountingJournalEntry | None
-    inbound_journal_entry: AccountingJournalEntry | None
+    journal_entry: AccountingJournalEntry | None
     applied_journal_entry_ids: frozenset[str]
     applied: bool
     duplicate_transfer: bool
 
 
-def build_cash_transfer_journal_entries(
+def build_cash_transfer_journal_entry(
     *,
     from_balance: CashBalance,
     to_balance: CashBalance,
@@ -56,8 +46,13 @@ def build_cash_transfer_journal_entries(
     source_event_id: EventId,
     occurred_at: datetime,
     created_at: datetime,
-) -> CashTransferJournalEntries:
-    """Build balanced outbound and inbound cash transfer journal entries."""
+) -> AccountingJournalEntry:
+    """Build one balanced cash transfer journal entry.
+
+    The source event maps to one journal header so persisted journal entries
+    remain compatible with the unique source_event_id constraint. Balance
+    identity is encoded in cash account codes for the two cash lines.
+    """
 
     _validate_transfer_inputs(
         from_balance=from_balance,
@@ -65,25 +60,40 @@ def build_cash_transfer_journal_entries(
         amount=amount,
         transfer_id=transfer_id,
     )
-    return CashTransferJournalEntries(
-        outbound_journal_entry=_build_transfer_journal_entry(
-            balance=from_balance,
-            amount=amount,
-            transfer_id=transfer_id,
-            source_event_id=source_event_id,
-            occurred_at=occurred_at,
-            created_at=created_at,
-            direction=_OUTBOUND_DIRECTION,
+    return AccountingJournalEntry(
+        journal_entry_id=derive_cash_transfer_journal_entry_id(transfer_id=transfer_id),
+        occurred_at=occurred_at,
+        source_event_id=source_event_id,
+        reference_type=TRANSFER_REFERENCE_TYPE,
+        reference_id=transfer_id,
+        lines=(
+            JournalLine(
+                account_code=_cash_balance_account_code(from_balance),
+                amount=-amount.amount,
+                currency=amount.currency,
+                description="Cash transfer outbound cash movement.",
+            ),
+            JournalLine(
+                account_code=ACCOUNT_CASH_TRANSFER,
+                amount=amount.amount,
+                currency=amount.currency,
+                description="Cash transfer outbound offset.",
+            ),
+            JournalLine(
+                account_code=_cash_balance_account_code(to_balance),
+                amount=amount.amount,
+                currency=amount.currency,
+                description="Cash transfer inbound cash movement.",
+            ),
+            JournalLine(
+                account_code=ACCOUNT_CASH_TRANSFER,
+                amount=-amount.amount,
+                currency=amount.currency,
+                description="Cash transfer inbound offset.",
+            ),
         ),
-        inbound_journal_entry=_build_transfer_journal_entry(
-            balance=to_balance,
-            amount=amount,
-            transfer_id=transfer_id,
-            source_event_id=source_event_id,
-            occurred_at=occurred_at,
-            created_at=created_at,
-            direction=_INBOUND_DIRECTION,
-        ),
+        description=f"Cash transfer accounting for {transfer_id}.",
+        created_at=created_at,
     )
 
 
@@ -98,7 +108,7 @@ def apply_cash_transfer_once(
     occurred_at: datetime,
     created_at: datetime,
 ) -> CashTransferApplicationResult:
-    """Apply a cash transfer once and no-op when both transfer journal legs exist."""
+    """Apply a cash transfer once and no-op when its journal entry already exists."""
 
     _validate_transfer_inputs(
         from_balance=from_balance,
@@ -107,35 +117,20 @@ def apply_cash_transfer_once(
         transfer_id=transfer_id,
     )
     existing_journal_ids = frozenset(applied_journal_entry_ids)
-    outbound_journal_entry_id = derive_cash_transfer_journal_entry_id(
-        balance=from_balance,
-        transfer_id=transfer_id,
-        direction=_OUTBOUND_DIRECTION,
-    )
-    inbound_journal_entry_id = derive_cash_transfer_journal_entry_id(
-        balance=to_balance,
-        transfer_id=transfer_id,
-        direction=_INBOUND_DIRECTION,
-    )
-    transfer_journal_ids = frozenset({outbound_journal_entry_id, inbound_journal_entry_id})
-    applied_transfer_ids = existing_journal_ids & transfer_journal_ids
-    if applied_transfer_ids:
-        if applied_transfer_ids != transfer_journal_ids:
-            msg = "cash transfer idempotency state is partially applied"
-            raise PortfolioProjectionError(msg)
+    journal_entry_id = derive_cash_transfer_journal_entry_id(transfer_id=transfer_id)
+    if journal_entry_id in existing_journal_ids:
         return CashTransferApplicationResult(
             from_balance=from_balance,
             to_balance=to_balance,
             outbound_projection=None,
             inbound_projection=None,
-            outbound_journal_entry=None,
-            inbound_journal_entry=None,
+            journal_entry=None,
             applied_journal_entry_ids=existing_journal_ids,
             applied=False,
             duplicate_transfer=True,
         )
 
-    journal_entries = build_cash_transfer_journal_entries(
+    journal_entry = build_cash_transfer_journal_entry(
         from_balance=from_balance,
         to_balance=to_balance,
         amount=amount,
@@ -146,85 +141,37 @@ def apply_cash_transfer_once(
     )
     outbound_projection = apply_journal_to_cash_balance(
         from_balance,
-        journal_entries.outbound_journal_entry,
+        journal_entry,
+        cash_account_code=_cash_balance_account_code(from_balance),
     )
     inbound_projection = apply_journal_to_cash_balance(
         to_balance,
-        journal_entries.inbound_journal_entry,
+        journal_entry,
+        cash_account_code=_cash_balance_account_code(to_balance),
     )
     return CashTransferApplicationResult(
         from_balance=outbound_projection.balance,
         to_balance=inbound_projection.balance,
         outbound_projection=outbound_projection,
         inbound_projection=inbound_projection,
-        outbound_journal_entry=journal_entries.outbound_journal_entry,
-        inbound_journal_entry=journal_entries.inbound_journal_entry,
-        applied_journal_entry_ids=existing_journal_ids | transfer_journal_ids,
+        journal_entry=journal_entry,
+        applied_journal_entry_ids=existing_journal_ids | {journal_entry_id},
         applied=True,
         duplicate_transfer=False,
     )
 
 
-def derive_cash_transfer_journal_entry_id(
-    *,
-    balance: CashBalance,
-    transfer_id: str,
-    direction: str,
-) -> str:
-    """Derive a stable journal entry ID for one leg of a cash transfer."""
+def derive_cash_transfer_journal_entry_id(*, transfer_id: str) -> str:
+    """Derive a stable journal entry ID for a cash transfer."""
 
     _validate_transfer_id(transfer_id)
-    _validate_transfer_direction(direction)
     digest = canonical_sha256(
         {
-            "balance_id": balance.balance_id,
-            "direction": direction,
             "schema": "pmrp.cash_transfer_journal_entry.v1",
             "transfer_id": transfer_id,
         }
     ).removeprefix("sha256:")
     return f"journal_cash_transfer_{digest[:32]}"
-
-
-def _build_transfer_journal_entry(
-    *,
-    balance: CashBalance,
-    amount: Money,
-    transfer_id: str,
-    source_event_id: EventId,
-    occurred_at: datetime,
-    created_at: datetime,
-    direction: str,
-) -> AccountingJournalEntry:
-    _validate_transfer_direction(direction)
-    cash_amount = amount.amount if direction == _INBOUND_DIRECTION else -amount.amount
-    return AccountingJournalEntry(
-        journal_entry_id=derive_cash_transfer_journal_entry_id(
-            balance=balance,
-            transfer_id=transfer_id,
-            direction=direction,
-        ),
-        occurred_at=occurred_at,
-        source_event_id=source_event_id,
-        reference_type=TRANSFER_REFERENCE_TYPE,
-        reference_id=transfer_id,
-        lines=(
-            JournalLine(
-                account_code=ACCOUNT_CASH,
-                amount=cash_amount,
-                currency=amount.currency,
-                description=f"Cash transfer {direction} cash movement.",
-            ),
-            JournalLine(
-                account_code=ACCOUNT_CASH_TRANSFER,
-                amount=-cash_amount,
-                currency=amount.currency,
-                description=f"Cash transfer {direction} offset.",
-            ),
-        ),
-        description=f"Cash transfer {direction} accounting for {balance.balance_id}.",
-        created_at=created_at,
-    )
 
 
 def _validate_transfer_inputs(
@@ -248,6 +195,8 @@ def _validate_transfer_inputs(
     if amount.amount <= _ZERO:
         msg = "cash transfer amount must be positive"
         raise PortfolioProjectionError(msg)
+    _cash_balance_account_code(from_balance)
+    _cash_balance_account_code(to_balance)
 
 
 def _validate_transfer_id(transfer_id: str) -> None:
@@ -256,7 +205,9 @@ def _validate_transfer_id(transfer_id: str) -> None:
         raise PortfolioProjectionError(msg)
 
 
-def _validate_transfer_direction(direction: str) -> None:
-    if direction not in {_OUTBOUND_DIRECTION, _INBOUND_DIRECTION}:
-        msg = "cash transfer direction must be inbound or outbound"
+def _cash_balance_account_code(balance: CashBalance) -> str:
+    account_code = f"{ACCOUNT_CASH}:{balance.balance_id}"
+    if len(account_code) > _MAX_ACCOUNT_CODE_LENGTH:
+        msg = "cash transfer balance_id is too long for a cash account code"
         raise PortfolioProjectionError(msg)
+    return account_code

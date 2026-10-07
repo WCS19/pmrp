@@ -55,6 +55,8 @@ class CashBalanceCorrectionResult:
 def apply_journal_to_cash_balance(
     balance: CashBalance,
     journal_entry: AccountingJournalEntry,
+    *,
+    cash_account_code: str = ACCOUNT_CASH,
 ) -> CashBalanceProjectionResult:
     """Apply one journal entry's cash movement to an existing cash balance."""
 
@@ -62,7 +64,11 @@ def apply_journal_to_cash_balance(
         msg = "journal entry occurred_at must not be before balance captured_at"
         raise PortfolioProjectionError(msg)
 
-    cash_delta = _cash_delta_for_currency(journal_entry, balance.currency)
+    cash_delta = _cash_delta_for_currency(
+        journal_entry,
+        balance.currency,
+        cash_account_code=cash_account_code,
+    )
     projected_balance = CashBalance(
         balance_id=balance.balance_id,
         exchange=balance.exchange,
@@ -245,12 +251,17 @@ def derive_balance_correction_journal_entry_id(
 def _cash_delta_for_currency(
     journal_entry: AccountingJournalEntry,
     currency: str,
+    *,
+    cash_account_code: str,
 ) -> Money:
     validated_currency = validate_currency(currency)
+    if cash_account_code == "" or cash_account_code.strip() != cash_account_code:
+        msg = "cash account code is required without surrounding whitespace"
+        raise PortfolioProjectionError(msg)
     matching_cash_lines = tuple(
         line
         for line in journal_entry.lines
-        if line.account_code == ACCOUNT_CASH and line.currency == validated_currency
+        if line.account_code == cash_account_code and line.currency == validated_currency
     )
     if not matching_cash_lines:
         msg = "journal entry does not contain a cash line for balance currency"
