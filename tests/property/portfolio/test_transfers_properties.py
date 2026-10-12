@@ -9,7 +9,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from pmrp.portfolio import apply_cash_transfer_once, build_cash_transfer_journal_entries
+from pmrp.portfolio import apply_cash_transfer_once, build_cash_transfer_journal_entry
 from pmrp.schemas.identifiers import EventId
 from pmrp.schemas.numeric import Money
 from pmrp.schemas.portfolio import AccountingJournalEntry, CashBalance
@@ -32,8 +32,8 @@ _RESERVED = st.integers(min_value=0, max_value=1_000_000).map(
 
 
 @given(amount=_MONEY)
-def test_cash_transfer_journal_entries_balance(amount: Decimal) -> None:
-    journals = build_cash_transfer_journal_entries(
+def test_cash_transfer_journal_entry_balances(amount: Decimal) -> None:
+    journal = build_cash_transfer_journal_entry(
         from_balance=_balance("cash_property_transfer_from", available=Decimal("100")),
         to_balance=_balance("cash_property_transfer_to", available=Decimal("20")),
         amount=_money(amount),
@@ -43,8 +43,7 @@ def test_cash_transfer_journal_entries_balance(amount: Decimal) -> None:
         created_at=CREATED_AT,
     )
 
-    assert _journal_total(journals.outbound_journal_entry) == Decimal("0")
-    assert _journal_total(journals.inbound_journal_entry) == Decimal("0")
+    assert _journal_total(journal) == Decimal("0")
 
 
 @given(

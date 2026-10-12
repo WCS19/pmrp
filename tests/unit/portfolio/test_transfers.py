@@ -13,7 +13,7 @@ from pmrp.portfolio import (
     TRANSFER_REFERENCE_TYPE,
     PortfolioProjectionError,
     apply_cash_transfer_once,
-    build_cash_transfer_journal_entries,
+    build_cash_transfer_journal_entry,
     derive_cash_transfer_journal_entry_id,
 )
 from pmrp.schemas.identifiers import EventId
@@ -29,11 +29,11 @@ SOURCE_EVENT_ID = EventId("evt_cash_transfer_001")
 TRANSFER_ID = "transfer_cash_001"
 
 
-def test_build_cash_transfer_journal_entries_balances_each_leg() -> None:
+def test_build_cash_transfer_journal_entry_balances_both_legs() -> None:
     from_balance = _balance("cash_transfer_from", available="100.00")
     to_balance = _balance("cash_transfer_to", available="20.00")
 
-    journals = build_cash_transfer_journal_entries(
+    journal = build_cash_transfer_journal_entry(
         from_balance=from_balance,
         to_balance=to_balance,
         amount=_money("12.50"),
@@ -43,32 +43,19 @@ def test_build_cash_transfer_journal_entries_balances_each_leg() -> None:
         created_at=CREATED_AT,
     )
 
-    assert journals.outbound_journal_entry.journal_entry_id == (
-        derive_cash_transfer_journal_entry_id(
-            balance=from_balance,
-            transfer_id=TRANSFER_ID,
-            direction="outbound",
-        )
+    assert journal.journal_entry_id == derive_cash_transfer_journal_entry_id(
+        transfer_id=TRANSFER_ID
     )
-    assert journals.inbound_journal_entry.journal_entry_id == (
-        derive_cash_transfer_journal_entry_id(
-            balance=to_balance,
-            transfer_id=TRANSFER_ID,
-            direction="inbound",
-        )
-    )
-    assert journals.outbound_journal_entry.reference_type == TRANSFER_REFERENCE_TYPE
-    assert journals.outbound_journal_entry.reference_id == TRANSFER_ID
-    assert _line_amounts(journals.outbound_journal_entry) == [
-        (ACCOUNT_CASH, Decimal("-12.50")),
+    assert journal.source_event_id == SOURCE_EVENT_ID
+    assert journal.reference_type == TRANSFER_REFERENCE_TYPE
+    assert journal.reference_id == TRANSFER_ID
+    assert _line_amounts(journal) == [
+        (f"{ACCOUNT_CASH}:{from_balance.balance_id}", Decimal("-12.50")),
         (ACCOUNT_CASH_TRANSFER, Decimal("12.50")),
-    ]
-    assert _line_amounts(journals.inbound_journal_entry) == [
-        (ACCOUNT_CASH, Decimal("12.50")),
+        (f"{ACCOUNT_CASH}:{to_balance.balance_id}", Decimal("12.50")),
         (ACCOUNT_CASH_TRANSFER, Decimal("-12.50")),
     ]
-    assert _journal_total(journals.outbound_journal_entry) == Decimal("0")
-    assert _journal_total(journals.inbound_journal_entry) == Decimal("0")
+    assert _journal_total(journal) == Decimal("0")
 
 
 def test_apply_cash_transfer_once_projects_both_balances() -> None:
@@ -96,12 +83,10 @@ def test_apply_cash_transfer_once_projects_both_balances() -> None:
     assert result.to_balance.total == Decimal("35.50")
     assert result.outbound_projection is not None
     assert result.inbound_projection is not None
-    assert result.outbound_journal_entry is not None
-    assert result.inbound_journal_entry is not None
+    assert result.journal_entry is not None
     assert result.applied_journal_entry_ids == frozenset(
         {
-            result.outbound_journal_entry.journal_entry_id,
-            result.inbound_journal_entry.journal_entry_id,
+            result.journal_entry.journal_entry_id,
         }
     )
 
@@ -137,39 +122,36 @@ def test_apply_cash_transfer_once_returns_noop_for_duplicate_transfer() -> None:
     assert duplicate.to_balance == first.to_balance
     assert duplicate.outbound_projection is None
     assert duplicate.inbound_projection is None
-    assert duplicate.outbound_journal_entry is None
-    assert duplicate.inbound_journal_entry is None
+    assert duplicate.journal_entry is None
     assert duplicate.applied_journal_entry_ids == first.applied_journal_entry_ids
 
 
-def test_apply_cash_transfer_once_rejects_partial_idempotency_state() -> None:
+def test_transfer_journal_uses_one_source_event_safe_header() -> None:
     from_balance = _balance("cash_transfer_from", available="100.00")
     to_balance = _balance("cash_transfer_to", available="20.00")
-    outbound_id = derive_cash_transfer_journal_entry_id(
-        balance=from_balance,
+
+    result = apply_cash_transfer_once(
+        from_balance=from_balance,
+        to_balance=to_balance,
+        amount=_money("12.50"),
         transfer_id=TRANSFER_ID,
-        direction="outbound",
+        applied_journal_entry_ids=frozenset(),
+        source_event_id=SOURCE_EVENT_ID,
+        occurred_at=OCCURRED_AT,
+        created_at=CREATED_AT,
     )
 
-    with pytest.raises(PortfolioProjectionError, match="partially applied"):
-        apply_cash_transfer_once(
-            from_balance=from_balance,
-            to_balance=to_balance,
-            amount=_money("12.50"),
-            transfer_id=TRANSFER_ID,
-            applied_journal_entry_ids=frozenset({outbound_id}),
-            source_event_id=SOURCE_EVENT_ID,
-            occurred_at=OCCURRED_AT,
-            created_at=CREATED_AT,
-        )
+    assert result.journal_entry is not None
+    assert result.journal_entry.source_event_id == SOURCE_EVENT_ID
+    assert len(result.applied_journal_entry_ids) == 1
 
 
-def test_build_cash_transfer_journal_entries_rejects_invalid_inputs() -> None:
+def test_build_cash_transfer_journal_entry_rejects_invalid_inputs() -> None:
     from_balance = _balance("cash_transfer_from", available="100.00")
     to_balance = _balance("cash_transfer_to", available="20.00")
 
     with pytest.raises(PortfolioProjectionError, match="distinct"):
-        build_cash_transfer_journal_entries(
+        build_cash_transfer_journal_entry(
             from_balance=from_balance,
             to_balance=from_balance,
             amount=_money("12.50"),
@@ -179,7 +161,7 @@ def test_build_cash_transfer_journal_entries_rejects_invalid_inputs() -> None:
             created_at=CREATED_AT,
         )
     with pytest.raises(PortfolioProjectionError, match="positive"):
-        build_cash_transfer_journal_entries(
+        build_cash_transfer_journal_entry(
             from_balance=from_balance,
             to_balance=to_balance,
             amount=_money("0"),
@@ -189,7 +171,7 @@ def test_build_cash_transfer_journal_entries_rejects_invalid_inputs() -> None:
             created_at=CREATED_AT,
         )
     with pytest.raises(PortfolioProjectionError, match="currency"):
-        build_cash_transfer_journal_entries(
+        build_cash_transfer_journal_entry(
             from_balance=from_balance,
             to_balance=_balance("cash_transfer_to_eur", available="20.00", currency="EUR"),
             amount=_money("12.50"),
@@ -199,7 +181,7 @@ def test_build_cash_transfer_journal_entries_rejects_invalid_inputs() -> None:
             created_at=CREATED_AT,
         )
     with pytest.raises(PortfolioProjectionError, match="transfer_id"):
-        build_cash_transfer_journal_entries(
+        build_cash_transfer_journal_entry(
             from_balance=from_balance,
             to_balance=to_balance,
             amount=_money("12.50"),
@@ -210,13 +192,9 @@ def test_build_cash_transfer_journal_entries_rejects_invalid_inputs() -> None:
         )
 
 
-def test_derive_cash_transfer_journal_entry_id_rejects_unknown_direction() -> None:
-    with pytest.raises(PortfolioProjectionError, match="direction"):
-        derive_cash_transfer_journal_entry_id(
-            balance=_balance("cash_transfer_from", available="100.00"),
-            transfer_id=TRANSFER_ID,
-            direction="sideways",
-        )
+def test_derive_cash_transfer_journal_entry_id_rejects_invalid_transfer_id() -> None:
+    with pytest.raises(PortfolioProjectionError, match="transfer_id"):
+        derive_cash_transfer_journal_entry_id(transfer_id=" transfer_cash_001")
 
 
 def _money(amount: str, currency: str = "USD") -> Money:

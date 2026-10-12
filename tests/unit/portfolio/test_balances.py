@@ -76,6 +76,28 @@ def test_apply_journal_to_cash_balance_ignores_other_currency_cash_lines() -> No
     assert result.balance.total == Decimal("102.50")
 
 
+def test_apply_journal_to_cash_balance_supports_balance_scoped_cash_account() -> None:
+    balance = _balance(available="100.00", reserved="0")
+    scoped_account = f"{ACCOUNT_CASH}:{balance.balance_id}"
+    journal = _journal(
+        lines=(
+            _line(scoped_account, "-7.25"),
+            _line(ACCOUNT_CASH, "99.00"),
+            _line("transfer_offset", "-91.75"),
+        )
+    )
+
+    result = apply_journal_to_cash_balance(
+        balance,
+        journal,
+        cash_account_code=scoped_account,
+    )
+
+    assert result.cash_delta.amount == Decimal("-7.25")
+    assert result.balance.available == Decimal("92.75")
+    assert result.balance.total == Decimal("92.75")
+
+
 def test_apply_journal_to_cash_balance_rejects_missing_cash_line_for_currency() -> None:
     journal = _journal(
         lines=(
