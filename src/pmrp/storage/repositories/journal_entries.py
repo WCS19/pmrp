@@ -60,10 +60,13 @@ class JournalEntryRepository:
         )
         return await self._one_or_none(statement)
 
-    async def get_by_source_event(self, source_event_id: EventId) -> AccountingJournalEntry | None:
+    async def get_by_source_event(
+        self,
+        source_event_id: EventId | str,
+    ) -> AccountingJournalEntry | None:
         """Return the journal entry uniquely associated with a source event."""
 
-        source_event_id = EventId(source_event_id)
+        source_event_id = _validate_event_id(source_event_id)
         statement = select(JournalEntryRow).where(
             JournalEntryRow.source_event_id == str(source_event_id)
         )
@@ -250,3 +253,9 @@ def _validate_text(value: str, *, field_name: str, max_length: int) -> str:
     if len(value) > max_length:
         raise ValueError(f"{field_name} must be at most {max_length} characters")
     return value
+
+
+def _validate_event_id(value: EventId | str) -> EventId:
+    if type(value) is EventId:
+        return value
+    return EventId(value)

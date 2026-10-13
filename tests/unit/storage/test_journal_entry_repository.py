@@ -11,6 +11,7 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
 from sqlalchemy.sql import ClauseElement
 
+from pmrp.schemas.identifiers import EventId
 from pmrp.schemas.portfolio import AccountingJournalEntry, JournalLine
 from pmrp.storage import InvariantViolationError, PersistenceTimeoutError
 from pmrp.storage.models import JournalEntryRow, JournalLineRow
@@ -164,7 +165,7 @@ async def test_repository_get_by_source_event_uses_unique_source_event_query() -
     session = _FakeSession(results=(header_row, line_rows))
     repository = JournalEntryRepository(session)  # type: ignore[arg-type]
 
-    result = await repository.get_by_source_event("evt_journal_repo_0001")  # type: ignore[arg-type]
+    result = await repository.get_by_source_event(EventId("evt_journal_repo_0001"))
 
     assert result == journal
     assert "journal_entries.source_event_id = 'evt_journal_repo_0001'" in _compile(
