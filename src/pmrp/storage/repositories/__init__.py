@@ -25,6 +25,11 @@ from pmrp.storage.repositories.outbox import (
     OutboxMessageRepository,
     outbox_message_to_row,
 )
+from pmrp.storage.repositories.positions import (
+    PositionRepository,
+    position_from_row,
+    position_to_row,
+)
 from pmrp.storage.repositories.protocols import Repository, VersionedRepository
 from pmrp.storage.repositories.risk_breaches import (
     RiskBreachRepository,
@@ -56,6 +61,7 @@ __all__ = [
     "JournalEntryRepository",
     "KillSwitchRepository",
     "OutboxMessageRepository",
+    "PositionRepository",
     "Repository",
     "RiskBreachRepository",
     "RiskDecisionRepository",
@@ -71,6 +77,8 @@ __all__ = [
     "kill_switch_from_row",
     "kill_switch_to_row",
     "outbox_message_to_row",
+    "position_from_row",
+    "position_to_row",
     "risk_breach_from_row",
     "risk_breach_to_row",
     "risk_decision_from_row",
