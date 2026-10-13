@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from typing import Final
@@ -24,6 +25,17 @@ RECONCILIATION_SEVERITY_MISMATCH: Final = "mismatch"
 RECONCILIATION_SEVERITY_UNKNOWN: Final = "unknown"
 
 _PRESENT = "present"
+_OPEN_ORDER_RECORD_KIND = "open_order"
+_FILL_RECORD_KIND = "fill"
+_SETTLEMENT_RECORD_KIND = "settlement"
+
+
+@dataclass(frozen=True, slots=True)
+class RecordSetReconciliationResult:
+    """Mismatches and checked count for one reconciled record identity set."""
+
+    mismatches: tuple[ReconciliationMismatch, ...]
+    records_checked: int
 
 
 def reconcile_portfolio_snapshots(
@@ -148,6 +160,101 @@ def build_reconciliation_mismatch(
         severity=severity,
         explanation=explanation,
         requires_manual_review=requires_manual_review,
+    )
+
+
+def reconcile_open_order_ids(
+    *,
+    reconciliation_id: str,
+    local_order_ids: Iterable[str],
+    external_order_ids: Iterable[str],
+) -> RecordSetReconciliationResult:
+    """Reconcile local and external open order identity sets."""
+
+    return reconcile_record_id_sets(
+        reconciliation_id=reconciliation_id,
+        record_kind=_OPEN_ORDER_RECORD_KIND,
+        local_ids=local_order_ids,
+        external_ids=external_order_ids,
+    )
+
+
+def reconcile_fill_ids(
+    *,
+    reconciliation_id: str,
+    local_fill_ids: Iterable[str],
+    external_fill_ids: Iterable[str],
+) -> RecordSetReconciliationResult:
+    """Reconcile local and external fill identity sets."""
+
+    return reconcile_record_id_sets(
+        reconciliation_id=reconciliation_id,
+        record_kind=_FILL_RECORD_KIND,
+        local_ids=local_fill_ids,
+        external_ids=external_fill_ids,
+    )
+
+
+def reconcile_settlement_ids(
+    *,
+    reconciliation_id: str,
+    local_settlement_ids: Iterable[str],
+    external_settlement_ids: Iterable[str],
+) -> RecordSetReconciliationResult:
+    """Reconcile local and external settlement identity sets."""
+
+    return reconcile_record_id_sets(
+        reconciliation_id=reconciliation_id,
+        record_kind=_SETTLEMENT_RECORD_KIND,
+        local_ids=local_settlement_ids,
+        external_ids=external_settlement_ids,
+    )
+
+
+def reconcile_record_id_sets(
+    *,
+    reconciliation_id: str,
+    record_kind: str,
+    local_ids: Iterable[str],
+    external_ids: Iterable[str],
+) -> RecordSetReconciliationResult:
+    """Reconcile local and external record ID sets for event-backed records."""
+
+    validated_record_kind = _validate_record_kind(record_kind)
+    local_id_set = _validate_record_ids(local_ids, label="local_ids")
+    external_id_set = _validate_record_ids(external_ids, label="external_ids")
+    mismatches: list[ReconciliationMismatch] = []
+
+    for record_id in sorted(local_id_set - external_id_set):
+        mismatches.append(
+            build_reconciliation_mismatch(
+                reconciliation_id=reconciliation_id,
+                category=f"{validated_record_kind}.missing_external",
+                identity=record_id,
+                local_value=_PRESENT,
+                external_value=None,
+                explanation=(
+                    f"Local {validated_record_kind} record is missing from external snapshot."
+                ),
+            )
+        )
+    for record_id in sorted(external_id_set - local_id_set):
+        mismatches.append(
+            build_reconciliation_mismatch(
+                reconciliation_id=reconciliation_id,
+                category=f"{validated_record_kind}.missing_local",
+                identity=record_id,
+                local_value=None,
+                external_value=_PRESENT,
+                explanation=(
+                    f"External {validated_record_kind} record is missing from local projection."
+                ),
+            )
+        )
+
+    return RecordSetReconciliationResult(
+        mismatches=tuple(mismatches),
+        records_checked=len(local_id_set | external_id_set),
     )
 
 
@@ -344,6 +451,26 @@ def _status_for_mismatches(
     if any(mismatch.severity == RECONCILIATION_SEVERITY_UNKNOWN for mismatch in mismatches):
         return ReconciliationStatus.UNKNOWN
     return ReconciliationStatus.MISMATCH
+
+
+def _validate_record_kind(record_kind: str) -> str:
+    if record_kind == "" or record_kind.strip() != record_kind:
+        msg = "record_kind is required without surrounding whitespace"
+        raise PortfolioProjectionError(msg)
+    if not record_kind.replace("_", "").isalnum():
+        msg = "record_kind must contain only letters, numbers, and underscores"
+        raise PortfolioProjectionError(msg)
+    return record_kind
+
+
+def _validate_record_ids(record_ids: Iterable[str], *, label: str) -> frozenset[str]:
+    validated_ids: set[str] = set()
+    for record_id in record_ids:
+        if record_id == "" or record_id.strip() != record_id:
+            msg = f"{label} contains an empty or whitespace-padded record ID"
+            raise PortfolioProjectionError(msg)
+        validated_ids.add(record_id)
+    return frozenset(validated_ids)
 
 
 def _format_value(value: object | None) -> str | None:

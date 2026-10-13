@@ -10,10 +10,15 @@ import pytest
 from pmrp.portfolio import (
     RECONCILIATION_SEVERITY_UNKNOWN,
     PortfolioProjectionError,
+    RecordSetReconciliationResult,
     build_reconciliation_mismatch,
     build_reconciliation_result,
     derive_reconciliation_mismatch_id,
+    reconcile_fill_ids,
+    reconcile_open_order_ids,
     reconcile_portfolio_snapshots,
+    reconcile_record_id_sets,
+    reconcile_settlement_ids,
 )
 from pmrp.schemas.numeric import Money
 from pmrp.schemas.portfolio import (
@@ -118,6 +123,136 @@ def test_reconcile_portfolio_snapshots_detects_missing_external_position() -> No
     assert result.mismatches[0].category == "position.missing_external"
     assert result.mismatches[0].local_value == "present"
     assert result.mismatches[0].external_value is None
+
+
+def test_reconcile_open_order_ids_returns_healthy_for_matching_sets() -> None:
+    record_result = reconcile_open_order_ids(
+        reconciliation_id=RECONCILIATION_ID,
+        local_order_ids=("order_recon_002", "order_recon_001", "order_recon_001"),
+        external_order_ids=("order_recon_001", "order_recon_002"),
+    )
+
+    result = build_reconciliation_result(
+        reconciliation_id=RECONCILIATION_ID,
+        exchange="kalshi",
+        account_id="acct_recon_001",
+        started_at=STARTED_AT,
+        completed_at=COMPLETED_AT,
+        mismatches=record_result.mismatches,
+        open_orders_checked=record_result.records_checked,
+    )
+
+    assert isinstance(record_result, RecordSetReconciliationResult)
+    assert record_result.mismatches == ()
+    assert record_result.records_checked == 2
+    assert result.status is ReconciliationStatus.HEALTHY
+    assert result.trading_gate_released is True
+    assert result.open_orders_checked == 2
+
+
+def test_reconcile_fill_ids_detects_missing_records_deterministically() -> None:
+    first = reconcile_fill_ids(
+        reconciliation_id=RECONCILIATION_ID,
+        local_fill_ids=(
+            "fill_shared",
+            "fill_local_b",
+            "fill_local_a",
+            "fill_local_a",
+        ),
+        external_fill_ids=("fill_shared", "fill_external_b", "fill_external_a"),
+    )
+    second = reconcile_fill_ids(
+        reconciliation_id=RECONCILIATION_ID,
+        local_fill_ids=(
+            "fill_local_a",
+            "fill_local_b",
+            "fill_shared",
+        ),
+        external_fill_ids=("fill_external_a", "fill_external_b", "fill_shared"),
+    )
+
+    result = build_reconciliation_result(
+        reconciliation_id=RECONCILIATION_ID,
+        exchange="kalshi",
+        account_id="acct_recon_001",
+        started_at=STARTED_AT,
+        completed_at=COMPLETED_AT,
+        mismatches=first.mismatches,
+        fills_checked=first.records_checked,
+    )
+
+    assert first == second
+    assert first.records_checked == 5
+    assert [mismatch.category for mismatch in first.mismatches] == [
+        "fill.missing_external",
+        "fill.missing_external",
+        "fill.missing_local",
+        "fill.missing_local",
+    ]
+    assert [mismatch.local_value for mismatch in first.mismatches] == [
+        "present",
+        "present",
+        None,
+        None,
+    ]
+    assert [mismatch.external_value for mismatch in first.mismatches] == [
+        None,
+        None,
+        "present",
+        "present",
+    ]
+    assert result.status is ReconciliationStatus.MISMATCH
+    assert result.trading_gate_released is False
+    assert result.fills_checked == 5
+
+
+def test_reconcile_settlement_ids_blocks_gate_for_missing_settlement_record() -> None:
+    record_result = reconcile_settlement_ids(
+        reconciliation_id=RECONCILIATION_ID,
+        local_settlement_ids=(),
+        external_settlement_ids=("settlement_recon_external",),
+    )
+
+    result = build_reconciliation_result(
+        reconciliation_id=RECONCILIATION_ID,
+        exchange="kalshi",
+        account_id="acct_recon_001",
+        started_at=STARTED_AT,
+        completed_at=COMPLETED_AT,
+        mismatches=record_result.mismatches,
+    )
+
+    assert record_result.records_checked == 1
+    assert len(record_result.mismatches) == 1
+    assert record_result.mismatches[0].category == "settlement.missing_local"
+    assert record_result.mismatches[0].local_value is None
+    assert record_result.mismatches[0].external_value == "present"
+    assert result.status is ReconciliationStatus.MISMATCH
+    assert result.trading_gate_released is False
+
+
+@pytest.mark.parametrize("record_kind", ["", " fill", "fill ", "fill-record"])
+def test_reconcile_record_id_sets_rejects_invalid_record_kind(record_kind: str) -> None:
+    with pytest.raises(PortfolioProjectionError, match="record_kind"):
+        reconcile_record_id_sets(
+            reconciliation_id=RECONCILIATION_ID,
+            record_kind=record_kind,
+            local_ids=("record_001",),
+            external_ids=("record_001",),
+        )
+
+
+@pytest.mark.parametrize("record_id", ["", " fill_001", "fill_001 "])
+def test_reconcile_record_id_sets_rejects_empty_or_padded_record_ids(
+    record_id: str,
+) -> None:
+    with pytest.raises(PortfolioProjectionError, match="record ID"):
+        reconcile_record_id_sets(
+            reconciliation_id=RECONCILIATION_ID,
+            record_kind="fill",
+            local_ids=(record_id,),
+            external_ids=("fill_001",),
+        )
 
 
 def test_build_reconciliation_result_blocks_gate_for_unknown_mismatch() -> None:

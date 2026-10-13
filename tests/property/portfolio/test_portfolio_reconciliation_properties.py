@@ -9,7 +9,7 @@ import pytest
 from hypothesis import assume, given
 from hypothesis import strategies as st
 
-from pmrp.portfolio import reconcile_portfolio_snapshots
+from pmrp.portfolio import reconcile_fill_ids, reconcile_portfolio_snapshots
 from pmrp.schemas.numeric import Money
 from pmrp.schemas.portfolio import CashBalance, PortfolioSnapshot, Position, ReconciliationStatus
 
@@ -28,6 +28,10 @@ _NONNEGATIVE_MONEY_AMOUNTS = st.integers(min_value=0, max_value=1_000_000).map(
 _QUANTITIES = st.integers(min_value=1, max_value=1_000).map(Decimal)
 _PRICES = st.integers(min_value=0, max_value=10_000).map(
     lambda ticks: Decimal(ticks) / Decimal("10000")
+)
+_FILL_IDS = st.lists(
+    st.from_regex(r"fill_[a-z0-9_]{1,12}", fullmatch=True),
+    max_size=10,
 )
 
 
@@ -90,6 +94,51 @@ def test_reconcile_portfolio_snapshots_blocks_gate_for_balance_mismatch(
     assert result.status is ReconciliationStatus.MISMATCH
     assert result.trading_gate_released is False
     assert any(mismatch.category == "balance.available" for mismatch in result.mismatches)
+
+
+@given(fill_ids=_FILL_IDS)
+def test_reconcile_fill_ids_is_healthy_for_identical_record_sets(fill_ids: list[str]) -> None:
+    result = reconcile_fill_ids(
+        reconciliation_id="recon_property_fill_match",
+        local_fill_ids=fill_ids,
+        external_fill_ids=reversed(fill_ids),
+    )
+
+    assert result.mismatches == ()
+    assert result.records_checked == len(set(fill_ids))
+
+
+@given(local_fill_ids=_FILL_IDS, external_fill_ids=_FILL_IDS)
+def test_reconcile_fill_ids_reports_only_missing_record_categories(
+    local_fill_ids: list[str],
+    external_fill_ids: list[str],
+) -> None:
+    local_set = set(local_fill_ids)
+    external_set = set(external_fill_ids)
+    assume(local_set != external_set)
+
+    result = reconcile_fill_ids(
+        reconciliation_id="recon_property_fill_mismatch",
+        local_fill_ids=local_fill_ids,
+        external_fill_ids=external_fill_ids,
+    )
+
+    assert result.records_checked == len(local_set | external_set)
+    assert result.mismatches
+    assert {mismatch.category for mismatch in result.mismatches} <= {
+        "fill.missing_external",
+        "fill.missing_local",
+    }
+    assert {
+        mismatch.category
+        for mismatch in result.mismatches
+        if mismatch.local_value == "present" and mismatch.external_value is None
+    } <= {"fill.missing_external"}
+    assert {
+        mismatch.category
+        for mismatch in result.mismatches
+        if mismatch.local_value is None and mismatch.external_value == "present"
+    } <= {"fill.missing_local"}
 
 
 def _snapshot(
