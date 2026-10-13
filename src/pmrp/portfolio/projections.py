@@ -2,17 +2,22 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 
 from pmrp.portfolio.errors import PortfolioProjectionError
 from pmrp.portfolio.journal import build_fill_journal_entry
 from pmrp.portfolio.positions import PositionProjectionResult, apply_fill_to_position
 from pmrp.schemas.identifiers import EventId, FillId, PositionId
+from pmrp.schemas.numeric import Money
 from pmrp.schemas.orders import Fill
-from pmrp.schemas.portfolio import AccountingJournalEntry, Position
+from pmrp.schemas.portfolio import AccountingJournalEntry, CashBalance, PortfolioSnapshot, Position
+
+_ZERO = Decimal("0")
 
 
 @dataclass(frozen=True, slots=True)
@@ -152,3 +157,118 @@ def _validate_fill_batch(
 
 def _fill_order_key(fill: Fill) -> tuple[datetime, datetime, str]:
     return (fill.exchange_occurred_at, fill.received_at, str(fill.fill_id))
+
+
+def build_portfolio_snapshot(
+    *,
+    portfolio_id: str,
+    positions: Iterable[Position],
+    balances: Iterable[CashBalance],
+    captured_at: datetime,
+    reconciliation_status: str,
+) -> PortfolioSnapshot:
+    """Build a deterministic portfolio snapshot from projected state."""
+
+    position_tuple = tuple(sorted(positions, key=lambda position: str(position.position_id)))
+    balance_tuple = tuple(sorted(balances, key=lambda balance: balance.balance_id))
+    _validate_snapshot_horizon(
+        positions=position_tuple,
+        balances=balance_tuple,
+        captured_at=captured_at,
+    )
+
+    return PortfolioSnapshot(
+        portfolio_id=portfolio_id,
+        captured_at=captured_at,
+        positions=position_tuple,
+        balances=balance_tuple,
+        realized_pnl=_sum_position_money(
+            position_tuple,
+            field_name="realized_pnl",
+        ),
+        unrealized_pnl=_sum_position_money(
+            position_tuple,
+            field_name="unrealized_pnl",
+        ),
+        gross_exposure=_sum_position_exposure(position_tuple, gross=True),
+        net_exposure=_sum_position_exposure(position_tuple, gross=False),
+        reconciliation_status=reconciliation_status,
+    )
+
+
+def _validate_snapshot_horizon(
+    *,
+    positions: tuple[Position, ...],
+    balances: tuple[CashBalance, ...],
+    captured_at: datetime,
+) -> None:
+    for position in positions:
+        if position.last_updated_at > captured_at:
+            msg = "position last_updated_at must not be after snapshot captured_at"
+            raise PortfolioProjectionError(msg)
+        _position_currency(position)
+        if position.quantity != _ZERO and position.average_entry_price is None:
+            msg = "nonzero position requires average_entry_price for snapshot exposure"
+            raise PortfolioProjectionError(msg)
+
+    for balance in balances:
+        if balance.captured_at > captured_at:
+            msg = "balance captured_at must not be after snapshot captured_at"
+            raise PortfolioProjectionError(msg)
+
+
+def _sum_position_money(
+    positions: tuple[Position, ...],
+    *,
+    field_name: str,
+) -> tuple[Money, ...]:
+    totals: defaultdict[str, Decimal] = defaultdict(lambda: _ZERO)
+    for position in positions:
+        money = getattr(position, field_name)
+        if not isinstance(money, Money):
+            msg = f"position {field_name} must be Money"
+            raise PortfolioProjectionError(msg)
+        totals[money.currency] += money.amount
+    return _money_totals(totals)
+
+
+def _sum_position_exposure(
+    positions: tuple[Position, ...],
+    *,
+    gross: bool,
+) -> tuple[Money, ...]:
+    totals: defaultdict[str, Decimal] = defaultdict(lambda: _ZERO)
+    for position in positions:
+        currency = _position_currency(position)
+        exposure = _position_exposure(position)
+        if gross:
+            exposure = abs(exposure)
+        totals[currency] += exposure
+    return _money_totals(totals)
+
+
+def _position_currency(position: Position) -> str:
+    currency = position.realized_pnl.currency
+    money_fields = (
+        ("unrealized_pnl", position.unrealized_pnl),
+        ("fees_paid", position.fees_paid),
+        ("rebates_received", position.rebates_received),
+    )
+    for field_name, money in money_fields:
+        if money.currency != currency:
+            msg = f"position {field_name} currency must match realized_pnl currency"
+            raise PortfolioProjectionError(msg)
+    return currency
+
+
+def _position_exposure(position: Position) -> Decimal:
+    if position.quantity == _ZERO:
+        return _ZERO
+    if position.average_entry_price is None:
+        msg = "nonzero position requires average_entry_price for snapshot exposure"
+        raise PortfolioProjectionError(msg)
+    return position.quantity * position.average_entry_price
+
+
+def _money_totals(totals: Mapping[str, Decimal]) -> tuple[Money, ...]:
+    return tuple(Money(amount=totals[currency], currency=currency) for currency in sorted(totals))
