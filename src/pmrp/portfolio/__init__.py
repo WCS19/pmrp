@@ -53,10 +53,15 @@ from pmrp.portfolio.projections import FillApplicationResult, apply_fill_once
 from pmrp.portfolio.reconciliation import (
     RECONCILIATION_SEVERITY_MISMATCH,
     RECONCILIATION_SEVERITY_UNKNOWN,
+    RecordSetReconciliationResult,
     build_reconciliation_mismatch,
     build_reconciliation_result,
     derive_reconciliation_mismatch_id,
+    reconcile_fill_ids,
+    reconcile_open_order_ids,
     reconcile_portfolio_snapshots,
+    reconcile_record_id_sets,
+    reconcile_settlement_ids,
 )
 from pmrp.portfolio.settlement import (
     SETTLEMENT_REFERENCE_TYPE,
@@ -114,6 +119,7 @@ __all__ = [
     "PortfolioProjectionError",
     "PositionProjectionResult",
     "RebateApplicationResult",
+    "RecordSetReconciliationResult",
     "SettlementAccountingResult",
     "SettlementApplicationResult",
     "SettlementCorrectionAccountingResult",
@@ -153,5 +159,9 @@ __all__ = [
     "derive_reconciliation_mismatch_id",
     "derive_settlement_correction_journal_entry_id",
     "derive_settlement_journal_entry_id",
+    "reconcile_fill_ids",
+    "reconcile_open_order_ids",
     "reconcile_portfolio_snapshots",
+    "reconcile_record_id_sets",
+    "reconcile_settlement_ids",
 ]
