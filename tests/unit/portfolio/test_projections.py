@@ -7,7 +7,8 @@ from decimal import Decimal
 
 import pytest
 
-from pmrp.portfolio import apply_fill_once
+from pmrp.portfolio import apply_fill_once, apply_fills_once
+from pmrp.portfolio.errors import PortfolioProjectionError
 from pmrp.schemas.enums import LiquidityRole, Side
 from pmrp.schemas.identifiers import EventId, FillId
 from pmrp.schemas.orders import Fill
@@ -123,6 +124,109 @@ def test_apply_fill_once_chains_distinct_fills_in_order() -> None:
     assert second.position.quantity == Decimal("6")
     assert second.position.realized_pnl.amount == Decimal("0.80")
     assert second.applied_fill_ids == frozenset({first_fill.fill_id, second_fill.fill_id})
+
+
+def test_apply_fills_once_sorts_out_of_order_fills_by_exchange_time() -> None:
+    first_fill = _fill(fill_id="fill_projection_batch_first", price="0.40", quantity="10")
+    second_fill = _fill(
+        fill_id="fill_projection_batch_second",
+        exchange_fill_id="ex-fill-projection-batch-second",
+        side=Side.SELL,
+        price="0.60",
+        quantity="4",
+        exchange_occurred_at=OCCURRED_AT + timedelta(seconds=2),
+        received_at=RECEIVED_AT + timedelta(seconds=2),
+    )
+    third_fill = _fill(
+        fill_id="fill_projection_batch_third",
+        exchange_fill_id="ex-fill-projection-batch-third",
+        price="0.50",
+        quantity="2",
+        exchange_occurred_at=OCCURRED_AT + timedelta(seconds=3),
+        received_at=RECEIVED_AT + timedelta(seconds=3),
+    )
+
+    result = apply_fills_once(
+        position=None,
+        fills=(third_fill, first_fill, second_fill),
+        applied_fill_ids=frozenset(),
+        currency="USD",
+        source_event_ids={
+            first_fill.fill_id: EventId("evt_projection_batch_first"),
+            second_fill.fill_id: EventId("evt_projection_batch_second"),
+            third_fill.fill_id: EventId("evt_projection_batch_third"),
+        },
+        created_at=CREATED_AT + timedelta(seconds=5),
+    )
+
+    assert result.applied_count == 3
+    assert result.duplicate_fill_count == 0
+    assert result.position is not None
+    assert result.position.quantity == Decimal("8")
+    assert result.position.average_entry_price == Decimal("0.425")
+    assert result.position.realized_pnl.amount == Decimal("0.80")
+    assert result.applied_fill_ids == frozenset(
+        {first_fill.fill_id, second_fill.fill_id, third_fill.fill_id}
+    )
+    assert [journal.reference_id for journal in result.journal_entries] == [
+        first_fill.fill_id,
+        second_fill.fill_id,
+        third_fill.fill_id,
+    ]
+
+
+def test_apply_fills_once_skips_duplicate_fill_ids_in_batch() -> None:
+    fill = _fill(fill_id="fill_projection_batch_duplicate")
+
+    result = apply_fills_once(
+        position=None,
+        fills=(fill, fill),
+        applied_fill_ids=frozenset(),
+        currency="USD",
+        source_event_ids={fill.fill_id: EventId("evt_projection_batch_duplicate")},
+        created_at=CREATED_AT,
+    )
+
+    assert result.applied_count == 1
+    assert result.duplicate_fill_count == 1
+    assert len(result.fill_results) == 2
+    assert len(result.journal_entries) == 1
+    assert result.fill_results[0].applied is True
+    assert result.fill_results[1].duplicate_fill is True
+    assert result.applied_fill_ids == frozenset({fill.fill_id})
+
+
+def test_apply_fills_once_rejects_conflicting_duplicate_fill_payload() -> None:
+    fill = _fill(fill_id="fill_projection_batch_conflict", price="0.40")
+    conflicting = _fill(
+        fill_id="fill_projection_batch_conflict",
+        exchange_fill_id="ex-fill-projection-conflict",
+        price="0.41",
+    )
+
+    with pytest.raises(PortfolioProjectionError, match="conflicting"):
+        apply_fills_once(
+            position=None,
+            fills=(fill, conflicting),
+            applied_fill_ids=frozenset(),
+            currency="USD",
+            source_event_ids={fill.fill_id: EventId("evt_projection_batch_conflict")},
+            created_at=CREATED_AT,
+        )
+
+
+def test_apply_fills_once_rejects_missing_source_event_id() -> None:
+    fill = _fill(fill_id="fill_projection_batch_missing_event")
+
+    with pytest.raises(PortfolioProjectionError, match="source_event_ids"):
+        apply_fills_once(
+            position=None,
+            fills=(fill,),
+            applied_fill_ids=frozenset(),
+            currency="USD",
+            source_event_ids={},
+            created_at=CREATED_AT,
+        )
 
 
 def _fill(
