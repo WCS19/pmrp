@@ -37,6 +37,7 @@ from pmrp.storage.repositories.pnl_attributions import (
     pnl_attribution_from_row,
     pnl_attribution_to_row,
 )
+from pmrp.storage.repositories.portfolio_unit_of_work import SqlAlchemyPortfolioUnitOfWork
 from pmrp.storage.repositories.positions import (
     PositionRepository,
     position_from_row,
@@ -94,6 +95,7 @@ __all__ = [
     "RiskInputSnapshotRepository",
     "RiskLimitRepository",
     "SettlementRepository",
+    "SqlAlchemyPortfolioUnitOfWork",
     "SqlAlchemyRiskUnitOfWork",
     "VersionedRepository",
     "canonical_event_to_rows",
