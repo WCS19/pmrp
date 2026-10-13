@@ -10,6 +10,11 @@ from pmrp.storage.repositories.capital_reservations import (
     capital_reservation_to_row,
 )
 from pmrp.storage.repositories.event_contracts import CanonicalEventContract
+from pmrp.storage.repositories.journal_entries import (
+    JournalEntryRepository,
+    journal_entry_from_rows,
+    journal_entry_to_rows,
+)
 from pmrp.storage.repositories.kill_switches import (
     KillSwitchRepository,
     kill_switch_from_row,
@@ -48,6 +53,7 @@ __all__ = [
     "CanonicalEventContract",
     "CanonicalEventRepository",
     "CapitalReservationRepository",
+    "JournalEntryRepository",
     "KillSwitchRepository",
     "OutboxMessageRepository",
     "Repository",
@@ -60,6 +66,8 @@ __all__ = [
     "canonical_event_to_rows",
     "capital_reservation_from_row",
     "capital_reservation_to_row",
+    "journal_entry_from_rows",
+    "journal_entry_to_rows",
     "kill_switch_from_row",
     "kill_switch_to_row",
     "outbox_message_to_row",
