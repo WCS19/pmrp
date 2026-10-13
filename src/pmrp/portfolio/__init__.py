@@ -54,6 +54,7 @@ from pmrp.portfolio.projections import (
     FillBatchApplicationResult,
     apply_fill_once,
     apply_fills_once,
+    build_portfolio_snapshot,
 )
 from pmrp.portfolio.reconciliation import (
     RECONCILIATION_SEVERITY_MISMATCH,
@@ -148,6 +149,7 @@ __all__ = [
     "build_fee_journal_entry",
     "build_fill_journal_entry",
     "build_journal_pnl_attribution",
+    "build_portfolio_snapshot",
     "build_rebate_journal_entry",
     "build_reconciliation_mismatch",
     "build_reconciliation_result",
