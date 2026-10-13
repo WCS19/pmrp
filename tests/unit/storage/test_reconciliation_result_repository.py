@@ -149,6 +149,7 @@ async def test_repository_latest_for_account_uses_account_time_query() -> None:
     sql = _compile(session.statements[0])
     assert "reconciliation_runs.exchange = 'kalshi'" in sql
     assert "reconciliation_runs.account_id = 'acct_reconciliation_repository'" in sql
+    assert "reconciliation_runs.completed_at IS NOT NULL" in sql
     assert "ORDER BY pmrp_ops.reconciliation_runs.started_at DESC" in sql
     assert "pmrp_ops.reconciliation_runs.reconciliation_id DESC" in sql
     assert "LIMIT 1" in sql
@@ -165,6 +166,7 @@ async def test_repository_list_by_status_uses_bounded_status_query() -> None:
     assert result == (_result(),)
     sql = _compile(session.statements[0])
     assert "reconciliation_runs.status = 'mismatch'" in sql
+    assert "reconciliation_runs.completed_at IS NOT NULL" in sql
     assert "ORDER BY pmrp_ops.reconciliation_runs.started_at DESC" in sql
     assert "LIMIT 25" in sql
 

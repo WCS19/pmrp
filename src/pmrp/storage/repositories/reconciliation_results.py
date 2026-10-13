@@ -82,6 +82,7 @@ class ReconciliationResultRepository:
             .where(
                 ReconciliationRunRow.exchange == exchange,
                 ReconciliationRunRow.account_id == str(account_id),
+                ReconciliationRunRow.completed_at.is_not(None),
             )
             .order_by(
                 desc(ReconciliationRunRow.started_at),
@@ -103,7 +104,10 @@ class ReconciliationResultRepository:
         _validate_limit(limit)
         statement = (
             select(ReconciliationRunRow)
-            .where(ReconciliationRunRow.status == status.value)
+            .where(
+                ReconciliationRunRow.status == status.value,
+                ReconciliationRunRow.completed_at.is_not(None),
+            )
             .order_by(
                 desc(ReconciliationRunRow.started_at),
                 desc(ReconciliationRunRow.reconciliation_id),
