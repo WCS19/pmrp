@@ -14,6 +14,11 @@ from pmrp.portfolio.balances import (
     derive_cash_balance_id,
 )
 from pmrp.portfolio.errors import PortfolioError, PortfolioProjectionError
+from pmrp.portfolio.events import (
+    PortfolioCanonicalEvent,
+    PortfolioEventFactory,
+    PortfolioReconciliationEvent,
+)
 from pmrp.portfolio.fees import (
     FEE_REFERENCE_TYPE,
     REBATE_REFERENCE_TYPE,
@@ -122,8 +127,11 @@ __all__ = [
     "FeeApplicationResult",
     "FillApplicationResult",
     "FillBatchApplicationResult",
+    "PortfolioCanonicalEvent",
     "PortfolioError",
+    "PortfolioEventFactory",
     "PortfolioProjectionError",
+    "PortfolioReconciliationEvent",
     "PositionProjectionResult",
     "RebateApplicationResult",
     "RecordSetReconciliationResult",
