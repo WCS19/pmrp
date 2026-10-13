@@ -99,6 +99,13 @@ from pmrp.portfolio.transfers import (
     build_cash_transfer_journal_entry,
     derive_cash_transfer_journal_entry_id,
 )
+from pmrp.portfolio.workflow import (
+    PortfolioEventPersistenceResult,
+    PortfolioEventStore,
+    PortfolioEventUnitOfWork,
+    PortfolioEventUnitOfWorkFactory,
+    PortfolioEventWorkflow,
+)
 
 __all__ = [
     "ACCOUNT_BALANCE_CORRECTION",
@@ -130,6 +137,11 @@ __all__ = [
     "PortfolioCanonicalEvent",
     "PortfolioError",
     "PortfolioEventFactory",
+    "PortfolioEventPersistenceResult",
+    "PortfolioEventStore",
+    "PortfolioEventUnitOfWork",
+    "PortfolioEventUnitOfWorkFactory",
+    "PortfolioEventWorkflow",
     "PortfolioProjectionError",
     "PortfolioReconciliationEvent",
     "PositionProjectionResult",
