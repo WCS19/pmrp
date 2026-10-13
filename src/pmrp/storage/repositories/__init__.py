@@ -59,6 +59,11 @@ from pmrp.storage.repositories.risk_limits import (
     risk_limit_to_row,
 )
 from pmrp.storage.repositories.risk_unit_of_work import SqlAlchemyRiskUnitOfWork
+from pmrp.storage.repositories.settlements import (
+    SettlementRepository,
+    settlement_from_row,
+    settlement_to_row,
+)
 
 __all__ = [
     "CANONICAL_EVENTS_TOPIC",
@@ -76,6 +81,7 @@ __all__ = [
     "RiskDecisionRepository",
     "RiskInputSnapshotRepository",
     "RiskLimitRepository",
+    "SettlementRepository",
     "SqlAlchemyRiskUnitOfWork",
     "VersionedRepository",
     "canonical_event_to_rows",
@@ -99,4 +105,6 @@ __all__ = [
     "risk_input_snapshot_to_row",
     "risk_limit_from_row",
     "risk_limit_to_row",
+    "settlement_from_row",
+    "settlement_to_row",
 ]
