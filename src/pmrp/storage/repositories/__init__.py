@@ -43,6 +43,11 @@ from pmrp.storage.repositories.positions import (
     position_to_row,
 )
 from pmrp.storage.repositories.protocols import Repository, VersionedRepository
+from pmrp.storage.repositories.reconciliation_results import (
+    ReconciliationResultRepository,
+    reconciliation_result_from_rows,
+    reconciliation_result_to_rows,
+)
 from pmrp.storage.repositories.risk_breaches import (
     RiskBreachRepository,
     risk_breach_from_row,
@@ -82,6 +87,7 @@ __all__ = [
     "OutboxMessageRepository",
     "PnlAttributionRepository",
     "PositionRepository",
+    "ReconciliationResultRepository",
     "Repository",
     "RiskBreachRepository",
     "RiskDecisionRepository",
@@ -105,6 +111,8 @@ __all__ = [
     "pnl_attribution_to_row",
     "position_from_row",
     "position_to_row",
+    "reconciliation_result_from_rows",
+    "reconciliation_result_to_rows",
     "risk_breach_from_row",
     "risk_breach_to_row",
     "risk_decision_from_row",
