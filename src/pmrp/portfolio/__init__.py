@@ -49,7 +49,12 @@ from pmrp.portfolio.positions import (
     apply_fill_to_position,
     derive_position_id,
 )
-from pmrp.portfolio.projections import FillApplicationResult, apply_fill_once
+from pmrp.portfolio.projections import (
+    FillApplicationResult,
+    FillBatchApplicationResult,
+    apply_fill_once,
+    apply_fills_once,
+)
 from pmrp.portfolio.reconciliation import (
     RECONCILIATION_SEVERITY_MISMATCH,
     RECONCILIATION_SEVERITY_UNKNOWN,
@@ -115,6 +120,7 @@ __all__ = [
     "CashTransferApplicationResult",
     "FeeApplicationResult",
     "FillApplicationResult",
+    "FillBatchApplicationResult",
     "PortfolioError",
     "PortfolioProjectionError",
     "PositionProjectionResult",
@@ -130,6 +136,7 @@ __all__ = [
     "apply_fee_once",
     "apply_fill_once",
     "apply_fill_to_position",
+    "apply_fills_once",
     "apply_journal_to_cash_balance",
     "apply_journal_to_cash_balance_once",
     "apply_rebate_once",
