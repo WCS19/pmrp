@@ -9,6 +9,13 @@ from pmrp.storage.repositories.capital_reservations import (
     capital_reservation_from_row,
     capital_reservation_to_row,
 )
+from pmrp.storage.repositories.cash_balances import (
+    CashBalanceRecord,
+    CashBalanceRepository,
+    cash_balance_from_row,
+    cash_balance_record_from_row,
+    cash_balance_to_row,
+)
 from pmrp.storage.repositories.event_contracts import CanonicalEventContract
 from pmrp.storage.repositories.journal_entries import (
     JournalEntryRepository,
@@ -58,6 +65,8 @@ __all__ = [
     "CanonicalEventContract",
     "CanonicalEventRepository",
     "CapitalReservationRepository",
+    "CashBalanceRecord",
+    "CashBalanceRepository",
     "JournalEntryRepository",
     "KillSwitchRepository",
     "OutboxMessageRepository",
@@ -72,6 +81,9 @@ __all__ = [
     "canonical_event_to_rows",
     "capital_reservation_from_row",
     "capital_reservation_to_row",
+    "cash_balance_from_row",
+    "cash_balance_record_from_row",
+    "cash_balance_to_row",
     "journal_entry_from_rows",
     "journal_entry_to_rows",
     "kill_switch_from_row",
