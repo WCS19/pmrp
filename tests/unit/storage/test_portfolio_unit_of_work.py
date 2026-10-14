@@ -7,6 +7,7 @@ from decimal import Decimal
 
 import pytest
 
+from pmrp.portfolio import PortfolioEventUnitOfWork
 from pmrp.schemas.identifiers import AccountId, ContractId, EventId, MarketId, OutcomeId
 from pmrp.schemas.numeric import Money
 from pmrp.schemas.portfolio import (
@@ -134,6 +135,14 @@ async def test_portfolio_unit_of_work_explicit_rollback_finishes_transaction() -
     assert session.committed == 0
     assert session.rolled_back == 1
     assert session.closed == 1
+
+
+@pytest.mark.asyncio
+async def test_portfolio_unit_of_work_conforms_to_event_workflow_protocol() -> None:
+    async with SqlAlchemyPortfolioUnitOfWork(
+        session_factory=_SessionFactory(_FakeSession()),
+    ) as unit_of_work:
+        assert isinstance(unit_of_work, PortfolioEventUnitOfWork)
 
 
 def _position() -> Position:
